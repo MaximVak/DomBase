@@ -23,17 +23,18 @@ async function render() {
   );
 }
 
-test("server-renders the DomBase app shell", async () => {
+test("server-renders the DomBase staff shell", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
   assert.match(html, /<title>DomBase<\/title>/i);
-  assert.match(html, /Household pulse/);
-  assert.match(html, /Priority queue/);
-  assert.match(html, /Inventory watch/);
-  assert.match(html, /Mobile DomBase sections/);
+  assert.match(html, /Workforce/);
+  assert.match(html, /Enter PIN/);
+  assert.match(html, /Unlock/);
+  assert.doesNotMatch(html, /Manager mode/);
+  assert.doesNotMatch(html, /Mobile DomBase staff sections/);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton|Your site is taking shape/);
 });
 

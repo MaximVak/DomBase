@@ -14,20 +14,20 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "DomBase",
-  description: "A mobile-friendly homebase for household tasks, schedules, members, notes, inventory, and shared spending.",
+  description: "A staff scheduling and time clock workspace with manager and employee access modes.",
   icons: {
     icon: "/favicon.svg",
     shortcut: "/favicon.svg",
   },
   openGraph: {
     title: "DomBase",
-    description: "A calm command center for everything important at home.",
+    description: "A staff scheduling and time clock workspace with manager and employee access modes.",
     images: ["/og.png"],
   },
   twitter: {
     card: "summary_large_image",
     title: "DomBase",
-    description: "A calm command center for everything important at home.",
+    description: "A staff scheduling and time clock workspace with manager and employee access modes.",
     images: ["/og.png"],
   },
 };
