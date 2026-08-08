@@ -91,7 +91,7 @@ export default function Home() {
   }, [openTasks]);
 
   return (
-    <main className="min-h-screen bg-[#f8f5ef] text-[#1e2523]">
+    <main className="min-h-screen bg-[#f2f7fc] text-[#12213a]">
       <div className="app-frame">
         <aside className="sidebar" aria-label="DomBase sections">
           <div className="brand-lockup" aria-label="DomBase home">
