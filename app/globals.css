@@ -147,6 +147,12 @@ h1 {
   justify-content: center;
   gap: 14px;
   margin-bottom: 6px;
+  text-align: center;
+}
+
+.login-brand h1 {
+  margin: 0;
+  font-size: 1.55rem;
 }
 
 .login-card input {
@@ -158,7 +164,12 @@ h1 {
   color: var(--ink);
   font-size: 1.2rem;
   font-weight: 800;
+  padding: 0 16px;
   text-align: center;
+}
+
+.login-card input:focus::placeholder {
+  color: transparent;
 }
 
 .login-card input:focus {
@@ -339,6 +350,7 @@ h1 {
 }
 
 .topbar {
+  align-items: end;
   margin-bottom: 18px;
 }
 
@@ -348,29 +360,13 @@ h1 {
   line-height: 1;
 }
 
-.mode-toggle {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(92px, 1fr));
-  gap: 4px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: #ffffff;
-  padding: 4px;
-}
-
-.mode-toggle span {
-  display: grid;
-  min-height: 36px;
-  place-items: center;
-  border-radius: 7px;
-  color: var(--muted);
-  font-size: 0.86rem;
+.welcome-message {
+  margin: 0;
+  color: var(--blue-deep);
+  font-size: clamp(1.8rem, 3vw, 3rem);
   font-weight: 800;
-}
-
-.mode-toggle span.active {
-  background: linear-gradient(135deg, var(--green-dark), var(--blue));
-  color: #ffffff;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .summary-strip {
@@ -501,7 +497,7 @@ h1 {
 
 .shift-row {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 13px;
   min-height: 82px;
@@ -554,10 +550,28 @@ h1 {
   text-align: left;
 }
 
+.manager-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
 .quick-form {
   display: grid;
   gap: 10px;
   margin-bottom: 16px;
+}
+
+.form-message {
+  margin: -6px 0 14px;
+  border: 1px solid rgba(215, 25, 32, 0.28);
+  border-radius: 8px;
+  background: rgba(215, 25, 32, 0.08);
+  color: var(--danger);
+  font-size: 0.9rem;
+  font-weight: 800;
+  padding: 10px 12px;
 }
 
 .employee-form {
@@ -565,7 +579,7 @@ h1 {
 }
 
 .shift-form {
-  grid-template-columns: minmax(150px, 1fr) minmax(140px, 0.8fr) repeat(2, minmax(96px, 0.5fr)) minmax(120px, 0.7fr) minmax(120px, 0.7fr) auto;
+  grid-template-columns: minmax(150px, 1fr) minmax(140px, 0.8fr) repeat(2, minmax(96px, 0.5fr)) minmax(120px, 0.7fr) auto;
 }
 
 .quick-form input,
@@ -588,7 +602,7 @@ h1 {
 
 .employee-card {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 13px;
   min-height: 112px;
@@ -598,11 +612,41 @@ h1 {
 .employee-card input {
   width: 100%;
   min-height: 38px;
-  margin-bottom: 6px;
+  margin: 0;
   padding: 0 10px;
 }
 
+.employee-fields {
+  display: grid;
+  gap: 6px;
+}
+
+.employee-field {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.employee-field > span {
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.employee-field h3 {
+  margin: 0;
+}
+
 .employee-card button {
+  background: var(--danger);
+}
+
+.employee-actions {
+  display: grid;
+  gap: 8px;
+}
+
+.employee-card .employee-edit-button {
   background: var(--blue-deep);
 }
 
@@ -721,6 +765,7 @@ h1 {
 }
 
 @media (max-width: 1040px) {
+
   .employee-form,
   .shift-form,
   .employee-grid {
@@ -774,6 +819,7 @@ h1 {
 }
 
 @media (max-width: 640px) {
+
   .topbar,
   .clock-card,
   .calendar-shift {
@@ -782,10 +828,10 @@ h1 {
   }
 
   .topbar h2 {
+    margin-top: 14px;
     font-size: 1.85rem;
   }
 
-  .mode-toggle,
   .summary-metrics,
   .employee-form,
   .shift-form,
@@ -804,13 +850,13 @@ h1 {
 
   .shift-row,
   .employee-card {
-    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-columns: 1fr;
   }
 
   .shift-meta,
-  .employee-card button,
+  .employee-actions,
   .row-actions {
-    grid-column: 2;
+    grid-column: 1;
     justify-self: start;
   }
 

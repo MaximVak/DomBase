@@ -30,9 +30,11 @@ test("server-renders the DomBase staff shell", async () => {
 
   const html = await response.text();
   assert.match(html, /<title>DomBase<\/title>/i);
-  assert.match(html, /Workforce/);
-  assert.match(html, /Enter PIN/);
-  assert.match(html, /Unlock/);
+  assert.match(html, /DomBase/);
+  assert.match(html, /PIN/);
+  assert.match(html, /Enter/);
+  assert.doesNotMatch(html, /Workforce/);
+  assert.doesNotMatch(html, /Unlock/);
   assert.doesNotMatch(html, /Manager mode/);
   assert.doesNotMatch(html, /Mobile DomBase staff sections/);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton|Your site is taking shape/);

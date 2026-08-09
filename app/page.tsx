@@ -44,7 +44,6 @@ type StaffState = {
 };
 
 const managerPin = "0000";
-const today = "2026-08-07";
 const storageKey = "dombase-staff-state-v1";
 
 const permissionsByMode: Record<Mode, Permission[]> = {
@@ -53,7 +52,6 @@ const permissionsByMode: Record<Mode, Permission[]> = {
     "manage_roles",
     "manage_shifts",
     "view_clockins",
-    "clock_self",
     "view_schedule",
   ],
   employee: ["clock_self", "view_schedule"],
@@ -75,6 +73,7 @@ const starterState: StaffState = {
 };
 
 export default function Home() {
+  const today = getLocalDateValue();
   const [state, setState] = useState<StaffState>(() => readStoredState());
   const [isUnlocked, setIsUnlocked] = useState(false);
   const [mode, setMode] = useState<Mode>("employee");
@@ -83,13 +82,15 @@ export default function Home() {
   const [activeView, setActiveView] = useState<ViewId>("dashboard");
   const [authMessage, setAuthMessage] = useState("");
   const [employeeForm, setEmployeeForm] = useState({ name: "", role: "", pin: "" });
+  const [employeeMessage, setEmployeeMessage] = useState("");
+  const [editingEmployeeId, setEditingEmployeeId] = useState<number | null>(null);
   const [shiftForm, setShiftForm] = useState({
     id: 0,
-    employeeId: 1,
+    employeeId: 0,
     date: today,
     start: "09:00",
     end: "17:00",
-    role: "Manager",
+    role: "",
     station: "Floor",
   });
 
@@ -98,23 +99,44 @@ export default function Home() {
   }, [state]);
 
   const activeEmployee = state.employees.find((employee) => employee.id === activeEmployeeId);
-  const activeEmployees = state.employees.filter((employee) => employee.active);
-  const activeEmployeeIds = new Set(activeEmployees.map((employee) => employee.id));
+  const activeEmployees = useMemo(
+    () => state.employees.filter((employee) => employee.active),
+    [state.employees],
+  );
+  const shiftEmployees = useMemo(
+    () => activeEmployees.filter((employee) => !isManagerEmployee(employee)),
+    [activeEmployees],
+  );
+  const shiftEmployeeIds = useMemo(
+    () => new Set(shiftEmployees.map((employee) => employee.id)),
+    [shiftEmployees],
+  );
   const activePermissions = permissionsByMode[mode];
   const visibleNavItems = navItems.filter((item) => mode === "manager" || !item.managerOnly);
   const todaysShifts = state.shifts
-    .filter((shift) => shift.date === today && activeEmployeeIds.has(shift.employeeId))
+    .filter((shift) => shift.date === today && shiftEmployeeIds.has(shift.employeeId))
     .sort((a, b) => a.start.localeCompare(b.start));
   const myShift = todaysShifts.find((shift) => shift.employeeId === activeEmployeeId);
   const clockedInIds = useMemo(() => {
     return new Set(
       state.employees
+        .filter((employee) => employee.active && !isManagerEmployee(employee))
         .filter((employee) => lastClockEvent(state.clockEvents, employee.id)?.type === "in")
         .map((employee) => employee.id),
     );
   }, [state.clockEvents, state.employees]);
   const activeClockEvent = lastClockEvent(state.clockEvents, activeEmployeeId);
   const activeIsClockedIn = activeClockEvent?.type === "in";
+
+  useEffect(() => {
+    if (shiftEmployeeIds.has(shiftForm.employeeId)) return;
+
+    setShiftForm((form) => ({
+      ...form,
+      employeeId: 0,
+      role: "",
+    }));
+  }, [shiftEmployeeIds, shiftEmployees, shiftForm.employeeId]);
 
   function signIn(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -154,7 +176,22 @@ export default function Home() {
 
   function addEmployee(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!employeeForm.name.trim() || !employeeForm.role.trim() || !employeeForm.pin.trim()) return;
+    const name = employeeForm.name.trim();
+    const role = employeeForm.role.trim();
+    const pin = employeeForm.pin.trim();
+
+    if (!name || !role || !pin) return;
+
+    const employeeWithPin = findEmployeeWithPin(state.employees, pin);
+    if (employeeWithPin) {
+      setEmployeeMessage(`PIN already in use by ${employeeWithPin.name}.`);
+      return;
+    }
+
+    if (hasEmployeeWithName(state.employees, name)) {
+      setEmployeeMessage("Name already in use.");
+      return;
+    }
 
     setState((current) => ({
       ...current,
@@ -162,17 +199,22 @@ export default function Home() {
         ...current.employees,
         {
           id: nextId(current.employees),
-          name: employeeForm.name.trim(),
-          role: employeeForm.role.trim(),
-          pin: employeeForm.pin.trim(),
+          name,
+          role,
+          pin,
           active: true,
         },
       ],
     }));
     setEmployeeForm({ name: "", role: "", pin: "" });
+    setEmployeeMessage("");
   }
 
   function removeEmployee(employeeId: number) {
+    if (!window.confirm("Are you sure you want to remove this employee?")) {
+      return;
+    }
+
     if (activeEmployeeId === employeeId) {
       setActiveEmployeeId(1);
     }
@@ -183,6 +225,7 @@ export default function Home() {
       shifts: current.shifts.filter((shift) => shift.employeeId !== employeeId),
       clockEvents: current.clockEvents.filter((event) => event.employeeId !== employeeId),
     }));
+    setEmployeeMessage("");
   }
 
   function updateRole(employeeId: number, role: string) {
@@ -197,8 +240,34 @@ export default function Home() {
     }));
   }
 
+  function updateEmployeeName(employeeId: number, name: string) {
+    if (hasEmployeeWithName(state.employees, name, employeeId)) {
+      setEmployeeMessage("Name already in use.");
+      return;
+    }
+
+    setState((current) => ({
+      ...current,
+      employees: current.employees.map((employee) =>
+        employee.id === employeeId ? { ...employee, name } : employee,
+      ),
+    }));
+    setEmployeeMessage("");
+  }
+
+  function updateEmployeePin(employeeId: number, pin: string) {
+    setState((current) => ({
+      ...current,
+      employees: current.employees.map((employee) =>
+        employee.id === employeeId ? { ...employee, pin } : employee,
+      ),
+    }));
+  }
+
   function saveShift(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!shiftEmployeeIds.has(shiftForm.employeeId)) return;
+
     setState((current) => {
       const savedShift = { ...shiftForm, id: shiftForm.id || nextId(current.shifts) };
       const shifts = shiftForm.id
@@ -209,11 +278,11 @@ export default function Home() {
     });
     setShiftForm({
       id: 0,
-      employeeId: activeEmployeeId,
+      employeeId: 0,
       date: today,
       start: "09:00",
       end: "17:00",
-      role: activeEmployee?.role ?? "Staff",
+      role: "",
       station: "Floor",
     });
   }
@@ -251,19 +320,16 @@ export default function Home() {
         <form className="login-card" onSubmit={signIn}>
           <div className="login-brand" aria-label="DomBase workforce">
             <span className="brand-mark">D</span>
-            <div>
-              <p className="eyebrow">Workforce</p>
-              <h1>DomBase</h1>
-            </div>
+            <h1>DomBase</h1>
           </div>
           <input
             value={pin}
             onChange={(event) => setPin(event.target.value)}
-            placeholder="Enter PIN"
+            placeholder="PIN"
             aria-label="Access PIN"
             inputMode="numeric"
           />
-          <button type="submit">Unlock</button>
+          <button type="submit">Enter</button>
           {authMessage ? <p role="alert">{authMessage}</p> : null}
         </form>
       </main>
@@ -287,7 +353,7 @@ export default function Home() {
               <p className="eyebrow">Access</p>
               <h2>{mode === "manager" ? "Manager mode" : "Employee mode"}</h2>
             </div>
-            <button type="button" className="sign-out-button" onClick={signOut}>Lock</button>
+            <button type="button" className="sign-out-button" onClick={signOut}>Logout</button>
             <p>{authMessage}</p>
           </section>
 
@@ -323,13 +389,10 @@ export default function Home() {
         <section className="workspace" aria-live="polite">
           <header className="topbar">
             <div>
-              <p className="eyebrow">Friday, August 7, 2026</p>
+              <p className="eyebrow">{formatLongDate(today)}</p>
               <h2>{activeViewLabel(activeView)}</h2>
             </div>
-            <div className="mode-toggle" aria-label="Current access mode">
-              <span className={mode === "employee" ? "active" : ""}>Employee</span>
-              <span className={mode === "manager" ? "active" : ""}>Manager</span>
-            </div>
+            <p className="welcome-message">{activeEmployee?.name ?? "Guest"}</p>
           </header>
 
           <section className="summary-strip" aria-label="Staff summary">
@@ -338,37 +401,53 @@ export default function Home() {
               <h3>{clockedInIds.size} clocked in across {todaysShifts.length} scheduled shifts.</h3>
             </div>
             <div className="summary-metrics">
-              <Metric label="Employees" value={activeEmployees.length.toString()} />
-              <Metric label="Roles" value={new Set(activeEmployees.map((employee) => employee.role)).size.toString()} />
+              <Metric label="Employees" value={shiftEmployees.length.toString()} />
+              <Metric label="Roles" value={new Set(shiftEmployees.map((employee) => employee.role)).size.toString()} />
               <Metric label="Clock events" value={state.clockEvents.length.toString()} />
             </div>
           </section>
 
           {activeView === "dashboard" && (
             <div className="content-grid">
-              <section className="panel main-panel">
-                <PanelHeading eyebrow="Clock" title="Time clock" />
-                <div className="clock-card">
-                  <div>
-                    <p className="eyebrow">{activeEmployee?.role ?? "Employee"}</p>
-                    <h3>{activeEmployee?.name ?? "Select employee"}</h3>
-                    <p>
-                      {activeIsClockedIn
-                        ? `Clocked in since ${formatDateTime(activeClockEvent?.at)}`
-                        : "Currently clocked out"}
-                    </p>
+              {mode === "employee" ? (
+                <section className="panel main-panel">
+                  <PanelHeading eyebrow="Clock" title="Time clock" />
+                  <div className="clock-card">
+                    <div>
+                      <p className="eyebrow">{activeEmployee?.role ?? "Employee"}</p>
+                      <h3>{activeEmployee?.name ?? "Select employee"}</h3>
+                      <p>
+                        {activeIsClockedIn
+                          ? `Clocked in since ${formatDateTime(activeClockEvent?.at)}`
+                          : "Currently clocked out"}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      className={activeIsClockedIn ? "danger-action" : "primary-action"}
+                      onClick={() => clock(activeIsClockedIn ? "out" : "in")}
+                    >
+                      {activeIsClockedIn ? "Clock out" : "Clock in"}
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    className={activeIsClockedIn ? "danger-action" : "primary-action"}
-                    onClick={() => clock(activeIsClockedIn ? "out" : "in")}
-                  >
-                    {activeIsClockedIn ? "Clock out" : "Clock in"}
-                  </button>
-                </div>
-                <PanelHeading eyebrow="Own shift" title="My shift today" />
-                {myShift ? <ShiftRow shift={myShift} employee={activeEmployee} /> : <EmptyState text="No shift assigned today." />}
-              </section>
+                  <PanelHeading eyebrow="Own shift" title="My shift today" />
+                  {myShift ? <ShiftRow shift={myShift} employee={activeEmployee} /> : <EmptyState text="No shift assigned today." />}
+                </section>
+              ) : (
+                <section className="panel main-panel">
+                  <PanelHeading eyebrow="Manager" title="Manager overview" />
+                  <div className="manager-summary">
+                    <Metric label="Active employees" value={shiftEmployees.length.toString()} />
+                    <Metric label="Scheduled today" value={todaysShifts.length.toString()} />
+                    <Metric label="Clocked in" value={clockedInIds.size.toString()} />
+                  </div>
+                  <div className="control-grid">
+                    <button type="button" onClick={() => setActiveView("employees")}>Manage employees</button>
+                    <button type="button" onClick={() => setActiveView("schedule")}>Manage schedule</button>
+                    <button type="button" onClick={() => setActiveView("clockins")}>View clock-ins</button>
+                  </div>
+                </section>
+              )}
 
               <section className="panel">
                 <PanelHeading eyebrow="Coworkers" title="Shift times and roles" />
@@ -384,16 +463,6 @@ export default function Home() {
                 </div>
               </section>
 
-              {mode === "manager" && (
-                <section className="panel">
-                  <PanelHeading eyebrow="Manager" title="Quick controls" />
-                  <div className="control-grid">
-                    <button type="button" onClick={() => setActiveView("employees")}>Add employee</button>
-                    <button type="button" onClick={() => setActiveView("schedule")}>Create shift</button>
-                    <button type="button" onClick={() => setActiveView("clockins")}>View clock-ins</button>
-                  </div>
-                </section>
-              )}
             </div>
           )}
 
@@ -422,21 +491,60 @@ export default function Home() {
                 />
                 <button type="submit">Add</button>
               </form>
+              {employeeMessage ? <p className="form-message" role="alert">{employeeMessage}</p> : null}
               <div className="employee-grid">
                 {activeEmployees.map((employee) => (
                   <article className="employee-card" key={employee.id}>
-                    <div className="avatar">{employee.name.charAt(0)}</div>
-                    <div>
-                      <h3>{employee.name}</h3>
-                      <input
-                        value={employee.role}
-                        onChange={(event) => updateRole(employee.id, event.target.value)}
-                        aria-label={`Role for ${employee.name}`}
-                      />
-                      <p>PIN {employee.pin} / Active</p>
+                    <div className="employee-fields">
+                      <div className="employee-field">
+                        <span>Name:</span>
+                        {editingEmployeeId === employee.id ? (
+                          <input
+                            value={employee.name}
+                            onChange={(event) => updateEmployeeName(employee.id, event.target.value)}
+                            aria-label={`Name for ${employee.name}`}
+                          />
+                        ) : (
+                          <h3>{employee.name}</h3>
+                        )}
+                      </div>
+                      <div className="employee-field">
+                        <span>Role:</span>
+                        {editingEmployeeId === employee.id ? (
+                          <input
+                            value={employee.role}
+                            onChange={(event) => updateRole(employee.id, event.target.value)}
+                            aria-label={`Role for ${employee.name}`}
+                          />
+                        ) : (
+                          <p>{employee.role}</p>
+                        )}
+                      </div>
+                      <div className="employee-field">
+                        <span>PIN:</span>
+                        {editingEmployeeId === employee.id ? (
+                          <input
+                            value={employee.pin}
+                            onChange={(event) => updateEmployeePin(employee.id, event.target.value)}
+                            aria-label={`PIN for ${employee.name}`}
+                            inputMode="numeric"
+                          />
+                        ) : (
+                          <p>{employee.pin}</p>
+                        )}
+                      </div>
                     </div>
                     {employee.active && employee.id !== 1 ? (
-                      <button type="button" onClick={() => removeEmployee(employee.id)}>Remove</button>
+                      <div className="employee-actions">
+                        <button
+                          type="button"
+                          className="employee-edit-button"
+                          onClick={() => setEditingEmployeeId((current) => (current === employee.id ? null : employee.id))}
+                        >
+                          {editingEmployeeId === employee.id ? "Done" : "Edit"}
+                        </button>
+                        <button type="button" onClick={() => removeEmployee(employee.id)}>Remove</button>
+                      </div>
                     ) : null}
                   </article>
                 ))}
@@ -453,12 +561,14 @@ export default function Home() {
                     value={shiftForm.employeeId}
                     onChange={(event) => {
                       const employeeId = Number(event.target.value);
-                      const employee = employeeById(state.employees, employeeId);
+                      const employee = employeeById(shiftEmployees, employeeId);
                       setShiftForm((form) => ({ ...form, employeeId, role: employee?.role ?? form.role }));
                     }}
                     aria-label="Shift employee"
+                    disabled={shiftEmployees.length === 0}
                   >
-                    {activeEmployees.map((employee) => (
+                    <option value={0} disabled>Select Employee</option>
+                    {shiftEmployees.map((employee) => (
                       <option key={employee.id} value={employee.id}>{employee.name}</option>
                     ))}
                   </select>
@@ -486,22 +596,16 @@ export default function Home() {
                     placeholder="Role"
                     aria-label="Shift role"
                   />
-                  <input
-                    value={shiftForm.station}
-                    onChange={(event) => setShiftForm((form) => ({ ...form, station: event.target.value }))}
-                    placeholder="Station"
-                    aria-label="Shift station"
-                  />
-                  <button type="submit">{shiftForm.id ? "Save" : "Create"}</button>
+                  <button type="submit" disabled={shiftEmployees.length === 0}>Save</button>
                 </form>
               )}
               <div className="calendar-grid">
                 {state.shifts
                   .slice()
-                  .filter((shift) => activeEmployeeIds.has(shift.employeeId))
+                  .filter((shift) => shiftEmployeeIds.has(shift.employeeId))
                   .sort((a, b) => `${a.date}${a.start}`.localeCompare(`${b.date}${b.start}`))
                   .map((shift) => {
-                    const employee = employeeById(activeEmployees, shift.employeeId);
+                    const employee = employeeById(shiftEmployees, shift.employeeId);
                     if (!employee) return null;
 
                     return (
@@ -512,7 +616,7 @@ export default function Home() {
                         </div>
                         <div>
                           <h3>{employee.name}</h3>
-                          <p>{shift.start} - {shift.end} / {shift.role} / {shift.station}</p>
+                          <p>{formatShiftSummary(shift)}</p>
                         </div>
                         {mode === "manager" && (
                           <div className="row-actions">
@@ -580,6 +684,31 @@ function employeeById(employees: Employee[], id: number) {
   return employees.find((employee) => employee.id === id);
 }
 
+function findEmployeeWithPin(employees: Employee[], pin: string, excludedEmployeeId?: number) {
+  const normalizedPin = pin.trim();
+
+  return employees.find(
+    (employee) => employee.id !== excludedEmployeeId && employee.pin.trim() === normalizedPin,
+  );
+}
+
+function hasEmployeeWithName(employees: Employee[], name: string, excludedEmployeeId?: number) {
+  const normalizedName = normalizeEmployeeName(name);
+  if (!normalizedName) return false;
+
+  return employees.some(
+    (employee) => employee.id !== excludedEmployeeId && normalizeEmployeeName(employee.name) === normalizedName,
+  );
+}
+
+function normalizeEmployeeName(name: string) {
+  return name.trim().toLocaleLowerCase();
+}
+
+function isManagerEmployee(employee: Employee) {
+  return employee.pin === managerPin;
+}
+
 function lastClockEvent(events: ClockEvent[], employeeId: number) {
   return events
     .filter((event) => event.employeeId === employeeId)
@@ -638,12 +767,74 @@ function formatDateTime(value?: string) {
   }).format(new Date(value));
 }
 
+function getLocalDateValue() {
+  const date = new Date();
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, "0");
+  const day = `${date.getDate()}`.padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
+function formatLongDate(date: string) {
+  return new Intl.DateTimeFormat("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  }).format(new Date(`${date}T12:00:00`));
+}
+
 function weekday(date: string) {
   return new Intl.DateTimeFormat("en-US", { weekday: "short" }).format(new Date(`${date}T12:00:00`));
 }
 
 function dayNumber(date: string) {
   return new Intl.DateTimeFormat("en-US", { day: "2-digit" }).format(new Date(`${date}T12:00:00`));
+}
+
+function formatShiftSummary(shift: Shift) {
+  return `${shift.role} / ${formatTimeRange(shift)} / ${formatScheduledHours(shift)} hours`;
+}
+
+function formatTimeRange(shift: Shift) {
+  return `${formatTime12(shift.start)} - ${formatTime12(shift.end)}`;
+}
+
+function formatTime12(time: string) {
+  const [hourText, minuteText] = time.split(":");
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return time;
+
+  const period = hour >= 12 ? "pm" : "am";
+  const displayHour = hour % 12 || 12;
+
+  return `${displayHour}:${minute.toString().padStart(2, "0")} ${period}`;
+}
+
+function formatScheduledHours(shift: Shift) {
+  const startMinutes = timeToMinutes(shift.start);
+  const endMinutes = timeToMinutes(shift.end);
+
+  if (startMinutes === null || endMinutes === null) return "0.0";
+
+  const durationMinutes = endMinutes >= startMinutes
+    ? endMinutes - startMinutes
+    : endMinutes + 24 * 60 - startMinutes;
+
+  return (durationMinutes / 60).toFixed(1);
+}
+
+function timeToMinutes(time: string) {
+  const [hourText, minuteText] = time.split(":");
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
+
+  return hour * 60 + minute;
 }
 
 function permissionLabel(permission: Permission) {
@@ -687,14 +878,13 @@ function ShiftRow({
 }) {
   return (
     <article className={compact ? "shift-row compact" : "shift-row"}>
-      <div className="avatar">{employee?.name.charAt(0) ?? "?"}</div>
       <div>
         <h3>{employee?.name ?? "Open shift"}</h3>
-        <p>{shift.start} - {shift.end}</p>
+        <p>{formatTimeRange(shift)}</p>
       </div>
       <div className="shift-meta">
         <strong>{shift.role}</strong>
-        <span>{shift.station}</span>
+        <span>{formatScheduledHours(shift)} hours</span>
       </div>
     </article>
   );
