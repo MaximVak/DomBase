@@ -454,6 +454,37 @@ h1 {
   font-size: 1.18rem;
 }
 
+.calendar-heading {
+  align-items: start;
+}
+
+.tab-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(72px, 1fr));
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #edf4fb;
+  padding: 4px;
+}
+
+.tab-button {
+  min-height: 34px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.tab-button.active,
+.tab-button:hover {
+  background: #ffffff;
+  color: var(--green-dark);
+  box-shadow: 0 4px 12px rgba(7, 29, 58, 0.12);
+}
+
 .clock-card {
   min-height: 138px;
   margin-bottom: 22px;
@@ -485,6 +516,156 @@ h1 {
 .calendar-grid {
   display: grid;
   gap: 12px;
+}
+
+.employee-shift-list {
+  display: grid;
+  gap: 8px;
+}
+
+.shift-bulk-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  min-height: 52px;
+  margin-bottom: 10px;
+  border: 1px solid rgba(215, 25, 32, 0.24);
+  border-radius: 8px;
+  background: rgba(215, 25, 32, 0.06);
+  padding: 6px 8px 6px 14px;
+}
+
+.shift-bulk-actions span {
+  color: var(--ink);
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+.shift-bulk-actions button {
+  min-height: 38px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--danger);
+  color: #ffffff;
+  font-weight: 800;
+  padding: 0 14px;
+}
+
+.employee-shift-group {
+  overflow: hidden;
+  border: 1px solid #d7e3ed;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.employee-shift-group summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
+  padding: 0 16px;
+  color: var(--ink);
+  font-weight: 800;
+  cursor: pointer;
+  list-style: none;
+}
+
+.employee-shift-group summary::-webkit-details-marker {
+  display: none;
+}
+
+.employee-shift-group summary > span:first-child {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.employee-shift-count {
+  grid-column: 2;
+  grid-row: 1;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.employee-shift-content {
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid #e4ebf2;
+  background: #f7fafc;
+  padding: 10px;
+}
+
+.calendar-shift.compact {
+  min-height: 64px;
+  padding: 8px 10px;
+}
+
+.shift-selector {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  place-items: center;
+  cursor: pointer;
+}
+
+.shift-selector input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--blue);
+  cursor: pointer;
+}
+
+.calendar-shift.compact p {
+  margin: 0;
+}
+
+.inline-shift-editor {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(110px, 1fr)) auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.inline-shift-editor > input {
+  min-width: 0;
+  min-height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--ink);
+  padding: 0 10px;
+}
+
+.inline-shift-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.inline-shift-actions button {
+  min-height: 40px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--blue-deep);
+  color: #ffffff;
+  font-weight: 800;
+  padding: 0 12px;
+}
+
+.inline-shift-actions button:last-child {
+  background: #e8eef4;
+  color: var(--ink);
+}
+
+.employee-shift-empty {
+  margin: 0;
+  padding: 8px;
+  color: var(--muted);
+  font-size: 0.86rem;
 }
 
 .shift-row,
@@ -579,7 +760,14 @@ h1 {
 }
 
 .shift-form {
-  grid-template-columns: minmax(150px, 1fr) minmax(140px, 0.8fr) repeat(2, minmax(96px, 0.5fr)) minmax(120px, 0.7fr) auto;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-items: start;
+}
+
+.shift-form > button {
+  grid-column: 1 / -1;
+  justify-self: end;
+  min-width: 160px;
 }
 
 .quick-form input,
@@ -594,6 +782,128 @@ h1 {
 .row-actions button {
   min-height: 44px;
   padding: 0 14px;
+}
+
+.copy-calendar {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin: 0;
+  padding: 10px 12px 12px;
+}
+
+.copy-calendar legend {
+  color: var(--green-dark);
+  font-size: 0.78rem;
+  font-weight: 800;
+  padding: 0 4px;
+}
+
+.copy-calendar-toolbar {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 40px;
+  align-items: center;
+  gap: 8px;
+}
+
+.copy-calendar-toolbar strong {
+  color: var(--ink);
+  font-size: 0.98rem;
+  text-align: center;
+}
+
+.copy-calendar-toolbar button {
+  display: grid;
+  width: 40px;
+  min-height: 40px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--green-dark);
+  font-size: 1.2rem;
+  font-weight: 800;
+  line-height: 1;
+  padding: 0;
+}
+
+.copy-range-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(92px, 1fr));
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #edf4fb;
+  padding: 4px;
+}
+
+.copy-range-tabs button {
+  min-height: 34px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 800;
+  padding: 0 10px;
+}
+
+.copy-range-tabs button.active,
+.copy-range-tabs button:hover {
+  background: #ffffff;
+  color: var(--green-dark);
+  box-shadow: 0 4px 12px rgba(7, 29, 58, 0.12);
+}
+
+.copy-calendar-weekdays,
+.copy-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(48px, 1fr));
+  gap: 6px;
+}
+
+.copy-calendar-weekdays span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.copy-calendar label,
+.copy-calendar-grid > span {
+  display: grid;
+  min-height: 40px;
+  place-items: center;
+}
+
+.copy-calendar label {
+  border: 1px solid #d7e3ed;
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.copy-calendar label.active {
+  border-color: var(--blue);
+  background: #e7f1fb;
+  color: var(--green-dark);
+}
+
+.copy-calendar input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.copy-calendar:disabled {
+  opacity: 0.6;
 }
 
 .employee-grid {
@@ -767,9 +1077,12 @@ h1 {
 @media (max-width: 1040px) {
 
   .employee-form,
-  .shift-form,
   .employee-grid {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .shift-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .quick-form button {
@@ -822,9 +1135,14 @@ h1 {
 
   .topbar,
   .clock-card,
-  .calendar-shift {
+  .calendar-shift,
+  .calendar-heading {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .tab-list {
+    width: 100%;
   }
 
   .topbar h2 {
@@ -850,6 +1168,10 @@ h1 {
 
   .shift-row,
   .employee-card {
+    grid-template-columns: 1fr;
+  }
+
+  .inline-shift-editor {
     grid-template-columns: 1fr;
   }
 

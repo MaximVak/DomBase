@@ -4,6 +4,8 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 
 type Mode = "manager" | "employee";
 type ViewId = "dashboard" | "employees" | "schedule" | "clockins";
+type CalendarTab = "today" | "week" | "month";
+type CopyRange = "week" | "month";
 type Permission =
   | "manage_employees"
   | "manage_roles"
@@ -45,6 +47,7 @@ type StaffState = {
 
 const managerPin = "0000";
 const storageKey = "dombase-staff-state-v1";
+const calendarWeekdayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 const permissionsByMode: Record<Mode, Permission[]> = {
   manager: [
@@ -58,10 +61,10 @@ const permissionsByMode: Record<Mode, Permission[]> = {
 };
 
 const navItems: { id: ViewId; label: string; icon: string; managerOnly?: boolean }[] = [
-  { id: "dashboard", label: "Today", icon: "T" },
-  { id: "employees", label: "Employees", icon: "P", managerOnly: true },
+  { id: "dashboard", label: "Calendar", icon: "C" },
   { id: "schedule", label: "Schedule", icon: "S" },
   { id: "clockins", label: "Clock-ins", icon: "C", managerOnly: true },
+  { id: "employees", label: "Employees", icon: "E", managerOnly: true },
 ];
 
 const starterState: StaffState = {
@@ -80,16 +83,21 @@ export default function Home() {
   const [pin, setPin] = useState("");
   const [activeEmployeeId, setActiveEmployeeId] = useState<number>(1);
   const [activeView, setActiveView] = useState<ViewId>("dashboard");
+  const [activeCalendarTab, setActiveCalendarTab] = useState<CalendarTab>("today");
   const [authMessage, setAuthMessage] = useState("");
   const [employeeForm, setEmployeeForm] = useState({ name: "", role: "", pin: "" });
   const [employeeMessage, setEmployeeMessage] = useState("");
   const [editingEmployeeId, setEditingEmployeeId] = useState<number | null>(null);
+  const [copyRange, setCopyRange] = useState<CopyRange>("week");
+  const [repeatDates, setRepeatDates] = useState<string[]>([]);
+  const [selectedShiftIds, setSelectedShiftIds] = useState<Set<number>>(() => new Set());
+  const [inlineShiftForm, setInlineShiftForm] = useState<Pick<Shift, "id" | "start" | "end" | "role"> | null>(null);
   const [shiftForm, setShiftForm] = useState({
     id: 0,
     employeeId: 0,
     date: today,
-    start: "09:00",
-    end: "17:00",
+    start: "",
+    end: "",
     role: "",
     station: "Floor",
   });
@@ -113,9 +121,20 @@ export default function Home() {
   );
   const activePermissions = permissionsByMode[mode];
   const visibleNavItems = navItems.filter((item) => mode === "manager" || !item.managerOnly);
+  const copyCalendarDays = useMemo(
+    () => copyRange === "week" ? weekCalendarDays(shiftForm.date) : monthCalendarDays(shiftForm.date),
+    [copyRange, shiftForm.date],
+  );
   const todaysShifts = state.shifts
     .filter((shift) => shift.date === today && shiftEmployeeIds.has(shift.employeeId))
     .sort((a, b) => a.start.localeCompare(b.start));
+  const calendarShifts = useMemo(
+    () =>
+      shiftsForCalendarRange(state.shifts, shiftEmployeeIds, today, activeCalendarTab).sort(
+        (a, b) => `${a.date}${a.start}`.localeCompare(`${b.date}${b.start}`),
+      ),
+    [activeCalendarTab, shiftEmployeeIds, state.shifts, today],
+  );
   const myShift = todaysShifts.find((shift) => shift.employeeId === activeEmployeeId);
   const clockedInIds = useMemo(() => {
     return new Set(
@@ -268,35 +287,109 @@ export default function Home() {
     event.preventDefault();
     if (!shiftEmployeeIds.has(shiftForm.employeeId)) return;
 
+    const start = parseTypedTime(shiftForm.start);
+    const end = parseTypedTime(shiftForm.end);
+    if (!start || !end) return;
+
+    const shiftDates = shiftForm.id
+      ? [shiftForm.date]
+      : repeatDatesForRange(shiftForm.date, repeatDates, copyRange);
+    const duplicateDates = shiftDates.filter((date) =>
+      state.shifts.some((shift) =>
+        shift.employeeId === shiftForm.employeeId
+        && shift.id !== shiftForm.id
+        && shift.date === date,
+      ),
+    );
+    if (duplicateDates.length > 0) {
+      const duplicateDays = duplicateDates.map((date) => parseLocalDate(date).getDate()).join(", ");
+      window.alert(`Shifts already scheduled for: ${duplicateDays}`);
+      return;
+    }
+
     setState((current) => {
-      const savedShift = { ...shiftForm, id: shiftForm.id || nextId(current.shifts) };
+      let nextShiftId = nextId(current.shifts);
+      const savedShifts = shiftDates.map((date) => ({
+        ...shiftForm,
+        date,
+        start,
+        end,
+        id: shiftForm.id || nextShiftId++,
+      }));
       const shifts = shiftForm.id
-        ? current.shifts.map((shift) => (shift.id === shiftForm.id ? savedShift : shift))
-        : [...current.shifts, savedShift];
+        ? current.shifts.map((shift) => (shift.id === shiftForm.id ? savedShifts[0] : shift))
+        : [...current.shifts, ...savedShifts];
 
       return { ...current, shifts };
     });
+    setRepeatDates([]);
     setShiftForm({
       id: 0,
       employeeId: 0,
       date: today,
-      start: "09:00",
-      end: "17:00",
+      start: "",
+      end: "",
       role: "",
       station: "Floor",
     });
   }
 
   function editShift(shift: Shift) {
-    setShiftForm(shift);
-    setActiveView("schedule");
+    setInlineShiftForm({ id: shift.id, start: shift.start, end: shift.end, role: shift.role });
   }
 
-  function removeShift(shiftId: number) {
+  function saveInlineShift() {
+    if (!inlineShiftForm) return;
+    const start = parseTypedTime(inlineShiftForm.start);
+    const end = parseTypedTime(inlineShiftForm.end);
+    const role = inlineShiftForm.role.trim();
+    if (!start || !end || !role) return;
+
     setState((current) => ({
       ...current,
-      shifts: current.shifts.filter((shift) => shift.id !== shiftId),
+      shifts: current.shifts.map((shift) =>
+        shift.id === inlineShiftForm.id ? { ...shift, start, end, role } : shift,
+      ),
     }));
+    setInlineShiftForm(null);
+  }
+
+  function toggleRepeatDate(date: string) {
+    setShiftForm((form) => ({ ...form, date }));
+    setRepeatDates((current) =>
+      current.includes(date)
+        ? current.filter((entry) => entry !== date)
+        : [...current, date].sort(),
+    );
+  }
+
+  function moveCopyRange(direction: -1 | 1) {
+    setRepeatDates([]);
+    setShiftForm((form) => ({
+      ...form,
+      date: shiftDateByRange(form.date, copyRange, direction),
+    }));
+  }
+
+  function toggleShiftSelection(shiftId: number) {
+    setSelectedShiftIds((current) => {
+      const next = new Set(current);
+      if (next.has(shiftId)) next.delete(shiftId);
+      else next.add(shiftId);
+      return next;
+    });
+  }
+
+  function deleteSelectedShifts() {
+    const count = selectedShiftIds.size;
+    if (count === 0) return;
+    if (!window.confirm(`Are you sure you want to delete ${count === 1 ? "this shift" : `these ${count} shifts`}?`)) return;
+
+    setState((current) => ({
+      ...current,
+      shifts: current.shifts.filter((shift) => !selectedShiftIds.has(shift.id)),
+    }));
+    setSelectedShiftIds(new Set());
   }
 
   function clock(type: "in" | "out") {
@@ -395,17 +488,19 @@ export default function Home() {
             <p className="welcome-message">{activeEmployee?.name ?? "Guest"}</p>
           </header>
 
-          <section className="summary-strip" aria-label="Staff summary">
-            <div>
-              <p className="eyebrow">Live floor</p>
-              <h3>{clockedInIds.size} clocked in across {todaysShifts.length} scheduled shifts.</h3>
-            </div>
-            <div className="summary-metrics">
-              <Metric label="Employees" value={shiftEmployees.length.toString()} />
-              <Metric label="Roles" value={new Set(shiftEmployees.map((employee) => employee.role)).size.toString()} />
-              <Metric label="Clock events" value={state.clockEvents.length.toString()} />
-            </div>
-          </section>
+          {activeView === "dashboard" && (
+            <section className="summary-strip" aria-label="Staff summary">
+              <div>
+                <p className="eyebrow">Live floor</p>
+                <h3>{clockedInIds.size} clocked in across {todaysShifts.length} scheduled shifts.</h3>
+              </div>
+              <div className="summary-metrics">
+                <Metric label="Employees" value={shiftEmployees.length.toString()} />
+                <Metric label="Roles" value={new Set(shiftEmployees.map((employee) => employee.role)).size.toString()} />
+                <Metric label="Clock events" value={state.clockEvents.length.toString()} />
+              </div>
+            </section>
+          )}
 
           {activeView === "dashboard" && (
             <div className="content-grid">
@@ -450,16 +545,40 @@ export default function Home() {
               )}
 
               <section className="panel">
-                <PanelHeading eyebrow="Coworkers" title="Shift times and roles" />
+                <div className="panel-heading calendar-heading">
+                  <div>
+                    <p className="eyebrow">Calendar</p>
+                    <h2>{calendarTabTitle(activeCalendarTab)}</h2>
+                  </div>
+                  <div className="tab-list" role="tablist" aria-label="Calendar range">
+                    {(["today", "week", "month"] as CalendarTab[]).map((tab) => (
+                      <button
+                        type="button"
+                        key={tab}
+                        className={activeCalendarTab === tab ? "tab-button active" : "tab-button"}
+                        onClick={() => setActiveCalendarTab(tab)}
+                        role="tab"
+                        aria-selected={activeCalendarTab === tab}
+                      >
+                        {capitalize(tab)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 <div className="shift-stack">
-                  {todaysShifts.map((shift) => (
-                    <ShiftRow
-                      key={shift.id}
-                      shift={shift}
-                      employee={employeeById(state.employees, shift.employeeId)}
-                      compact
-                    />
-                  ))}
+                  {calendarShifts.length > 0 ? (
+                    calendarShifts.map((shift) => (
+                      <ShiftRow
+                        key={shift.id}
+                        shift={shift}
+                        employee={employeeById(state.employees, shift.employeeId)}
+                        compact
+                        showDate={activeCalendarTab !== "today"}
+                      />
+                    ))
+                  ) : (
+                    <EmptyState text={`No shifts scheduled for ${calendarTabEmptyLabel(activeCalendarTab)}.`} />
+                  )}
                 </div>
               </section>
 
@@ -554,7 +673,7 @@ export default function Home() {
 
           {activeView === "schedule" && (
             <section className="panel feature-panel">
-              <PanelHeading eyebrow="Calendar" title="Schedule calendar" />
+              <PanelHeading eyebrow="Calendar" title="Schedule Calendar" />
               {mode === "manager" && (
                 <form className="quick-form shift-form" onSubmit={saveShift}>
                   <select
@@ -572,23 +691,17 @@ export default function Home() {
                       <option key={employee.id} value={employee.id}>{employee.name}</option>
                     ))}
                   </select>
-                  <input
-                    type="date"
-                    value={shiftForm.date}
-                    onChange={(event) => setShiftForm((form) => ({ ...form, date: event.target.value }))}
-                    aria-label="Shift date"
-                  />
-                  <input
-                    type="time"
+                  <TimeInput
                     value={shiftForm.start}
-                    onChange={(event) => setShiftForm((form) => ({ ...form, start: event.target.value }))}
-                    aria-label="Shift start"
+                    onChange={(start) => setShiftForm((form) => ({ ...form, start }))}
+                    ariaLabel="Shift start"
+                    placeholder="Start shift"
                   />
-                  <input
-                    type="time"
+                  <TimeInput
                     value={shiftForm.end}
-                    onChange={(event) => setShiftForm((form) => ({ ...form, end: event.target.value }))}
-                    aria-label="Shift end"
+                    onChange={(end) => setShiftForm((form) => ({ ...form, end }))}
+                    ariaLabel="Shift end"
+                    placeholder="End shift"
                   />
                   <input
                     value={shiftForm.role}
@@ -596,37 +709,152 @@ export default function Home() {
                     placeholder="Role"
                     aria-label="Shift role"
                   />
+                  <fieldset className="copy-calendar" disabled={Boolean(shiftForm.id)}>
+                    <legend>{copyRange === "week" ? "Week" : "Month"}</legend>
+                    <div className="copy-calendar-toolbar">
+                      <button
+                        type="button"
+                        onClick={() => moveCopyRange(-1)}
+                        aria-label={`Previous ${copyRange}`}
+                      >
+                        <span aria-hidden="true">&lt;</span>
+                      </button>
+                      <strong>
+                        {copyRange === "week" ? `Week of ${formatShortDate(shiftForm.date)}` : formatMonthYear(shiftForm.date)}
+                      </strong>
+                      <button
+                        type="button"
+                        onClick={() => moveCopyRange(1)}
+                        aria-label={`Next ${copyRange}`}
+                      >
+                        <span aria-hidden="true">&gt;</span>
+                      </button>
+                    </div>
+                    <div className="copy-range-tabs" role="tablist" aria-label="Copy shift range">
+                      {(["week", "month"] as CopyRange[]).map((range) => (
+                        <button
+                          type="button"
+                          key={range}
+                          className={copyRange === range ? "active" : ""}
+                          onClick={() => {
+                            setCopyRange(range);
+                            setRepeatDates([]);
+                          }}
+                          role="tab"
+                          aria-selected={copyRange === range}
+                        >
+                          {capitalize(range)}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="copy-calendar-weekdays" aria-hidden="true">
+                      {calendarWeekdayLabels.map((label) => (
+                        <span key={label}>{label}</span>
+                      ))}
+                    </div>
+                    <div className="copy-calendar-grid">
+                      {copyCalendarDays.map((day, index) =>
+                        day ? (
+                          <label
+                            key={day.date}
+                            className={repeatDates.includes(day.date) ? "active" : ""}
+                            title={formatLongDate(day.date)}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={repeatDates.includes(day.date)}
+                              onChange={() => toggleRepeatDate(day.date)}
+                            />
+                            <span>{day.day}</span>
+                          </label>
+                        ) : (
+                          <span key={`blank-${index}`} aria-hidden="true" />
+                        ),
+                      )}
+                    </div>
+                  </fieldset>
                   <button type="submit" disabled={shiftEmployees.length === 0}>Save</button>
                 </form>
               )}
-              <div className="calendar-grid">
-                {state.shifts
-                  .slice()
-                  .filter((shift) => shiftEmployeeIds.has(shift.employeeId))
-                  .sort((a, b) => `${a.date}${a.start}`.localeCompare(`${b.date}${b.start}`))
-                  .map((shift) => {
-                    const employee = employeeById(shiftEmployees, shift.employeeId);
-                    if (!employee) return null;
+              {mode === "manager" && selectedShiftIds.size > 0 && (
+                <div className="shift-bulk-actions" role="status">
+                  <span>{selectedShiftIds.size} {selectedShiftIds.size === 1 ? "shift" : "shifts"} selected</span>
+                  <button type="button" onClick={deleteSelectedShifts}>Delete</button>
+                </div>
+              )}
+              <div className="employee-shift-list">
+                {shiftEmployees.map((employee) => {
+                  const employeeShifts = state.shifts
+                    .filter((shift) => shift.employeeId === employee.id)
+                    .sort((a, b) => `${a.date}${a.start}`.localeCompare(`${b.date}${b.start}`));
 
-                    return (
-                      <article className="calendar-shift" key={shift.id}>
-                        <div className="date-tile">
-                          <span>{weekday(shift.date)}</span>
-                          <strong>{dayNumber(shift.date)}</strong>
-                        </div>
-                        <div>
-                          <h3>{employee.name}</h3>
-                          <p>{formatShiftSummary(shift)}</p>
-                        </div>
-                        {mode === "manager" && (
-                          <div className="row-actions">
-                            <button type="button" onClick={() => editShift(shift)}>Edit</button>
-                            <button type="button" onClick={() => removeShift(shift.id)}>Delete</button>
-                          </div>
+                  return (
+                    <details className="employee-shift-group" key={employee.id}>
+                      <summary>
+                        <span>{employee.name}</span>
+                        <span className="employee-shift-count">
+                          {employeeShifts.length} {employeeShifts.length === 1 ? "shift" : "shifts"}
+                        </span>
+                      </summary>
+                      <div className="employee-shift-content">
+                        {employeeShifts.length > 0 ? employeeShifts.map((shift) => (
+                          <article className="calendar-shift compact" key={shift.id}>
+                            {mode === "manager" && (
+                              <label className="shift-selector" title="Select shift">
+                                <input
+                                  type="checkbox"
+                                  checked={selectedShiftIds.has(shift.id)}
+                                  onChange={() => toggleShiftSelection(shift.id)}
+                                  aria-label={`Select ${employee.name}'s shift on ${formatLongDate(shift.date)}`}
+                                />
+                              </label>
+                            )}
+                            <div className="date-tile">
+                              <span>{weekday(shift.date)}</span>
+                              <strong>{dayNumber(shift.date)}</strong>
+                            </div>
+                            {inlineShiftForm?.id === shift.id ? (
+                              <div className="inline-shift-editor">
+                                <TimeInput
+                                  value={inlineShiftForm.start}
+                                  onChange={(start) => setInlineShiftForm((form) => form ? { ...form, start } : form)}
+                                  ariaLabel="Edit shift start"
+                                  placeholder="Start shift"
+                                />
+                                <TimeInput
+                                  value={inlineShiftForm.end}
+                                  onChange={(end) => setInlineShiftForm((form) => form ? { ...form, end } : form)}
+                                  ariaLabel="Edit shift end"
+                                  placeholder="End shift"
+                                />
+                                <input
+                                  type="text"
+                                  value={inlineShiftForm.role}
+                                  onChange={(event) => setInlineShiftForm((form) => form ? { ...form, role: event.target.value } : form)}
+                                  placeholder="Role"
+                                  aria-label="Edit shift role"
+                                />
+                                <div className="inline-shift-actions">
+                                  <button type="button" onClick={saveInlineShift}>Save</button>
+                                  <button type="button" onClick={() => setInlineShiftForm(null)}>Cancel</button>
+                                </div>
+                              </div>
+                            ) : (
+                              <p>{formatShiftSummary(shift)}</p>
+                            )}
+                            {mode === "manager" && inlineShiftForm?.id !== shift.id && (
+                              <div className="row-actions">
+                                <button type="button" onClick={() => editShift(shift)}>Edit</button>
+                              </div>
+                            )}
+                          </article>
+                        )) : (
+                          <p className="employee-shift-empty">No shifts scheduled.</p>
                         )}
-                      </article>
-                    );
-                  })}
+                      </div>
+                    </details>
+                  );
+                })}
               </div>
             </section>
           )}
@@ -677,7 +905,7 @@ export default function Home() {
 }
 
 function activeViewLabel(activeView: ViewId) {
-  return navItems.find((item) => item.id === activeView)?.label ?? "Today";
+  return navItems.find((item) => item.id === activeView)?.label ?? "Calendar";
 }
 
 function employeeById(employees: Employee[], id: number) {
@@ -793,6 +1021,144 @@ function dayNumber(date: string) {
   return new Intl.DateTimeFormat("en-US", { day: "2-digit" }).format(new Date(`${date}T12:00:00`));
 }
 
+function formatShortDate(date: string) {
+  return new Intl.DateTimeFormat("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  }).format(new Date(`${date}T12:00:00`));
+}
+
+function formatMonthYear(date: string) {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    year: "numeric",
+  }).format(new Date(`${date}T12:00:00`));
+}
+
+function shiftsForCalendarRange(
+  shifts: Shift[],
+  employeeIds: Set<number>,
+  today: string,
+  tab: CalendarTab,
+) {
+  const currentDate = parseLocalDate(today);
+  const { start, end } = dateRangeForCalendarTab(currentDate, tab);
+
+  return shifts.filter((shift) => {
+    if (!employeeIds.has(shift.employeeId)) return false;
+
+    const shiftDate = parseLocalDate(shift.date);
+    return shiftDate >= start && shiftDate <= end;
+  });
+}
+
+function dateRangeForCalendarTab(date: Date, tab: CalendarTab) {
+  if (tab === "today") {
+    return { start: startOfDay(date), end: startOfDay(date) };
+  }
+
+  if (tab === "week") {
+    const start = startOfDay(date);
+    start.setDate(start.getDate() - start.getDay());
+    const end = startOfDay(start);
+    end.setDate(start.getDate() + 6);
+
+    return { start, end };
+  }
+
+  const start = new Date(date.getFullYear(), date.getMonth(), 1);
+  const end = new Date(date.getFullYear(), date.getMonth() + 1, 0);
+
+  return { start, end };
+}
+
+function repeatDatesForRange(date: string, dates: string[], range: CopyRange) {
+  if (dates.length === 0) return [date];
+
+  const { start, end } = dateRangeForCalendarTab(parseLocalDate(date), range);
+  const selectedDates = dates.filter((entry) => {
+    const selectedDate = parseLocalDate(entry);
+    return selectedDate >= start && selectedDate <= end;
+  });
+
+  return selectedDates.length > 0 ? selectedDates : [date];
+}
+
+function shiftDateByRange(date: string, range: CopyRange, direction: -1 | 1) {
+  const selectedDate = parseLocalDate(date);
+
+  if (range === "week") {
+    selectedDate.setDate(selectedDate.getDate() + direction * 7);
+  } else {
+    selectedDate.setMonth(selectedDate.getMonth() + direction);
+  }
+
+  return toDateInputValue(selectedDate);
+}
+
+function weekCalendarDays(date: string) {
+  const selectedDate = parseLocalDate(date);
+  const weekStart = startOfDay(selectedDate);
+  weekStart.setDate(selectedDate.getDate() - selectedDate.getDay());
+
+  return Array.from({ length: 7 }, (_, index) => {
+    const calendarDate = startOfDay(weekStart);
+    calendarDate.setDate(weekStart.getDate() + index);
+    return { date: toDateInputValue(calendarDate), day: calendarDate.getDate().toString() };
+  });
+}
+
+function monthCalendarDays(date: string) {
+  const selectedDate = parseLocalDate(date);
+  const firstDay = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1);
+  const lastDay = new Date(selectedDate.getFullYear(), selectedDate.getMonth() + 1, 0);
+  const days: ({ date: string; day: string } | null)[] = [];
+
+  for (let index = 0; index < firstDay.getDay(); index += 1) {
+    days.push(null);
+  }
+
+  for (let day = 1; day <= lastDay.getDate(); day += 1) {
+    const calendarDate = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), day);
+    days.push({ date: toDateInputValue(calendarDate), day: day.toString() });
+  }
+
+  return days;
+}
+
+function toDateInputValue(date: Date) {
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, "0");
+  const day = `${date.getDate()}`.padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
+function parseLocalDate(date: string) {
+  return new Date(`${date}T12:00:00`);
+}
+
+function startOfDay(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function calendarTabTitle(tab: CalendarTab) {
+  if (tab === "today") return "Today";
+  if (tab === "week") return "This week";
+  return "This month";
+}
+
+function calendarTabEmptyLabel(tab: CalendarTab) {
+  if (tab === "today") return "today";
+  if (tab === "week") return "this week";
+  return "this month";
+}
+
+function capitalize(value: string) {
+  return `${value.charAt(0).toUpperCase()}${value.slice(1)}`;
+}
+
 function formatShiftSummary(shift: Shift) {
   return `${shift.role} / ${formatTimeRange(shift)} / ${formatScheduledHours(shift)} hours`;
 }
@@ -812,6 +1178,44 @@ function formatTime12(time: string) {
   const displayHour = hour % 12 || 12;
 
   return `${displayHour}:${minute.toString().padStart(2, "0")} ${period}`;
+}
+
+function parseTypedTime(value: string) {
+  const normalized = value.trim().toLowerCase().replace(/\s+/g, "");
+  if (!normalized) return null;
+
+  const period = normalized.endsWith("am") ? "am" : normalized.endsWith("pm") ? "pm" : "";
+  const timeText = period ? normalized.slice(0, -2) : normalized;
+  let hour = 0;
+  let minute = 0;
+
+  if (timeText.includes(":")) {
+    const [hourText, minuteText = "0"] = timeText.split(":");
+    hour = Number(hourText);
+    minute = Number(minuteText);
+  } else if (/^\d{3,4}$/.test(timeText)) {
+    hour = Number(timeText.slice(0, -2));
+    minute = Number(timeText.slice(-2));
+  } else if (/^\d{1,2}$/.test(timeText)) {
+    hour = Number(timeText);
+    minute = 0;
+  } else {
+    return null;
+  }
+
+  if (!Number.isInteger(hour) || !Number.isInteger(minute) || minute < 0 || minute > 59) {
+    return null;
+  }
+
+  if (period) {
+    if (hour < 1 || hour > 12) return null;
+    if (period === "am") hour = hour === 12 ? 0 : hour;
+    if (period === "pm") hour = hour === 12 ? 12 : hour + 12;
+  } else if (hour < 0 || hour > 23) {
+    return null;
+  }
+
+  return `${hour.toString().padStart(2, "0")}:${minute.toString().padStart(2, "0")}`;
 }
 
 function formatScheduledHours(shift: Shift) {
@@ -850,6 +1254,58 @@ function Metric({ label, value }: { label: string; value: string }) {
   );
 }
 
+function TimeInput({
+  value,
+  onChange,
+  ariaLabel,
+  placeholder,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  ariaLabel: string;
+  placeholder: string;
+}) {
+  const [draft, setDraft] = useState(() => (value ? formatTime12(value) : ""));
+
+  useEffect(() => {
+    setDraft(value ? formatTime12(value) : "");
+  }, [value]);
+
+  function commitTime() {
+    if (!draft.trim()) {
+      onChange("");
+      setDraft("");
+      return;
+    }
+
+    const parsed = parseTypedTime(draft);
+    if (!parsed) {
+      setDraft(value ? formatTime12(value) : "");
+      return;
+    }
+
+    onChange(parsed);
+    setDraft(formatTime12(parsed));
+  }
+
+  return (
+    <input
+      type="text"
+      value={draft}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={commitTime}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          commitTime();
+        }
+      }}
+      placeholder={placeholder}
+      aria-label={ariaLabel}
+      inputMode="text"
+    />
+  );
+}
+
 function PanelHeading({
   eyebrow,
   title,
@@ -871,16 +1327,18 @@ function ShiftRow({
   shift,
   employee,
   compact = false,
+  showDate = false,
 }: {
   shift: Shift;
   employee?: Employee;
   compact?: boolean;
+  showDate?: boolean;
 }) {
   return (
     <article className={compact ? "shift-row compact" : "shift-row"}>
       <div>
         <h3>{employee?.name ?? "Open shift"}</h3>
-        <p>{formatTimeRange(shift)}</p>
+        <p>{showDate ? `${formatShortDate(shift.date)} | ${formatTimeRange(shift)}` : formatTimeRange(shift)}</p>
       </div>
       <div className="shift-meta">
         <strong>{shift.role}</strong>
