@@ -6,6 +6,7 @@ import type { CSSProperties } from "react";
 type Mode = "manager" | "employee";
 type ViewId = "dashboard" | "employees" | "schedule" | "clockins" | "hours";
 type CalendarTab = "today" | "week" | "month";
+type HoursSectionTab = "hours" | "pto";
 type CopyRange = "week" | "month";
 type EmployeeScheduleTab = "day" | "week";
 type HoursRounding = "actual" | 5 | 10 | 15;
@@ -47,10 +48,32 @@ type ClockEvent = {
   explanation?: string;
 };
 
+type HoursAdjustment = {
+  id: number;
+  employeeId: number;
+  date: string;
+  hours: number;
+};
+
+type PtoRequest = {
+  id: number;
+  employeeId: number;
+  startDate: string;
+  endDate: string;
+  startTime?: string;
+  endTime?: string;
+  reason: "sick_emergency" | "vacation";
+  explanation: string;
+  status: "pending" | "approved" | "denied" | "cancelled";
+  requestedAt: string;
+};
+
 type StaffState = {
   employees: Employee[];
   shifts: Shift[];
   clockEvents: ClockEvent[];
+  hoursAdjustments: HoursAdjustment[];
+  ptoRequests: PtoRequest[];
 };
 
 const managerPin = "0000";
@@ -73,13 +96,13 @@ const permissionsByMode: Record<Mode, Permission[]> = {
     "view_hours",
     "view_schedule",
   ],
-  employee: ["clock_self", "view_schedule"],
+  employee: ["clock_self", "view_schedule", "view_hours"],
 };
 
 const navItems: { id: ViewId; label: string; icon: string; managerOnly?: boolean }[] = [
   { id: "dashboard", label: "Calendar", icon: "C" },
   { id: "schedule", label: "Schedule", icon: "S" },
-  { id: "hours", label: "Hours", icon: "H", managerOnly: true },
+  { id: "hours", label: "Hours", icon: "H" },
   { id: "clockins", label: "Events", icon: "E", managerOnly: true },
   { id: "employees", label: "Team", icon: "T", managerOnly: true },
 ];
@@ -90,18 +113,22 @@ const starterState: StaffState = {
   ],
   shifts: [],
   clockEvents: [],
+  hoursAdjustments: [],
+  ptoRequests: [],
 };
 
 export default function Home() {
   const today = getLocalDateValue();
   const [state, setState] = useState<StaffState>(() => readStoredState());
   const [isUnlocked, setIsUnlocked] = useState(false);
+  const [isPublicSchedule, setIsPublicSchedule] = useState(false);
   const [mode, setMode] = useState<Mode>("employee");
   const [pin, setPin] = useState("");
   const [activeEmployeeId, setActiveEmployeeId] = useState<number>(1);
   const [activeView, setActiveView] = useState<ViewId>("dashboard");
   const [activeCalendarTab, setActiveCalendarTab] = useState<CalendarTab>("today");
   const [activeHoursTab, setActiveHoursTab] = useState<CalendarTab>("today");
+  const [activeHoursSectionTab, setActiveHoursSectionTab] = useState<HoursSectionTab>("hours");
   const [hoursRounding, setHoursRounding] = useState<HoursRounding>("actual");
   const [authMessage, setAuthMessage] = useState("");
   const [employeeForm, setEmployeeForm] = useState({ name: "", role: "", pin: "" });
@@ -110,8 +137,31 @@ export default function Home() {
   const [copyRange, setCopyRange] = useState<CopyRange>("week");
   const [scheduleDate, setScheduleDate] = useState(today);
   const [hoursDate, setHoursDate] = useState(today);
+  const [editingHours, setEditingHours] = useState<{
+    employee: Employee;
+    hours: string;
+    minutes: string;
+  } | null>(null);
+  const [showHoursChangeWarning, setShowHoursChangeWarning] = useState(false);
+  const [ptoRequestForm, setPtoRequestForm] = useState<{
+    startDate: string;
+    endDate: string;
+    reason: PtoRequest["reason"] | "";
+    explanation: string;
+    useCustomTime: boolean;
+    startTime: string;
+    endTime: string;
+  } | null>(null);
+  const [ptoRequestError, setPtoRequestError] = useState("");
+  const [reviewingPtoRequestId, setReviewingPtoRequestId] = useState<number | null>(null);
+  const [ptoReviewError, setPtoReviewError] = useState("");
   const [employeeScheduleTab, setEmployeeScheduleTab] = useState<EmployeeScheduleTab>("day");
   const [editingShift, setEditingShift] = useState<Shift | null>(null);
+  const [createShiftError, setCreateShiftError] = useState("");
+  const [editShiftError, setEditShiftError] = useState("");
+  const [createdShiftTimes, setCreatedShiftTimes] = useState<Record<number, number>>({});
+  const [editedShiftTimes, setEditedShiftTimes] = useState<Record<number, number>>({});
+  const [lastEditedShiftId, setLastEditedShiftId] = useState<number | null>(null);
   const [showBreakOptions, setShowBreakOptions] = useState(false);
   const [pendingTimeException, setPendingTimeException] = useState<TimeExceptionAction | null>(null);
   const [timeExceptionExplanation, setTimeExceptionExplanation] = useState("");
@@ -143,6 +193,7 @@ export default function Home() {
   }, []);
 
   const activeEmployee = state.employees.find((employee) => employee.id === activeEmployeeId);
+  const reviewingPtoRequest = (state.ptoRequests ?? []).find((request) => request.id === reviewingPtoRequestId);
   const activeEmployees = useMemo(
     () => state.employees.filter((employee) => employee.active),
     [state.employees],
@@ -155,8 +206,10 @@ export default function Home() {
     () => new Set(shiftEmployees.map((employee) => employee.id)),
     [shiftEmployees],
   );
-  const activePermissions = permissionsByMode[mode];
-  const visibleNavItems = navItems.filter((item) => mode === "manager" || !item.managerOnly);
+  const activePermissions = isPublicSchedule ? ["view_schedule" as Permission] : permissionsByMode[mode];
+  const visibleNavItems = isPublicSchedule
+    ? navItems.filter((item) => item.id === "schedule")
+    : navItems.filter((item) => mode === "manager" || !item.managerOnly);
   const copyCalendarDays = useMemo(
     () => copyRange === "week" ? weekCalendarDays(shiftForm.date) : monthCalendarDays(shiftForm.date),
     [copyRange, shiftForm.date],
@@ -220,21 +273,57 @@ export default function Home() {
     ? timeExceptionWarningMessage(pendingTimeException, myShift, activeBreakEndTime, currentTime)
     : "";
   const hoursRows = useMemo(
-    () =>
-      shiftEmployees.map((employee) => ({
+    () => {
+      const range = dateRangeForCalendarTab(parseLocalDate(hoursDate), activeHoursTab);
+
+      return shiftEmployees.map((employee) => ({
         employee,
         hours: roundHoursToMinutes(
-          workedHoursForRange(
+          adjustedWorkedHoursForRange(
             state.clockEvents,
+            state.hoursAdjustments ?? [],
             employee.id,
-            dateRangeForCalendarTab(parseLocalDate(hoursDate), activeHoursTab),
+            range,
             currentTime,
           ),
-          hoursRounding,
+          mode === "manager" ? hoursRounding : "actual",
         ),
-      })),
-    [activeHoursTab, currentTime, hoursDate, hoursRounding, shiftEmployees, state.clockEvents],
+      }));
+    },
+    [activeHoursTab, currentTime, hoursDate, hoursRounding, mode, shiftEmployees, state.clockEvents, state.hoursAdjustments],
   );
+  const ptoRows = useMemo(() => {
+    const yearToDate = yearToDateRange(new Date(currentTime));
+
+    return state.employees.map((employee) => {
+      const hoursWorked = adjustedWorkedHoursForRange(
+        state.clockEvents,
+        state.hoursAdjustments ?? [],
+        employee.id,
+        yearToDate,
+        currentTime,
+      );
+
+      return {
+        employee,
+        hoursWorked,
+        ptoHours: Math.floor(hoursWorked / 30),
+        ptoUsed: ptoHoursUsedThisYear(state.ptoRequests ?? [], employee.id, new Date(currentTime).getFullYear()),
+      };
+    });
+  }, [currentTime, state.clockEvents, state.employees, state.hoursAdjustments, state.ptoRequests]);
+  const activeEmployeePto = ptoRows.find((row) => row.employee.id === activeEmployeeId);
+  const activeEmployeePtoLeft = activeEmployeePto
+    ? activeEmployeePto.ptoHours - activeEmployeePto.ptoUsed
+    : 0;
+  const ptoRequestPreviewHours = ptoRequestForm
+    ? ptoHoursForDateRange(
+        ptoRequestForm.startDate,
+        ptoRequestForm.endDate,
+        ptoRequestForm.useCustomTime ? ptoRequestForm.startTime : undefined,
+        ptoRequestForm.useCustomTime ? ptoRequestForm.endTime : undefined,
+      )
+    : 0;
 
   useEffect(() => {
     if (shiftEmployeeIds.has(shiftForm.employeeId)) return;
@@ -251,6 +340,7 @@ export default function Home() {
     const employee = state.employees.find((entry) => entry.pin === pin && entry.active);
 
     if (pin === managerPin) {
+      setIsPublicSchedule(false);
       setMode("manager");
       setActiveEmployeeId(employee?.id ?? 1);
       setActiveView("dashboard");
@@ -261,6 +351,7 @@ export default function Home() {
     }
 
     if (employee) {
+      setIsPublicSchedule(false);
       setMode("employee");
       setActiveEmployeeId(employee.id);
       setActiveView("dashboard");
@@ -275,11 +366,27 @@ export default function Home() {
 
   function signOut() {
     setIsUnlocked(false);
+    setIsPublicSchedule(false);
     setMode("employee");
     setActiveEmployeeId(1);
     setActiveView("dashboard");
     setPin("");
     setAuthMessage("");
+  }
+
+  function navigateToView(view: ViewId) {
+    if (view === "hours") setActiveHoursSectionTab("hours");
+    setActiveView(view);
+  }
+
+  function viewPublicSchedule() {
+    setMode("employee");
+    setActiveEmployeeId(0);
+    setActiveView("schedule");
+    setIsPublicSchedule(true);
+    setIsUnlocked(true);
+    setPin("");
+    setAuthMessage("Public schedule view. Sign in with a PIN to access employee tools.");
   }
 
   function addEmployee(event: FormEvent<HTMLFormElement>) {
@@ -332,6 +439,8 @@ export default function Home() {
       employees: current.employees.filter((employee) => employee.id !== employeeId),
       shifts: current.shifts.filter((shift) => shift.employeeId !== employeeId),
       clockEvents: current.clockEvents.filter((event) => event.employeeId !== employeeId),
+      hoursAdjustments: (current.hoursAdjustments ?? []).filter((adjustment) => adjustment.employeeId !== employeeId),
+      ptoRequests: (current.ptoRequests ?? []).filter((request) => request.employeeId !== employeeId),
     }));
     setEmployeeMessage("");
   }
@@ -378,7 +487,14 @@ export default function Home() {
 
     const start = parseTypedTime(shiftForm.start);
     const end = parseTypedTime(shiftForm.end);
-    if (!start || !end) return;
+    if (!start || !end) {
+      setCreateShiftError("Enter a valid start and end time.");
+      return;
+    }
+    if (timeToMinutes(start) >= timeToMinutes(end)) {
+      setCreateShiftError("Start time must be earlier than end time.");
+      return;
+    }
 
     const shiftDates = shiftForm.id
       ? [shiftForm.date]
@@ -396,6 +512,11 @@ export default function Home() {
       return;
     }
 
+    const firstCreatedShiftId = nextId(state.shifts);
+    const createdShiftIds = shiftForm.id
+      ? []
+      : shiftDates.map((_, index) => firstCreatedShiftId + index);
+
     setState((current) => {
       let nextShiftId = nextId(current.shifts);
       const savedShifts = shiftDates.map((date) => ({
@@ -411,6 +532,14 @@ export default function Home() {
 
       return { ...current, shifts };
     });
+    if (createdShiftIds.length > 0) {
+      const createdAt = Date.now();
+      setCreatedShiftTimes((current) => ({
+        ...current,
+        ...Object.fromEntries(createdShiftIds.map((id) => [id, createdAt])),
+      }));
+    }
+    setCreateShiftError("");
     setRepeatDates([]);
     setShiftForm({
       id: 0,
@@ -450,8 +579,203 @@ export default function Home() {
     setHoursDate((date) => shiftDateByCalendarTab(date, activeHoursTab, direction));
   }
 
+  function editWorkedHours(employee: Employee, displayedHours: number) {
+    const totalMinutes = Math.round(displayedHours * 60);
+    setEditingHours({
+      employee,
+      hours: String(Math.floor(totalMinutes / 60)),
+      minutes: String(totalMinutes % 60),
+    });
+    setShowHoursChangeWarning(false);
+  }
+
+  function openPtoRequest() {
+    setPtoRequestForm({
+      startDate: today,
+      endDate: today,
+      reason: "",
+      explanation: "",
+      useCustomTime: false,
+      startTime: "09:00",
+      endTime: "17:00",
+    });
+    setPtoRequestError("");
+  }
+
+  function submitPtoRequest(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!ptoRequestForm || !activeEmployee || mode !== "employee") return;
+
+    if (!ptoRequestForm.reason) {
+      setPtoRequestError("Choose Sick/Emergency or Vacation.");
+      return;
+    }
+    if (ptoRequestForm.endDate < ptoRequestForm.startDate) {
+      setPtoRequestError("The end date cannot be before the start date.");
+      return;
+    }
+    if (ptoRequestForm.useCustomTime) {
+      const startMinutes = timeToMinutes(ptoRequestForm.startTime);
+      const endMinutes = timeToMinutes(ptoRequestForm.endTime);
+      if (
+        startMinutes === null
+        || endMinutes === null
+        || startMinutes % 60 !== 0
+        || endMinutes % 60 !== 0
+      ) {
+        setPtoRequestError("PTO can only be requested in whole-hour increments. Choose times ending in :00.");
+        return;
+      }
+      if (startMinutes === null || endMinutes === null || startMinutes >= endMinutes) {
+        setPtoRequestError("The end time must be later than the start time.");
+        return;
+      }
+    }
+    const requestedPtoHours = ptoHoursForDateRange(
+      ptoRequestForm.startDate,
+      ptoRequestForm.endDate,
+      ptoRequestForm.useCustomTime ? ptoRequestForm.startTime : undefined,
+      ptoRequestForm.useCustomTime ? ptoRequestForm.endTime : undefined,
+    );
+    if (requestedPtoHours <= 0) {
+      setPtoRequestError("Choose at least one weekday and a valid amount of PTO time.");
+      return;
+    }
+    const employeePto = ptoRows.find((row) => row.employee.id === activeEmployee.id);
+    const ptoHoursLeft = employeePto ? employeePto.ptoHours - employeePto.ptoUsed : 0;
+    if (ptoHoursLeft < requestedPtoHours) {
+      setPtoRequestError("You do not have enough PTO hours. You cannot submit this request.");
+      return;
+    }
+    const explanation = ptoRequestForm.explanation.trim();
+    if (!explanation) {
+      setPtoRequestError("An explanation is required.");
+      return;
+    }
+
+    setState((current) => ({
+      ...current,
+      ptoRequests: [
+        ...(current.ptoRequests ?? []),
+        {
+          id: nextId(current.ptoRequests ?? []),
+          employeeId: activeEmployee.id,
+          startDate: ptoRequestForm.startDate,
+          endDate: ptoRequestForm.endDate,
+          startTime: ptoRequestForm.useCustomTime ? ptoRequestForm.startTime : undefined,
+          endTime: ptoRequestForm.useCustomTime ? ptoRequestForm.endTime : undefined,
+          reason: ptoRequestForm.reason as PtoRequest["reason"],
+          explanation,
+          status: "pending",
+          requestedAt: new Date().toISOString(),
+        },
+      ],
+    }));
+    setPtoRequestForm(null);
+    setPtoRequestError("");
+  }
+
+  function decidePtoRequest(status: "approved" | "denied") {
+    if (reviewingPtoRequestId === null || mode !== "manager") return;
+
+    const request = (state.ptoRequests ?? []).find((entry) => entry.id === reviewingPtoRequestId);
+    if (!request || request.status === "cancelled") return;
+    if (status === "approved" && request.status !== "approved") {
+      const employeePto = ptoRows.find((row) => row.employee.id === request.employeeId);
+      const ptoHoursLeft = employeePto ? employeePto.ptoHours - employeePto.ptoUsed : 0;
+      const requestedHours = ptoHoursForDateRange(
+        request.startDate,
+        request.endDate,
+        request.startTime,
+        request.endTime,
+      );
+      if (ptoHoursLeft < requestedHours) {
+        setPtoReviewError(
+          `This employee does not have enough PTO hours. They have ${formatPtoHours(ptoHoursLeft)} left, but this request uses ${formatPtoHours(requestedHours)}.`,
+        );
+        return;
+      }
+    }
+
+    setState((current) => ({
+      ...current,
+      ptoRequests: (current.ptoRequests ?? []).map((request) =>
+        request.id === reviewingPtoRequestId ? { ...request, status } : request,
+      ),
+    }));
+    setReviewingPtoRequestId(null);
+    setPtoReviewError("");
+  }
+
+  function cancelPtoRequest(requestId: number) {
+    if (mode !== "employee") return;
+
+    setState((current) => ({
+      ...current,
+      ptoRequests: (current.ptoRequests ?? []).map((request) =>
+        request.id === requestId
+        && request.employeeId === activeEmployeeId
+        && request.status === "pending"
+          ? { ...request, status: "cancelled" }
+          : request,
+      ),
+    }));
+  }
+
+  function saveWorkedHours(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!editingHours) return;
+
+    const enteredHours = Number(editingHours.hours);
+    const enteredMinutes = Number(editingHours.minutes);
+    if (
+      !Number.isInteger(enteredHours)
+      || enteredHours < 0
+      || !Number.isInteger(enteredMinutes)
+      || enteredMinutes < 0
+      || enteredMinutes > 59
+    ) return;
+
+    if (!showHoursChangeWarning) {
+      setShowHoursChangeWarning(true);
+      return;
+    }
+
+    const requestedHours = enteredHours + enteredMinutes / 60;
+
+    const range = dateRangeForCalendarTab(parseLocalDate(hoursDate), activeHoursTab);
+    const currentHours = adjustedWorkedHoursForRange(
+      state.clockEvents,
+      state.hoursAdjustments ?? [],
+      editingHours.employee.id,
+      range,
+      currentTime,
+    );
+    const difference = requestedHours - currentHours;
+    if (Math.abs(difference) < 1 / 3600) {
+      setEditingHours(null);
+      return;
+    }
+
+    setState((current) => ({
+      ...current,
+      hoursAdjustments: [
+        ...(current.hoursAdjustments ?? []),
+        {
+          id: nextId(current.hoursAdjustments ?? []),
+          employeeId: editingHours.employee.id,
+          date: adjustmentDateForRange(hoursDate, range),
+          hours: difference,
+        },
+      ],
+    }));
+    setEditingHours(null);
+    setShowHoursChangeWarning(false);
+  }
+
   function openShiftEditor(shift: Shift) {
     if (mode !== "manager") return;
+    setEditShiftError("");
     setEditingShift(shift);
   }
 
@@ -462,7 +786,15 @@ export default function Home() {
     const start = parseTypedTime(editingShift.start);
     const end = parseTypedTime(editingShift.end);
     const role = editingShift.role.trim();
-    if (!start || !end || !role || !shiftEmployeeIds.has(editingShift.employeeId)) return;
+    if (!start || !end) {
+      setEditShiftError("Enter a valid start and end time.");
+      return;
+    }
+    if (timeToMinutes(start) >= timeToMinutes(end)) {
+      setEditShiftError("Start time must be earlier than end time.");
+      return;
+    }
+    if (!role || !shiftEmployeeIds.has(editingShift.employeeId)) return;
 
     const hasDuplicate = state.shifts.some((shift) =>
       shift.id !== editingShift.id
@@ -479,9 +811,12 @@ export default function Home() {
       shifts: current.shifts.map((shift) =>
         shift.id === editingShift.id
           ? { ...editingShift, start, end, role }
-          : shift,
+        : shift,
       ),
     }));
+    setEditedShiftTimes((current) => ({ ...current, [editingShift.id]: Date.now() }));
+    setLastEditedShiftId(editingShift.id);
+    setEditShiftError("");
     setEditingShift(null);
   }
 
@@ -598,6 +933,12 @@ export default function Home() {
           <button type="submit">Enter</button>
           {authMessage ? <p role="alert">{authMessage}</p> : null}
         </form>
+        <button type="button" className="public-schedule-button" onClick={viewPublicSchedule} aria-label="View schedule">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M7 2v3M17 2v3M3.5 9h17M5.5 4h13a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z" />
+            <path d="M8 13h3v3H8zM14 13h3v3h-3z" />
+          </svg>
+        </button>
       </main>
     );
   }
@@ -619,7 +960,7 @@ export default function Home() {
               <p className="eyebrow">Access</p>
               <h2>{mode === "manager" ? "Manager mode" : "Employee mode"}</h2>
             </div>
-            <button type="button" className="sign-out-button" onClick={signOut}>Logout</button>
+            <button type="button" className="sign-out-button" onClick={signOut}>{isPublicSchedule ? "Back" : "Logout"}</button>
             <p>{authMessage}</p>
           </section>
 
@@ -629,7 +970,7 @@ export default function Home() {
                 type="button"
                 key={item.id}
                 className={activeView === item.id ? "nav-button active" : "nav-button"}
-                onClick={() => setActiveView(item.id)}
+                onClick={() => navigateToView(item.id)}
                 aria-pressed={activeView === item.id}
                 title={item.label}
               >
@@ -658,22 +999,8 @@ export default function Home() {
               <p className="eyebrow">{formatLongDate(today)}</p>
               <h2>{activeViewLabel(activeView)}</h2>
             </div>
-            <p className="welcome-message">{activeEmployee?.name ?? "Guest"}</p>
+            {!isPublicSchedule ? <p className="welcome-message">{activeEmployee?.name ?? "Guest"}</p> : null}
           </header>
-
-          {activeView === "dashboard" && (
-            <section className="summary-strip" aria-label="Staff summary">
-              <div>
-                <p className="eyebrow">Live floor</p>
-                <h3>{clockedInIds.size} clocked in across {todaysShifts.length} scheduled shifts.</h3>
-              </div>
-              <div className="summary-metrics">
-                <Metric label="Employees" value={shiftEmployees.length.toString()} />
-                <Metric label="Roles" value={new Set(shiftEmployees.map((employee) => employee.role)).size.toString()} />
-                <Metric label="Clock events" value={state.clockEvents.length.toString()} />
-              </div>
-            </section>
-          )}
 
           {activeView === "dashboard" && (
             <div className="content-grid">
@@ -736,7 +1063,6 @@ export default function Home() {
                 <section className="panel main-panel">
                   <PanelHeading eyebrow="Manager" title="Manager overview" />
                   <div className="manager-summary">
-                    <Metric label="Active employees" value={shiftEmployees.length.toString()} />
                     <Metric label="Scheduled today" value={todaysShifts.length.toString()} />
                     <Metric label="Clocked in" value={clockedInIds.size.toString()} />
                   </div>
@@ -744,6 +1070,10 @@ export default function Home() {
                     <button type="button" onClick={() => setActiveView("employees")}>Manage employees</button>
                     <button type="button" onClick={() => setActiveView("schedule")}>Manage schedule</button>
                     <button type="button" onClick={() => setActiveView("clockins")}>View clock-ins</button>
+                    <button type="button" onClick={() => {
+                      setActiveHoursSectionTab("pto");
+                      setActiveView("hours");
+                    }}>View PTO</button>
                   </div>
                 </section>
               )}
@@ -978,6 +1308,7 @@ export default function Home() {
                     </div>
                   </fieldset>
                   <button type="submit" disabled={shiftEmployees.length === 0}>Save</button>
+                  {createShiftError ? <p className="shift-error-message" role="alert">{createShiftError}</p> : null}
                 </form>
               )}
               {(mode === "employee" || mode === "manager") && (
@@ -1032,12 +1363,30 @@ export default function Home() {
                           </div>
                           {shiftEmployees.filter((employee) => scheduleDayEmployeeIds.has(employee.id)).map((employee) => {
                             const employeeShifts = scheduleDayShifts.filter((shift) => shift.employeeId === employee.id);
+                            const employeeEditedTimes = employeeShifts
+                              .map((shift) => editedShiftTimes[shift.id])
+                              .filter((value): value is number => Boolean(value));
+                            const employeeCreatedTimes = employeeShifts
+                              .map((shift) => createdShiftTimes[shift.id])
+                              .filter((value): value is number => Boolean(value));
+                            const employeeLastEditedAt = employeeEditedTimes.length > 0
+                              ? Math.max(...employeeEditedTimes)
+                              : null;
+                            const employeeLastCreatedAt = employeeCreatedTimes.length > 0
+                              ? Math.max(...employeeCreatedTimes)
+                              : null;
+                            const isLastEditedEmployee = employeeShifts.some((shift) => shift.id === lastEditedShiftId);
 
                             return (
                               <div className="schedule-chart-row" key={employee.id}>
-                                <div className="schedule-member">
+                                <div className={`schedule-member${isLastEditedEmployee ? " saved" : ""}`}>
                                   <span className="schedule-avatar" aria-hidden="true">{employeeInitials(employee.name)}</span>
                                   <strong>{employee.name}</strong>
+                                  {employeeLastEditedAt ? (
+                                    <small>Last edited at {formatSavedTime(employeeLastEditedAt)}</small>
+                                  ) : employeeLastCreatedAt ? (
+                                    <small className="created-timestamp">Created at {formatSavedTime(employeeLastCreatedAt)}</small>
+                                  ) : null}
                                 </div>
                                 <div className="schedule-track">
                                   {employeeShifts.map((shift) => (
@@ -1090,7 +1439,7 @@ export default function Home() {
 
                                 return (
                                   <article
-                                    className={`${mode === "employee" && shift.employeeId === activeEmployeeId ? "week-shift mine" : "week-shift"}${mode === "manager" ? " editable" : ""}`}
+                                    className={`${mode === "employee" && shift.employeeId === activeEmployeeId ? "week-shift mine" : "week-shift"}${mode === "manager" ? " editable" : ""}${lastEditedShiftId === shift.id ? " saved" : ""}`}
                                     key={shift.id}
                                     role={mode === "manager" ? "button" : undefined}
                                     tabIndex={mode === "manager" ? 0 : undefined}
@@ -1107,6 +1456,11 @@ export default function Home() {
                                       <strong>{employee?.name ?? "Open shift"}</strong>
                                       <span>{formatTimeRange(shift)} | {shift.role} | {formatScheduledHours(shift)} hours</span>
                                     </div>
+                                    {editedShiftTimes[shift.id] ? (
+                                      <small>Last edited at {formatSavedTime(editedShiftTimes[shift.id])}</small>
+                                    ) : createdShiftTimes[shift.id] ? (
+                                      <small className="created-timestamp">Created at {formatSavedTime(createdShiftTimes[shift.id])}</small>
+                                    ) : null}
                                   </article>
                                 );
                               }) : (
@@ -1164,7 +1518,30 @@ export default function Home() {
             </section>
           )}
 
-          {activeView === "hours" && mode === "manager" && (
+          {activeView === "hours" && !isPublicSchedule ? (
+            <div className="hours-section-tabs" role="tablist" aria-label="Hours and PTO views">
+              <button
+                type="button"
+                className={activeHoursSectionTab === "hours" ? "active" : ""}
+                onClick={() => setActiveHoursSectionTab("hours")}
+                role="tab"
+                aria-selected={activeHoursSectionTab === "hours"}
+              >
+                View hours
+              </button>
+              <button
+                type="button"
+                className={activeHoursSectionTab === "pto" ? "active" : ""}
+                onClick={() => setActiveHoursSectionTab("pto")}
+                role="tab"
+                aria-selected={activeHoursSectionTab === "pto"}
+              >
+                View PTO
+              </button>
+            </div>
+          ) : null}
+
+          {activeView === "hours" && activeHoursSectionTab === "hours" && !isPublicSchedule && (
             <section className="panel feature-panel">
               <div className="panel-heading calendar-heading">
                 <div className="hours-date-toolbar">
@@ -1191,26 +1568,30 @@ export default function Home() {
                       </button>
                     ))}
                   </div>
-                  <label className="hours-rounding-control">
-                    <span>Round</span>
-                    <select
-                      value={hoursRounding}
-                      onChange={(event) => {
-                        const value = event.target.value;
-                        setHoursRounding(value === "actual" ? "actual" : Number(value) as HoursRounding);
-                      }}
-                      aria-label="Round time worked"
-                    >
-                      <option value="actual">Actual</option>
-                      <option value={5}>5 min</option>
-                      <option value={10}>10 min</option>
-                      <option value={15}>15 min</option>
-                    </select>
-                  </label>
+                  {mode === "manager" ? (
+                    <label className="hours-rounding-control">
+                      <span>Round</span>
+                      <select
+                        value={hoursRounding}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          setHoursRounding(value === "actual" ? "actual" : Number(value) as HoursRounding);
+                        }}
+                        aria-label="Round time worked"
+                      >
+                        <option value="actual">Actual</option>
+                        <option value={5}>5 min</option>
+                        <option value={10}>10 min</option>
+                        <option value={15}>15 min</option>
+                      </select>
+                    </label>
+                  ) : null}
                 </div>
               </div>
               <div className="hours-list">
-                {hoursRows.map(({ employee, hours }) => (
+                {hoursRows
+                  .filter(({ employee }) => mode === "manager" || employee.id === activeEmployeeId)
+                  .map(({ employee, hours }) => (
                   <article className="hours-row" key={employee.id}>
                     <div>
                       <span className="schedule-avatar" aria-hidden="true">{employeeInitials(employee.name)}</span>
@@ -1219,9 +1600,115 @@ export default function Home() {
                         <span>{employee.role}</span>
                       </div>
                     </div>
-                    <strong>{formatWorkedHours(hours)}</strong>
+                    <div className="hours-value">
+                      <strong>{formatWorkedHours(hours)}</strong>
+                      {mode === "manager" ? (
+                        <button type="button" onClick={() => editWorkedHours(employee, hours)}>Edit</button>
+                      ) : null}
+                    </div>
                   </article>
                 ))}
+              </div>
+            </section>
+          )}
+
+          {activeView === "hours" && activeHoursSectionTab === "pto" && !isPublicSchedule && (
+            <section className="panel feature-panel">
+              <div className="panel-heading pto-heading">
+                <div>
+                  <p className="eyebrow">Paid time off</p>
+                  <p>Employees earn 1 hour of PTO for every 30 hours worked.</p>
+                  <p className="pto-usage-note">Approved requests use 8 PTO hours per weekday.</p>
+                </div>
+              </div>
+              <div className="pto-list" role="table" aria-label="Employee year-to-date PTO">
+                <div className="pto-row pto-table-head" role="row">
+                  <span role="columnheader">Employee</span>
+                  <span role="columnheader">Hours worked YTD</span>
+                  <span role="columnheader">PTO earned</span>
+                  <span role="columnheader">PTO used</span>
+                  <span role="columnheader">PTO left</span>
+                </div>
+                {ptoRows
+                  .filter(({ employee }) => mode === "manager" || employee.id === activeEmployeeId)
+                  .map(({ employee, hoursWorked, ptoHours, ptoUsed }) => (
+                  <div className="pto-row" role="row" key={employee.id}>
+                    <div role="cell" className="pto-employee">
+                      <span className="schedule-avatar" aria-hidden="true">{employeeInitials(employee.name)}</span>
+                      <div>
+                        <strong>{employee.name}</strong>
+                        <span>{employee.role}</span>
+                      </div>
+                    </div>
+                    <strong role="cell">{formatWorkedHours(hoursWorked)}</strong>
+                    <strong role="cell" className="pto-earned">{ptoHours} hrs</strong>
+                    <strong role="cell">{formatPtoHours(ptoUsed)}</strong>
+                    <strong role="cell" className="pto-left">{formatPtoHours(ptoHours - ptoUsed)}</strong>
+                  </div>
+                ))}
+              </div>
+              <div className="pto-request-section">
+                <div>
+                  <p className="eyebrow">Time off requests</p>
+                  {mode === "manager" ? <h3>Employee Requests</h3> : null}
+                </div>
+                {mode === "employee" ? (
+                  <button type="button" onClick={openPtoRequest}>Request PTO</button>
+                ) : null}
+              </div>
+              <div className="pto-request-list">
+                {(state.ptoRequests ?? [])
+                  .filter((request) => mode === "manager" || request.employeeId === activeEmployeeId)
+                  .sort((a, b) => b.requestedAt.localeCompare(a.requestedAt))
+                  .map((request) => {
+                    const employee = employeeById(state.employees, request.employeeId);
+                    return (
+                      <article className={`pto-request-card${mode === "manager" && request.status !== "cancelled" ? " reviewable" : ""}`} key={request.id}>
+                        <strong className="pto-request-employee">{employee?.name ?? "Employee"}</strong>
+                        <dl className="pto-request-fields">
+                          <div>
+                            <dt>Date requested off:</dt>
+                            <dd>{formatShortDate(request.startDate)}{request.endDate !== request.startDate ? ` - ${formatShortDate(request.endDate)}` : ""}</dd>
+                          </div>
+                          {request.startTime && request.endTime ? (
+                            <div>
+                              <dt>Time requested:</dt>
+                              <dd>{formatTime12(request.startTime)} - {formatTime12(request.endTime)}</dd>
+                            </div>
+                          ) : null}
+                          <div>
+                            <dt>Reason:</dt>
+                            <dd>{request.reason === "vacation" ? "Vacation" : "Sick / Emergency"}</dd>
+                          </div>
+                          <div>
+                            <dt>Explanation:</dt>
+                            <dd>{request.explanation}</dd>
+                          </div>
+                        </dl>
+                        <span className="pto-request-timestamp">Requested at {formatDateTime(request.requestedAt)}</span>
+                        <div className="pto-request-card-actions">
+                          {mode === "employee" && request.status === "pending" ? (
+                            <button type="button" className="pto-cancel-action" onClick={() => cancelPtoRequest(request.id)}>Cancel</button>
+                          ) : null}
+                          <span className={`pto-request-status ${request.status}`}>{capitalize(request.status)}</span>
+                        </div>
+                        {mode === "manager" && request.status !== "cancelled" ? (
+                          <button
+                            type="button"
+                            className="pto-request-panel-button"
+                            onClick={() => {
+                              setPtoReviewError("");
+                              setReviewingPtoRequestId(request.id);
+                            }}
+                            aria-label={`Review ${employee?.name ?? "employee"} PTO request`}
+                          />
+                        ) : null}
+                      </article>
+                    );
+                  })}
+                {(state.ptoRequests ?? []).filter((request) => mode === "manager" || request.employeeId === activeEmployeeId).length === 0 ? (
+                  <EmptyState text="No PTO requests submitted." />
+                ) : null}
               </div>
             </section>
           )}
@@ -1229,12 +1716,12 @@ export default function Home() {
       </div>
 
       <nav className="bottom-nav" aria-label="Mobile DomBase staff sections">
-        {visibleNavItems.slice(0, 4).map((item) => (
+        {visibleNavItems.map((item) => (
           <button
             type="button"
             key={item.id}
             className={activeView === item.id ? "bottom-button active" : "bottom-button"}
-            onClick={() => setActiveView(item.id)}
+            onClick={() => navigateToView(item.id)}
             title={item.label}
           >
             <span aria-hidden="true">{item.icon}</span>
@@ -1242,6 +1729,230 @@ export default function Home() {
           </button>
         ))}
       </nav>
+
+      {mode === "manager" && reviewingPtoRequest ? (
+        <div className="modal-backdrop" role="presentation">
+          <div className="pto-review-modal" role="dialog" aria-modal="true" aria-labelledby="pto-review-title">
+            <div className="modal-heading">
+              <div>
+                <p className="eyebrow">PTO request</p>
+                <h2 id="pto-review-title">{employeeById(state.employees, reviewingPtoRequest.employeeId)?.name ?? "Employee"}</h2>
+              </div>
+              <button type="button" onClick={() => setReviewingPtoRequestId(null)} aria-label="Close PTO review">
+                <span aria-hidden="true">&times;</span>
+              </button>
+            </div>
+            <dl className="pto-review-details">
+              <div>
+                <dt>Date requested off</dt>
+                <dd>{formatShortDate(reviewingPtoRequest.startDate)}{reviewingPtoRequest.endDate !== reviewingPtoRequest.startDate ? ` - ${formatShortDate(reviewingPtoRequest.endDate)}` : ""}</dd>
+              </div>
+              <div>
+                <dt>Reason</dt>
+                <dd>{reviewingPtoRequest.reason === "vacation" ? "Vacation" : "Sick / Emergency"}</dd>
+              </div>
+              {reviewingPtoRequest.startTime && reviewingPtoRequest.endTime ? (
+                <div>
+                  <dt>Time requested</dt>
+                  <dd>{formatTime12(reviewingPtoRequest.startTime)} - {formatTime12(reviewingPtoRequest.endTime)}</dd>
+                </div>
+              ) : null}
+            </dl>
+            <div className="pto-review-explanation">
+              <strong>Explanation</strong>
+              <p>{reviewingPtoRequest.explanation}</p>
+            </div>
+            <p className="pto-review-prompt">Approve or deny this PTO request?</p>
+            {ptoReviewError ? <p className="shift-error-message" role="alert">{ptoReviewError}</p> : null}
+            <div className="pto-review-actions">
+              <button type="button" className="approve-action" onClick={() => decidePtoRequest("approved")}>Approve</button>
+              <button type="button" className="deny-action" onClick={() => decidePtoRequest("denied")}>Deny</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {mode === "employee" && ptoRequestForm ? (
+        <div className="modal-backdrop" role="presentation">
+          <form className="pto-request-modal" onSubmit={submitPtoRequest} role="dialog" aria-modal="true" aria-labelledby="pto-request-title">
+            <div className="modal-heading">
+              <div>
+                <p className="eyebrow">Paid time off</p>
+                <h2 id="pto-request-title">Request PTO</h2>
+              </div>
+              <button type="button" onClick={() => setPtoRequestForm(null)} aria-label="Close PTO request">
+                <span aria-hidden="true">&times;</span>
+              </button>
+            </div>
+            <div className="pto-request-dates">
+              <label>
+                <span>First day off</span>
+                <input
+                  type="date"
+                  min={today}
+                  value={ptoRequestForm.startDate}
+                  onChange={(event) => setPtoRequestForm((form) => form ? { ...form, startDate: event.target.value } : form)}
+                  required
+                />
+              </label>
+              <label>
+                <span>Last day off</span>
+                <input
+                  type="date"
+                  min={ptoRequestForm.startDate || today}
+                  value={ptoRequestForm.endDate}
+                  onChange={(event) => setPtoRequestForm((form) => form ? { ...form, endDate: event.target.value } : form)}
+                  required
+                />
+              </label>
+            </div>
+            <label className="pto-custom-time-toggle">
+              <input
+                type="checkbox"
+                checked={ptoRequestForm.useCustomTime}
+                onChange={(event) => setPtoRequestForm((form) => form ? { ...form, useCustomTime: event.target.checked } : form)}
+              />
+              <span>Specify hours instead of requesting full days</span>
+            </label>
+            {ptoRequestForm.useCustomTime ? (
+              <div className="pto-request-times">
+                <label>
+                  <span>Start time</span>
+                  <input
+                    type="time"
+                    step="3600"
+                    value={ptoRequestForm.startTime}
+                    onChange={(event) => setPtoRequestForm((form) => form ? { ...form, startTime: event.target.value } : form)}
+                    required
+                  />
+                </label>
+                <label>
+                  <span>End time</span>
+                  <input
+                    type="time"
+                    step="3600"
+                    value={ptoRequestForm.endTime}
+                    onChange={(event) => setPtoRequestForm((form) => form ? { ...form, endTime: event.target.value } : form)}
+                    required
+                  />
+                </label>
+              </div>
+            ) : (
+              <p className="pto-full-shift-note">Full-day requests use 8 PTO hours per selected weekday.</p>
+            )}
+            <fieldset className="pto-reason-options">
+              <legend>Reason</legend>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={ptoRequestForm.reason === "sick_emergency"}
+                  onChange={() => setPtoRequestForm((form) => form ? { ...form, reason: form.reason === "sick_emergency" ? "" : "sick_emergency" } : form)}
+                />
+                <span>Sick / Emergency</span>
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={ptoRequestForm.reason === "vacation"}
+                  onChange={() => setPtoRequestForm((form) => form ? { ...form, reason: form.reason === "vacation" ? "" : "vacation" } : form)}
+                />
+                <span>Vacation</span>
+              </label>
+            </fieldset>
+            <label className="pto-explanation-field">
+              <span>Explanation</span>
+              <textarea
+                value={ptoRequestForm.explanation}
+                onChange={(event) => setPtoRequestForm((form) => form ? { ...form, explanation: event.target.value } : form)}
+                placeholder="Explain your PTO request"
+                maxLength={timeExceptionExplanationLimit}
+                required
+              />
+              <small>{ptoRequestForm.explanation.length}/{timeExceptionExplanationLimit}</small>
+            </label>
+            <dl className="pto-request-preview" aria-live="polite">
+              <div>
+                <dt>PTO available:</dt>
+                <dd>{formatPtoHours(activeEmployeePtoLeft)}</dd>
+              </div>
+              <div>
+                <dt>PTO used:</dt>
+                <dd>{formatPtoHours(ptoRequestPreviewHours)}</dd>
+              </div>
+              <div className={ptoRequestPreviewHours > activeEmployeePtoLeft ? "insufficient" : ""}>
+                <dt>PTO left:</dt>
+                <dd>{formatPtoHours(activeEmployeePtoLeft - ptoRequestPreviewHours)}</dd>
+              </div>
+            </dl>
+            {ptoRequestError ? <p className="shift-error-message" role="alert">{ptoRequestError}</p> : null}
+            <div className="hours-edit-actions">
+              <button type="button" onClick={() => setPtoRequestForm(null)}>Cancel</button>
+              <button type="submit">Submit request</button>
+            </div>
+          </form>
+        </div>
+      ) : null}
+
+      {mode === "manager" && editingHours ? (
+        <div className="modal-backdrop" role="presentation">
+          <form className="hours-edit-modal" onSubmit={saveWorkedHours} role="dialog" aria-modal="true" aria-labelledby="hours-edit-title">
+            <div className="modal-heading">
+              <div>
+                <p className="eyebrow">Edit worked time</p>
+                <h2 id="hours-edit-title">{editingHours.employee.name}</h2>
+                <p>{hoursDateLabel(activeHoursTab, hoursDate)}</p>
+              </div>
+              <button type="button" onClick={() => setEditingHours(null)} aria-label="Close hours editor">
+                <span aria-hidden="true">&times;</span>
+              </button>
+            </div>
+            <div className="hours-edit-fields">
+              <label>
+                <span>Hours</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={editingHours.hours}
+                  onChange={(event) => {
+                    setEditingHours((current) => current ? { ...current, hours: event.target.value } : current);
+                    setShowHoursChangeWarning(false);
+                  }}
+                  aria-label="Worked hours"
+                  required
+                />
+              </label>
+              <label>
+                <span>Minutes</span>
+                <input
+                  type="number"
+                  min="0"
+                  max="59"
+                  step="1"
+                  value={editingHours.minutes}
+                  onChange={(event) => {
+                    setEditingHours((current) => current ? { ...current, minutes: event.target.value } : current);
+                    setShowHoursChangeWarning(false);
+                  }}
+                  aria-label="Worked minutes"
+                  required
+                />
+              </label>
+            </div>
+            {showHoursChangeWarning ? (
+              <p className="hours-edit-warning" role="alert">
+                Are you sure you want to change {editingHours.employee.name}&apos;s worked time? This will update their hours and PTO totals.
+              </p>
+            ) : null}
+            <div className="hours-edit-actions">
+              <button type="button" onClick={() => setEditingHours(null)}>Cancel</button>
+              <button type="submit" className={showHoursChangeWarning ? "danger-confirm" : ""}>
+                {showHoursChangeWarning ? "Confirm change" : "Change time"}
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
 
       {mode === "manager" && editingShift ? (
         <div className="modal-backdrop" role="presentation">
@@ -1279,12 +1990,14 @@ export default function Home() {
               onChange={(start) => setEditingShift((shift) => shift ? { ...shift, start } : shift)}
               ariaLabel="Edit shift start"
               placeholder="Start shift"
+              selectOnFocus
             />
             <TimeInput
               value={editingShift.end}
               onChange={(end) => setEditingShift((shift) => shift ? { ...shift, end } : shift)}
               ariaLabel="Edit shift end"
               placeholder="End shift"
+              selectOnFocus
             />
             <input
               value={editingShift.role}
@@ -1292,6 +2005,7 @@ export default function Home() {
               placeholder="Role"
               aria-label="Edit shift role"
             />
+            {editShiftError ? <p className="shift-error-message" role="alert">{editShiftError}</p> : null}
             <div className="modal-actions">
               <button type="button" className="delete-action" onClick={deleteEditingShift}>Delete</button>
               <button type="button" onClick={() => setEditingShift(null)}>Cancel</button>
@@ -1606,6 +2320,8 @@ function readStoredState() {
       employees,
       shifts: parsed.shifts.filter((shift) => employeeIds.has(shift.employeeId)),
       clockEvents: parsed.clockEvents.filter((event) => employeeIds.has(event.employeeId)),
+      hoursAdjustments: (parsed.hoursAdjustments ?? []).filter((adjustment) => employeeIds.has(adjustment.employeeId)),
+      ptoRequests: (parsed.ptoRequests ?? []).filter((request) => employeeIds.has(request.employeeId)),
     };
   } catch {
     window.localStorage.removeItem(storageKey);
@@ -1629,6 +2345,14 @@ function formatDateTime(value?: string) {
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
+  }).format(new Date(value));
+}
+
+function formatSavedTime(value: number) {
+  return new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
   }).format(new Date(value));
 }
 
@@ -2003,6 +2727,31 @@ function workedHoursForRange(
   return workedMs / (60 * 60 * 1000);
 }
 
+function adjustedWorkedHoursForRange(
+  events: ClockEvent[],
+  adjustments: HoursAdjustment[],
+  employeeId: number,
+  range: { start: Date; end: Date },
+  currentTime: number,
+) {
+  const adjustmentHours = adjustments
+    .filter((adjustment) => {
+      if (adjustment.employeeId !== employeeId) return false;
+      const date = startOfDay(parseLocalDate(adjustment.date));
+      return date >= range.start && date <= range.end;
+    })
+    .reduce((total, adjustment) => total + adjustment.hours, 0);
+
+  return Math.max(0, workedHoursForRange(events, employeeId, range, currentTime) + adjustmentHours);
+}
+
+function adjustmentDateForRange(selectedDate: string, range: { start: Date; end: Date }) {
+  const date = startOfDay(parseLocalDate(selectedDate));
+  if (date < range.start) return toDateInputValue(range.start);
+  if (date > range.end) return toDateInputValue(range.end);
+  return selectedDate;
+}
+
 function clockIntervals(events: ClockEvent[], currentTime: number) {
   const intervals: { start: number; end: number }[] = [];
   let clockInAt: number | null = null;
@@ -2065,12 +2814,67 @@ function startOfNextDay(date: Date) {
   return next;
 }
 
+function yearToDateRange(date: Date) {
+  return {
+    start: new Date(date.getFullYear(), 0, 1),
+    end: startOfDay(date),
+  };
+}
+
+function ptoHoursUsedThisYear(requests: PtoRequest[], employeeId: number, year: number) {
+  return requests
+    .filter((request) => request.employeeId === employeeId && request.status === "approved")
+    .reduce((total, request) => {
+      const start = parseLocalDate(request.startDate);
+      const end = parseLocalDate(request.endDate);
+      const yearStart = new Date(year, 0, 1, 12);
+      const yearEnd = new Date(year, 11, 31, 12);
+      const current = new Date(Math.max(start.getTime(), yearStart.getTime()));
+      const finalDay = new Date(Math.min(end.getTime(), yearEnd.getTime()));
+      if (current > finalDay) return total;
+
+      return total + ptoHoursForDateRange(
+        toDateInputValue(current),
+        toDateInputValue(finalDay),
+        request.startTime,
+        request.endTime,
+      );
+    }, 0);
+}
+
+function ptoHoursForDateRange(startDate: string, endDate: string, startTime?: string, endTime?: string) {
+  const current = parseLocalDate(startDate);
+  const end = parseLocalDate(endDate);
+  let weekdays = 0;
+
+  while (current <= end) {
+    if (current.getDay() !== 0 && current.getDay() !== 6) weekdays += 1;
+    current.setDate(current.getDate() + 1);
+  }
+
+  const startMinutes = startTime ? timeToMinutes(startTime) : null;
+  const endMinutes = endTime ? timeToMinutes(endTime) : null;
+  const hoursPerDay = startMinutes !== null && endMinutes !== null
+    ? Math.max(0, endMinutes - startMinutes) / 60
+    : 8;
+
+  return weekdays * hoursPerDay;
+}
+
 function formatWorkedHours(hours: number) {
   const totalMinutes = Math.round(hours * 60);
   const displayHours = Math.floor(totalMinutes / 60);
   const displayMinutes = totalMinutes % 60;
 
   return `${displayHours} hrs ${displayMinutes} mins`;
+}
+
+function formatPtoHours(hours: number) {
+  const sign = hours < 0 ? "-" : "";
+  const absoluteHours = Math.abs(hours);
+  return Number.isInteger(absoluteHours)
+    ? `${sign}${absoluteHours} hrs`
+    : `${sign}${formatWorkedHours(absoluteHours)}`;
 }
 
 function roundHoursToMinutes(hours: number, minutes: HoursRounding) {
@@ -2102,11 +2906,13 @@ function TimeInput({
   onChange,
   ariaLabel,
   placeholder,
+  selectOnFocus = false,
 }: {
   value: string;
   onChange: (value: string) => void;
   ariaLabel: string;
   placeholder: string;
+  selectOnFocus?: boolean;
 }) {
   const [draft, setDraft] = useState(() => (value ? formatTime12(value) : ""));
 
@@ -2136,6 +2942,12 @@ function TimeInput({
       type="text"
       value={draft}
       onChange={(event) => setDraft(event.target.value)}
+      onFocus={(event) => {
+        if (selectOnFocus) event.currentTarget.select();
+      }}
+      onClick={(event) => {
+        if (selectOnFocus) event.currentTarget.select();
+      }}
       onBlur={commitTime}
       onKeyDown={(event) => {
         if (event.key === "Enter") {

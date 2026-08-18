@@ -751,12 +751,32 @@ h1 {
 }
 
 .schedule-member {
+  position: relative;
   display: grid;
   grid-template-columns: 42px minmax(0, 1fr);
   align-items: center;
   gap: 10px;
   border-right: 1px solid #dfe7ef;
   padding: 0 12px;
+}
+
+.schedule-member.saved {
+  border-color: rgba(0, 122, 77, 0.32);
+  background: #e9f9ef;
+}
+
+.schedule-member > small {
+  position: absolute;
+  right: 8px;
+  bottom: 4px;
+  color: #357254;
+  font-size: 0.66rem;
+  font-weight: 400;
+}
+
+.schedule-member > small.created-timestamp,
+.week-shift > small.created-timestamp {
+  color: var(--ink);
 }
 
 .schedule-member strong {
@@ -809,9 +829,10 @@ h1 {
 }
 
 .schedule-bar.mine {
-  border: 2px solid #92ffcf;
-  background: #007a4d;
-  box-shadow: 0 0 0 3px rgba(0, 122, 77, 0.18);
+  border: 2px solid #78b9ea;
+  background: #dceeff;
+  color: var(--ink);
+  box-shadow: 0 0 0 3px rgba(15, 116, 189, 0.16);
 }
 
 .schedule-bar.editable {
@@ -885,7 +906,12 @@ h1 {
 .week-schedule-heading span {
   color: var(--ink);
   font-size: 0.9rem;
-  font-weight: 800;
+  font-weight: 400;
+}
+
+.schedule-bar.mine strong,
+.schedule-bar.mine span {
+  color: var(--ink);
 }
 
 .week-shift-list {
@@ -908,11 +934,11 @@ h1 {
 }
 
 .week-shift.mine {
-  border-color: rgba(0, 122, 77, 0.36);
-  border-left-color: #007a4d;
+  border-color: rgba(15, 116, 189, 0.34);
+  border-left-color: var(--blue-deep);
   border-left-width: 7px;
-  background: #e6fff4;
-  box-shadow: inset 0 0 0 1px rgba(0, 122, 77, 0.12);
+  background: #e7f3ff;
+  box-shadow: inset 0 0 0 1px rgba(15, 116, 189, 0.1);
 }
 
 .week-shift.editable {
@@ -924,6 +950,22 @@ h1 {
   border-color: rgba(15, 116, 189, 0.34);
   background: #f3f8fd;
   outline: 3px solid rgba(15, 116, 189, 0.16);
+}
+
+.week-shift.saved,
+.week-shift.saved:hover,
+.week-shift.saved:focus-visible {
+  border-color: rgba(0, 122, 77, 0.32);
+  border-left-color: #007a4d;
+  background: #e9f9ef;
+}
+
+.week-shift > small {
+  grid-column: 1 / -1;
+  color: #357254;
+  font-size: 0.72rem;
+  font-weight: 400;
+  text-align: right;
 }
 
 .week-shift div {
@@ -1015,7 +1057,7 @@ h1 {
 
 .manager-summary {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
   margin-bottom: 16px;
 }
@@ -1477,6 +1519,331 @@ h1 {
   font-weight: 800;
 }
 
+.hours-section-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(120px, 1fr));
+  width: min(420px, 100%);
+  gap: 4px;
+  margin-bottom: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #edf4fb;
+  padding: 4px;
+}
+
+.hours-section-tabs button {
+  min-height: 42px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.hours-section-tabs button.active,
+.hours-section-tabs button:hover,
+.hours-section-tabs button:focus-visible {
+  background: #ffffff;
+  color: var(--green-dark);
+  box-shadow: 0 4px 12px rgba(7, 29, 58, 0.12);
+}
+
+.hours-value {
+  display: flex !important;
+  grid-template-columns: none !important;
+  align-items: center;
+  justify-content: end;
+  gap: 10px !important;
+}
+
+.hours-value strong {
+  color: var(--green-dark);
+  font-size: 1.1rem;
+  white-space: nowrap;
+}
+
+.hours-value button {
+  min-height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--green-dark);
+  font-weight: 800;
+  padding: 0 12px;
+}
+
+.hours-value button:hover,
+.hours-value button:focus-visible {
+  border-color: var(--blue);
+  background: #e7f1fb;
+}
+
+.pto-heading {
+  align-items: center;
+}
+
+.pto-heading p:last-child {
+  margin: 4px 0 0;
+}
+
+.pto-heading .pto-usage-note {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.pto-list {
+  display: grid;
+  overflow: hidden;
+  border: 1px solid #d7e3ed;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.pto-row {
+  display: grid;
+  grid-template-columns: minmax(190px, 1.35fr) minmax(145px, 0.9fr) repeat(3, minmax(95px, 0.6fr));
+  align-items: center;
+  gap: 16px;
+  min-height: 68px;
+  border-bottom: 1px solid #e5edf4;
+  padding: 10px 16px;
+}
+
+.pto-row:last-child {
+  border-bottom: 0;
+}
+
+.pto-row > :nth-child(n + 2) {
+  text-align: center;
+}
+
+.pto-table-head {
+  min-height: 48px;
+  background: linear-gradient(90deg, var(--green-dark), var(--blue));
+  color: #ffffff;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.pto-employee {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.pto-employee > div {
+  display: grid;
+  gap: 2px;
+}
+
+.pto-employee span,
+.pto-row > strong {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.pto-employee strong {
+  color: var(--ink);
+}
+
+.pto-row .pto-earned,
+.pto-row > strong:nth-child(4),
+.pto-row .pto-left {
+  color: var(--green-dark);
+  font-size: 1.05rem;
+}
+
+.pto-request-section {
+  display: flex;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 24px;
+}
+
+.pto-request-section h3 {
+  margin: 3px 0 0;
+}
+
+.pto-request-section > button {
+  min-height: 42px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--green-dark);
+  color: #ffffff;
+  font-weight: 800;
+  padding: 0 16px;
+}
+
+.pto-request-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.pto-request-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 14px;
+}
+
+.pto-request-card.reviewable {
+  cursor: pointer;
+  transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
+}
+
+.pto-request-card.reviewable:hover,
+.pto-request-card.reviewable:focus-within {
+  border-color: var(--blue);
+  background: #f5faff;
+  box-shadow: 0 0 0 3px rgba(15, 116, 189, 0.12);
+}
+
+.pto-request-panel-button {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  min-height: 100%;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.pto-request-employee {
+  color: var(--ink);
+  font-size: 1rem;
+}
+
+.pto-request-fields {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.pto-request-fields div {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.pto-request-fields dt {
+  color: var(--muted);
+  font-size: 0.84rem;
+  font-weight: 800;
+}
+
+.pto-request-fields dd {
+  margin: 0;
+  color: var(--ink);
+  font-size: 0.88rem;
+}
+
+.pto-request-status {
+  justify-self: end;
+  border: 0;
+  border-radius: 999px;
+  background: #fff4d6;
+  color: #755400 !important;
+  font-weight: 800;
+  padding: 5px 9px;
+}
+
+.pto-request-timestamp {
+  justify-self: start;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.pto-request-card-actions {
+  display: flex;
+  align-items: center;
+  justify-self: end;
+  gap: 8px;
+}
+
+.pto-cancel-action {
+  min-height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--danger);
+  font-size: 0.78rem;
+  font-weight: 800;
+  padding: 0 10px;
+}
+
+.pto-cancel-action:hover,
+.pto-cancel-action:focus-visible {
+  border-color: var(--danger);
+  background: #fdecec;
+}
+
+.pto-request-status.approved {
+  background: #e1f6e9;
+  color: var(--green-dark) !important;
+}
+
+.pto-request-status.denied {
+  background: #fdecec;
+  color: #8f2f2f !important;
+}
+
+.pto-request-status.cancelled {
+  background: #e8eef4;
+  color: var(--muted) !important;
+}
+
+.public-schedule-button {
+  position: fixed;
+  left: 50%;
+  bottom: 28px;
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  border: 0;
+  background: transparent;
+  color: var(--green-dark);
+  font-size: 0.82rem;
+  font-weight: 800;
+  transform: translateX(-50%);
+  cursor: pointer;
+}
+
+.public-schedule-button svg {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 8px 24px rgba(7, 29, 58, 0.16);
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+  padding: 11px;
+}
+
+.public-schedule-button:hover svg,
+.public-schedule-button:focus-visible svg {
+  background: #e7f1fb;
+  outline: 3px solid rgba(15, 116, 189, 0.2);
+}
+
+.event-detail-explanation p:last-child {
+  font-weight: 400;
+}
+
 .empty-state {
   border: 1px dashed #b7c5d4;
   border-radius: 8px;
@@ -1491,7 +1858,7 @@ h1 {
   left: 12px;
   z-index: 10;
   display: none;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(52px, 1fr));
   border: 1px solid rgba(7, 29, 58, 0.16);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.96);
@@ -1530,6 +1897,9 @@ h1 {
 }
 
 .shift-edit-modal,
+.hours-edit-modal,
+.pto-request-modal,
+.pto-review-modal,
 .time-exception-modal {
   display: grid;
   width: min(520px, 100%);
@@ -1603,6 +1973,275 @@ h1 {
   font-weight: 800;
   line-height: 1.35;
   padding: 12px;
+}
+
+.pto-review-modal {
+  display: grid;
+  width: min(520px, 100%);
+  gap: 14px;
+}
+
+.pto-review-details {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.pto-review-details div,
+.pto-review-explanation {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.pto-review-details dt,
+.pto-review-explanation strong {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.pto-review-details dd,
+.pto-review-explanation p {
+  margin: 4px 0 0;
+  color: var(--ink);
+}
+
+.pto-review-prompt {
+  margin: 0;
+  color: var(--ink);
+  font-weight: 800;
+}
+
+.pto-review-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(120px, 1fr));
+  gap: 10px;
+}
+
+.pto-review-actions button {
+  min-height: 44px;
+  border: 0;
+  border-radius: 8px;
+  color: #ffffff;
+  font-weight: 800;
+}
+
+.pto-review-actions .deny-action {
+  background: var(--danger);
+}
+
+.pto-review-actions .approve-action {
+  background: var(--green-dark);
+}
+
+.pto-request-modal {
+  display: grid;
+  width: min(560px, 100%);
+  gap: 14px;
+}
+
+.pto-request-dates,
+.pto-request-times,
+.pto-reason-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.pto-request-dates label,
+.pto-request-times label,
+.pto-explanation-field {
+  display: grid;
+  gap: 6px;
+  color: var(--ink);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.pto-request-dates input,
+.pto-request-times input,
+.pto-explanation-field textarea {
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--ink);
+  padding: 0 12px;
+}
+
+.pto-custom-time-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink);
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+.pto-custom-time-toggle input {
+  width: 18px;
+  height: 18px;
+}
+
+.pto-full-shift-note {
+  margin: -4px 0 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.pto-reason-options {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.pto-reason-options legend {
+  color: var(--ink);
+  font-size: 0.82rem;
+  font-weight: 800;
+  padding: 0 4px;
+}
+
+.pto-reason-options label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 800;
+}
+
+.pto-reason-options input {
+  width: 18px;
+  height: 18px;
+}
+
+.pto-explanation-field textarea {
+  min-height: 120px;
+  padding: 12px;
+  resize: vertical;
+}
+
+.pto-explanation-field small {
+  justify-self: end;
+  color: var(--muted);
+}
+
+.pto-request-preview {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+}
+
+.pto-request-preview > div {
+  display: grid;
+  grid-template-columns: 105px auto;
+  align-items: center;
+  justify-content: start;
+  gap: 6px;
+  padding: 0;
+}
+
+.pto-request-preview dt,
+.pto-request-preview dd {
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.pto-request-preview dd {
+  margin: 0;
+  font-weight: 700;
+}
+
+.hours-edit-modal {
+  display: grid;
+  width: min(500px, 100%);
+  gap: 16px;
+}
+
+.hours-edit-modal .modal-heading p:last-child {
+  margin: 4px 0 0;
+}
+
+.hours-edit-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.hours-edit-fields label {
+  display: grid;
+  gap: 6px;
+  color: var(--ink);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.hours-edit-fields input {
+  width: 100%;
+  min-height: 48px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--ink);
+  font-size: 1rem;
+  padding: 0 12px;
+}
+
+.hours-edit-warning {
+  margin: 0;
+  border: 1px solid rgba(215, 25, 32, 0.28);
+  border-radius: 8px;
+  background: rgba(215, 25, 32, 0.08);
+  color: #8f2f2f;
+  font-size: 0.9rem;
+  font-weight: 800;
+  line-height: 1.4;
+  padding: 12px;
+}
+
+.hours-edit-actions {
+  display: flex;
+  justify-content: end;
+  gap: 8px;
+}
+
+.hours-edit-actions button {
+  min-height: 42px;
+  border: 0;
+  border-radius: 8px;
+  font-weight: 800;
+  padding: 0 16px;
+}
+
+.hours-edit-actions button:first-child {
+  background: #e8eef4;
+  color: var(--ink);
+}
+
+.hours-edit-actions button:last-child {
+  background: var(--green-dark);
+  color: #ffffff;
+}
+
+.hours-edit-actions button.danger-confirm {
+  background: var(--danger);
+}
+
+.shift-error-message {
+  margin: 0;
+  border: 1px solid rgba(215, 25, 32, 0.28);
+  border-radius: 8px;
+  background: rgba(215, 25, 32, 0.08);
+  color: var(--danger);
+  font-size: 0.88rem;
+  font-weight: 700;
+  padding: 10px 12px;
+}
+
+.shift-form .shift-error-message {
+  grid-column: 1 / -1;
 }
 
 .time-exception-modal > button {
@@ -1777,6 +2416,65 @@ h1 {
 
   .hours-date-toolbar {
     grid-template-columns: 42px minmax(0, 1fr) 42px;
+  }
+
+  .pto-heading {
+    align-items: stretch;
+  }
+
+  .pto-row {
+    grid-template-columns: 1fr;
+    gap: 7px;
+    padding: 14px;
+  }
+
+  .pto-table-head {
+    display: none;
+  }
+
+  .pto-row > strong {
+    padding-left: 50px;
+    text-align: left;
+  }
+
+  .pto-row > strong::before {
+    color: var(--muted);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+  }
+
+  .pto-row > strong:nth-child(2)::before {
+    content: "Hours worked YTD: ";
+  }
+
+  .pto-row > strong:nth-child(3)::before {
+    content: "PTO earned: ";
+  }
+
+  .pto-row > strong:nth-child(4)::before {
+    content: "PTO used: ";
+  }
+
+  .pto-row > strong:nth-child(5)::before {
+    content: "PTO left: ";
+  }
+
+  .pto-request-section {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .pto-request-card,
+  .pto-request-dates,
+  .pto-request-times,
+  .pto-reason-options {
+    grid-template-columns: 1fr;
+  }
+
+
+  .pto-request-fields div {
+    grid-template-columns: 1fr;
+    gap: 2px;
   }
 
   .week-schedule-day {
