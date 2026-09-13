@@ -40,6 +40,26 @@ test("server-renders the DomBase staff shell", async () => {
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton|Your site is taking shape/);
 });
 
+test("dashboard navigation is labeled Home and shows the signed-in mode", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+
+  assert.match(page, /id: "dashboard", label: "Home", icon: "H"/);
+  assert.match(page, /mode === "manager" \? "Manager mode" : "Employee mode"/);
+  assert.match(page, /activeViewLabel\(activeView, mode\)/);
+});
+
+test("Team is a sidebar dropdown beneath Home with roster and role routes", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+
+  assert.match(page, /label: "Home", icon: "H"[^]*label: "Team", icon: "T"[^]*label: "Schedule", icon: "S"/);
+  assert.match(page, /className="sidebar-nav-group"/);
+  assert.match(page, /aria-controls="team-sidebar-menu"/);
+  assert.match(page, />\s*Roster\s*<\/button>/);
+  assert.match(page, />\s*Department \/ Roles\s*<\/button>/);
+  assert.match(page, /activeView === "departments_roles"/);
+  assert.match(page, /navigateToView\("employees"\)/);
+});
+
 test("starter preview code is no longer wired into DomBase", async () => {
   const [page, layout, packageJson] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
@@ -127,4 +147,88 @@ test("managers can approve or deny pending PTO requests", async () => {
   assert.match(page, /pto-request-panel-button/);
   assert.match(page, /Review \$\{employee\?\.name/);
   assert.match(page, /request\.status !== "cancelled"/);
+});
+
+test("signed-in users have a header account menu instead of a sidebar logout panel", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+
+  assert.doesNotMatch(page, /className="pin-panel"/);
+  assert.match(page, /className="account-avatar"/);
+  assert.match(page, />Profile<\/button>/);
+  assert.match(page, />Team members<\/button>/);
+  assert.match(page, /className="account-sign-out"/);
+  assert.match(page, /document\.addEventListener\("pointerdown", closeAccountMenu\)/);
+  assert.match(page, /aria-label="Notifications"/);
+  assert.match(page, /aria-label="Messages"/);
+  assert.match(page, /aria-label="Stopwatch"/);
+  assert.match(page, />\s*Team requests\s*<\/button>/);
+  assert.match(page, />\s*Alerts\s*<\/button>/);
+  assert.match(page, /formatShortDate\(request\.startDate\)/);
+  assert.doesNotMatch(page, /formatShortDate\(parseLocalDate\(request\.startDate\)\)/);
+  assert.match(page, /document\.addEventListener\("pointerdown", closeNotifications\)/);
+  assert.match(styles, /\.topbar\s*\{[^}]*border-bottom: 1px solid var\(--line\)/s);
+  assert.match(styles, /\.topbar\s*\{[^}]*width: min\(1200px, 100%\)/s);
+  assert.doesNotMatch(styles, /\.account-menu\s*\{[^}]*margin-right: 200px/s);
+});
+
+test("team messaging supports filters, group chats, and persisted replies", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+
+  assert.match(page, /type TeamConversation/);
+  assert.match(page, /conversations: TeamConversation\[\]/);
+  assert.match(page, /function createTeamConversation/);
+  assert.match(page, /function sendTeamMessage/);
+  assert.match(page, /function conversationHasUnreadMessages/);
+  assert.match(page, /aria-label="Message filters"/);
+  assert.match(page, />\s*All\s*<\/button>/);
+  assert.match(page, />\s*Unread\s*<\/button>/);
+  assert.match(page, /Add team members/);
+  assert.match(page, /\+<\/span> New message/);
+  assert.match(page, /document\.addEventListener\("pointerdown", closeMessages\)/);
+  assert.match(page, /conversations: \(parsed\.conversations \?\? \[\]\)/);
+});
+
+test("manager settings includes a gear icon, copied tabs, and the basic info template", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const expectedTabs = [
+    "Basic info",
+    "POS connection",
+    "Plan & billing",
+    "Schedule enforcement",
+    "Alerts & permissions",
+    "Events & trades",
+    "Time clock options",
+    "Overtime",
+    "Breaks & compliance",
+    "Tip settings",
+    "Tip Manager",
+    "Payroll settings",
+    "Time off",
+    "Messages",
+    "Team permissions",
+    "Manager Log",
+    "Profile",
+    "Locations & PINs",
+    "Notifications",
+    "Password & security",
+    "API access (read only)",
+  ];
+
+  assert.match(page, /id: "settings", label: "Settings", icon: "gear", managerOnly: true/);
+  expectedTabs.forEach((tab) => assert.match(page, new RegExp(tab.replace(/[&()]/g, "\\$&"))));
+  assert.match(page, /className="panel settings-basic-panel"/);
+  assert.match(page, /title="Location details"/);
+  assert.match(page, /title="Company info"/);
+  assert.match(page, /Company locations/);
+  assert.match(page, /Add a new location/);
+  assert.match(page, /function updateBasicInfo/);
+  assert.match(page, /function saveBasicInfo/);
+  assert.match(page, /basicInfoStorageKey/);
+  assert.match(page, /className=\{info\[field\] \? "settings-value-button" : "settings-add-button"\}/);
+  assert.match(page, /onClick=\{\(\) => onEdit\(field\)\}/);
+  assert.match(page, /disabled=\{!isBasicInfoDirty\}/);
+  assert.match(page, /function formatPhoneNumberInput/);
+  assert.match(page, /field === "locationPhone" \|\| field === "companyPhone"/);
+  assert.match(page, /maxLength=\{inputType === "tel" \? 14 : undefined\}/);
 });

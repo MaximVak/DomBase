@@ -1,12 +1,53 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 
 type Mode = "manager" | "employee";
-type ViewId = "dashboard" | "employees" | "schedule" | "clockins" | "hours";
+type ViewId = "dashboard" | "employees" | "departments_roles" | "schedule" | "clockins" | "hours" | "settings" | "profile" | "team_members";
 type CalendarTab = "today" | "week" | "month";
 type HoursSectionTab = "hours" | "pto";
+type NotificationTab = "team_requests" | "alerts";
+type SettingsTab =
+  | "Basic info"
+  | "POS connection"
+  | "Plan & billing"
+  | "Schedule enforcement"
+  | "Alerts & permissions"
+  | "Events & trades"
+  | "Time clock options"
+  | "Overtime"
+  | "Breaks & compliance"
+  | "Tip settings"
+  | "Tip Manager"
+  | "Payroll settings"
+  | "Time off"
+  | "Messages"
+  | "Team permissions"
+  | "Manager Log"
+  | "Profile"
+  | "Locations & PINs"
+  | "Notifications"
+  | "Password & security"
+  | "API access (read only)";
+type BasicInfo = {
+  locationName: string;
+  locationPhone: string;
+  address1: string;
+  address2: string;
+  city: string;
+  stateProvince: string;
+  postalCode: string;
+  country: string;
+  timeZone: string;
+  businessType: string;
+  businessCategory: string;
+  website: string;
+  companyName: string;
+  accountOwner: string;
+  companyPhone: string;
+};
+type BasicInfoField = keyof BasicInfo;
 type CopyRange = "week" | "month";
 type EmployeeScheduleTab = "day" | "week";
 type HoursRounding = "actual" | 5 | 10 | 15;
@@ -68,16 +109,32 @@ type PtoRequest = {
   requestedAt: string;
 };
 
+type TeamMessage = {
+  id: number;
+  senderEmployeeId: number;
+  body: string;
+  sentAt: string;
+  readByEmployeeIds: number[];
+};
+
+type TeamConversation = {
+  id: number;
+  participantIds: number[];
+  messages: TeamMessage[];
+};
+
 type StaffState = {
   employees: Employee[];
   shifts: Shift[];
   clockEvents: ClockEvent[];
   hoursAdjustments: HoursAdjustment[];
   ptoRequests: PtoRequest[];
+  conversations: TeamConversation[];
 };
 
 const managerPin = "0000";
 const storageKey = "dombase-staff-state-v1";
+const basicInfoStorageKey = "dombase-basic-info-v1";
 const timeExceptionExplanationLimit = 250;
 const calendarWeekdayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const scheduleStartHour = 6;
@@ -100,12 +157,41 @@ const permissionsByMode: Record<Mode, Permission[]> = {
 };
 
 const navItems: { id: ViewId; label: string; icon: string; managerOnly?: boolean }[] = [
-  { id: "dashboard", label: "Calendar", icon: "C" },
+  { id: "dashboard", label: "Home", icon: "H" },
+  { id: "employees", label: "Team", icon: "T", managerOnly: true },
   { id: "schedule", label: "Schedule", icon: "S" },
   { id: "hours", label: "Hours", icon: "H" },
   { id: "clockins", label: "Events", icon: "E", managerOnly: true },
-  { id: "employees", label: "Team", icon: "T", managerOnly: true },
+  { id: "settings", label: "Settings", icon: "gear", managerOnly: true },
 ];
+
+const settingsGroups: { label: string; items: SettingsTab[] }[] = [
+  { label: "Location", items: ["Basic info", "POS connection", "Plan & billing"] },
+  { label: "Scheduling", items: ["Schedule enforcement", "Alerts & permissions", "Events & trades"] },
+  { label: "Time tracking", items: ["Time clock options", "Overtime", "Breaks & compliance"] },
+  { label: "Tips", items: ["Tip settings", "Tip Manager"] },
+  { label: "Payroll", items: ["Payroll settings"] },
+  { label: "Team management", items: ["Time off", "Messages", "Team permissions", "Manager Log"] },
+  { label: "Account", items: ["Profile", "Locations & PINs", "Notifications", "Password & security", "API access (read only)"] },
+];
+
+const defaultBasicInfo: BasicInfo = {
+  locationName: "DomBase",
+  locationPhone: "",
+  address1: "",
+  address2: "",
+  city: "",
+  stateProvince: "",
+  postalCode: "",
+  country: "United States",
+  timeZone: "Pacific Time (US & Canada)",
+  businessType: "",
+  businessCategory: "",
+  website: "",
+  companyName: "DomBase",
+  accountOwner: "Serge Vakulchik",
+  companyPhone: "",
+};
 
 const starterState: StaffState = {
   employees: [
@@ -115,6 +201,7 @@ const starterState: StaffState = {
   clockEvents: [],
   hoursAdjustments: [],
   ptoRequests: [],
+  conversations: [],
 };
 
 export default function Home() {
@@ -126,6 +213,25 @@ export default function Home() {
   const [pin, setPin] = useState("");
   const [activeEmployeeId, setActiveEmployeeId] = useState<number>(1);
   const [activeView, setActiveView] = useState<ViewId>("dashboard");
+  const [isTeamNavOpen, setIsTeamNavOpen] = useState(false);
+  const [activeSettingsTab, setActiveSettingsTab] = useState<SettingsTab>("Basic info");
+  const [basicInfo, setBasicInfo] = useState<BasicInfo>(() => readStoredBasicInfo());
+  const [savedBasicInfoSnapshot, setSavedBasicInfoSnapshot] = useState(() => JSON.stringify(readStoredBasicInfo()));
+  const [editingBasicInfoField, setEditingBasicInfoField] = useState<BasicInfoField | null>(null);
+  const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [isMessagesOpen, setIsMessagesOpen] = useState(false);
+  const [activeNotificationTab, setActiveNotificationTab] = useState<NotificationTab>("team_requests");
+  const [messageFilter, setMessageFilter] = useState<"all" | "unread">("all");
+  const [isCreatingConversation, setIsCreatingConversation] = useState(false);
+  const [selectedConversationId, setSelectedConversationId] = useState<number | null>(null);
+  const [newConversationMemberIds, setNewConversationMemberIds] = useState<number[]>([]);
+  const [newConversationMessage, setNewConversationMessage] = useState("");
+  const [messageDraft, setMessageDraft] = useState("");
+  const [messageError, setMessageError] = useState("");
+  const accountMenuRef = useRef<HTMLDivElement>(null);
+  const notificationMenuRef = useRef<HTMLDivElement>(null);
+  const messageMenuRef = useRef<HTMLDivElement>(null);
   const [activeCalendarTab, setActiveCalendarTab] = useState<CalendarTab>("today");
   const [activeHoursTab, setActiveHoursTab] = useState<CalendarTab>("today");
   const [activeHoursSectionTab, setActiveHoursSectionTab] = useState<HoursSectionTab>("hours");
@@ -192,8 +298,89 @@ export default function Home() {
     return () => window.clearInterval(timer);
   }, []);
 
+  useEffect(() => {
+    if (!isAccountMenuOpen) return;
+
+    function closeAccountMenu(event: PointerEvent | KeyboardEvent) {
+      if (event instanceof KeyboardEvent) {
+        if (event.key === "Escape") setIsAccountMenuOpen(false);
+        return;
+      }
+
+      if (!accountMenuRef.current?.contains(event.target as Node)) {
+        setIsAccountMenuOpen(false);
+      }
+    }
+
+    document.addEventListener("pointerdown", closeAccountMenu);
+    document.addEventListener("keydown", closeAccountMenu);
+    return () => {
+      document.removeEventListener("pointerdown", closeAccountMenu);
+      document.removeEventListener("keydown", closeAccountMenu);
+    };
+  }, [isAccountMenuOpen]);
+
+  useEffect(() => {
+    if (!isNotificationsOpen) return;
+
+    function closeNotifications(event: PointerEvent | KeyboardEvent) {
+      if (event instanceof KeyboardEvent) {
+        if (event.key === "Escape") setIsNotificationsOpen(false);
+        return;
+      }
+
+      if (!notificationMenuRef.current?.contains(event.target as Node)) {
+        setIsNotificationsOpen(false);
+      }
+    }
+
+    document.addEventListener("pointerdown", closeNotifications);
+    document.addEventListener("keydown", closeNotifications);
+    return () => {
+      document.removeEventListener("pointerdown", closeNotifications);
+      document.removeEventListener("keydown", closeNotifications);
+    };
+  }, [isNotificationsOpen]);
+
+  useEffect(() => {
+    if (!isMessagesOpen) return;
+
+    function closeMessages(event: PointerEvent | KeyboardEvent) {
+      if (event instanceof KeyboardEvent) {
+        if (event.key === "Escape") setIsMessagesOpen(false);
+        return;
+      }
+
+      if (!messageMenuRef.current?.contains(event.target as Node)) {
+        setIsMessagesOpen(false);
+      }
+    }
+
+    document.addEventListener("pointerdown", closeMessages);
+    document.addEventListener("keydown", closeMessages);
+    return () => {
+      document.removeEventListener("pointerdown", closeMessages);
+      document.removeEventListener("keydown", closeMessages);
+    };
+  }, [isMessagesOpen]);
+
   const activeEmployee = state.employees.find((employee) => employee.id === activeEmployeeId);
   const reviewingPtoRequest = (state.ptoRequests ?? []).find((request) => request.id === reviewingPtoRequestId);
+  const notificationRequests = (state.ptoRequests ?? [])
+    .filter((request) => mode === "manager" || request.employeeId === activeEmployeeId)
+    .sort((first, second) => (second.requestedAt ?? "").localeCompare(first.requestedAt ?? ""));
+  const pendingNotificationCount = notificationRequests.filter((request) => request.status === "pending").length;
+  const teamConversations = (state.conversations ?? [])
+    .filter((conversation) => conversation.participantIds.includes(activeEmployeeId))
+    .sort((first, second) => conversationLastSentAt(second).localeCompare(conversationLastSentAt(first)));
+  const visibleConversations = teamConversations.filter(
+    (conversation) => messageFilter === "all" || conversationHasUnreadMessages(conversation, activeEmployeeId),
+  );
+  const selectedConversation = teamConversations.find((conversation) => conversation.id === selectedConversationId);
+  const unreadConversationCount = teamConversations.filter(
+    (conversation) => conversationHasUnreadMessages(conversation, activeEmployeeId),
+  ).length;
+  const isBasicInfoDirty = JSON.stringify(basicInfo) !== savedBasicInfoSnapshot;
   const activeEmployees = useMemo(
     () => state.employees.filter((employee) => employee.active),
     [state.employees],
@@ -364,6 +551,109 @@ export default function Home() {
     setAuthMessage("PIN not recognized.");
   }
 
+  function openConversation(conversationId: number) {
+    setSelectedConversationId(conversationId);
+    setIsCreatingConversation(false);
+    setMessageError("");
+    setState((current) => ({
+      ...current,
+      conversations: (current.conversations ?? []).map((conversation) =>
+        conversation.id === conversationId
+          ? {
+              ...conversation,
+              messages: conversation.messages.map((message) => ({
+                ...message,
+                readByEmployeeIds: message.readByEmployeeIds.includes(activeEmployeeId)
+                  ? message.readByEmployeeIds
+                  : [...message.readByEmployeeIds, activeEmployeeId],
+              })),
+            }
+          : conversation,
+      ),
+    }));
+  }
+
+  function toggleConversationMember(employeeId: number) {
+    setNewConversationMemberIds((selected) =>
+      selected.includes(employeeId)
+        ? selected.filter((id) => id !== employeeId)
+        : [...selected, employeeId],
+    );
+  }
+
+  function createTeamConversation(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const body = newConversationMessage.trim();
+    if (newConversationMemberIds.length === 0) {
+      setMessageError("Select at least one team member.");
+      return;
+    }
+    if (!body) {
+      setMessageError("Enter a message to start the chat.");
+      return;
+    }
+
+    const conversationId = nextId(state.conversations ?? []);
+    const conversation: TeamConversation = {
+      id: conversationId,
+      participantIds: Array.from(new Set([activeEmployeeId, ...newConversationMemberIds])),
+      messages: [{
+        id: 1,
+        senderEmployeeId: activeEmployeeId,
+        body,
+        sentAt: new Date().toISOString(),
+        readByEmployeeIds: [activeEmployeeId],
+      }],
+    };
+    setState((current) => ({
+      ...current,
+      conversations: [...(current.conversations ?? []), conversation],
+    }));
+    setNewConversationMemberIds([]);
+    setNewConversationMessage("");
+    setMessageError("");
+    setIsCreatingConversation(false);
+    setSelectedConversationId(conversationId);
+  }
+
+  function sendTeamMessage(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const body = messageDraft.trim();
+    if (!selectedConversation || !body) return;
+
+    setState((current) => ({
+      ...current,
+      conversations: (current.conversations ?? []).map((conversation) =>
+        conversation.id === selectedConversation.id
+          ? {
+              ...conversation,
+              messages: [...conversation.messages, {
+                id: nextId(conversation.messages),
+                senderEmployeeId: activeEmployeeId,
+                body,
+                sentAt: new Date().toISOString(),
+                readByEmployeeIds: [activeEmployeeId],
+              }],
+            }
+          : conversation,
+      ),
+    }));
+    setMessageDraft("");
+  }
+
+  function updateBasicInfo(field: BasicInfoField, value: string) {
+    const nextValue = field === "locationPhone" || field === "companyPhone"
+      ? formatPhoneNumberInput(value)
+      : value;
+    setBasicInfo((current) => ({ ...current, [field]: nextValue }));
+  }
+
+  function saveBasicInfo() {
+    window.localStorage.setItem(basicInfoStorageKey, JSON.stringify(basicInfo));
+    setSavedBasicInfoSnapshot(JSON.stringify(basicInfo));
+    setEditingBasicInfoField(null);
+  }
+
   function signOut() {
     setIsUnlocked(false);
     setIsPublicSchedule(false);
@@ -372,11 +662,18 @@ export default function Home() {
     setActiveView("dashboard");
     setPin("");
     setAuthMessage("");
+    setIsAccountMenuOpen(false);
+    setIsNotificationsOpen(false);
+    setIsMessagesOpen(false);
+    setIsTeamNavOpen(false);
   }
 
   function navigateToView(view: ViewId) {
     if (view === "hours") setActiveHoursSectionTab("hours");
+    if (view === "settings") setActiveSettingsTab("Basic info");
+    if (view === "employees" || view === "departments_roles") setIsTeamNavOpen(true);
     setActiveView(view);
+    setIsAccountMenuOpen(false);
   }
 
   function viewPublicSchedule() {
@@ -955,17 +1252,41 @@ export default function Home() {
             </div>
           </div>
 
-          <section className="pin-panel" aria-label="Signed in user">
-            <div>
-              <p className="eyebrow">Access</p>
-              <h2>{mode === "manager" ? "Manager mode" : "Employee mode"}</h2>
-            </div>
-            <button type="button" className="sign-out-button" onClick={signOut}>{isPublicSchedule ? "Back" : "Logout"}</button>
-            <p>{authMessage}</p>
-          </section>
-
           <nav className="nav-list">
-            {visibleNavItems.map((item) => (
+            {visibleNavItems.map((item) => item.id === "employees" ? (
+              <div className="sidebar-nav-group" key={item.id}>
+                <button
+                  type="button"
+                  className={activeView === "employees" || activeView === "departments_roles" ? "nav-button active" : "nav-button"}
+                  onClick={() => setIsTeamNavOpen((open) => !open)}
+                  aria-expanded={isTeamNavOpen}
+                  aria-controls="team-sidebar-menu"
+                  title="Team"
+                >
+                  <SidebarNavIcon icon={item.icon} />
+                  <span>Team</span>
+                  <span className={isTeamNavOpen ? "sidebar-chevron open" : "sidebar-chevron"} aria-hidden="true">⌄</span>
+                </button>
+                {isTeamNavOpen ? (
+                  <div className="sidebar-submenu" id="team-sidebar-menu">
+                    <button
+                      type="button"
+                      className={activeView === "employees" ? "active" : ""}
+                      onClick={() => navigateToView("employees")}
+                    >
+                      Roster
+                    </button>
+                    <button
+                      type="button"
+                      className={activeView === "departments_roles" ? "active" : ""}
+                      onClick={() => navigateToView("departments_roles")}
+                    >
+                      Department / Roles
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            ) : (
               <button
                 type="button"
                 key={item.id}
@@ -974,9 +1295,7 @@ export default function Home() {
                 aria-pressed={activeView === item.id}
                 title={item.label}
               >
-                <span className="nav-icon" aria-hidden="true">
-                  {item.icon}
-                </span>
+                <SidebarNavIcon icon={item.icon} />
                 <span>{item.label}</span>
               </button>
             ))}
@@ -997,10 +1316,392 @@ export default function Home() {
           <header className="topbar">
             <div>
               <p className="eyebrow">{formatLongDate(today)}</p>
-              <h2>{activeViewLabel(activeView)}</h2>
+              <h2>{activeViewLabel(activeView, mode)}</h2>
             </div>
-            {!isPublicSchedule ? <p className="welcome-message">{activeEmployee?.name ?? "Guest"}</p> : null}
+            {!isPublicSchedule ? (
+              <div className="header-actions">
+                <button
+                  type="button"
+                  className="header-icon-button"
+                  aria-label="Stopwatch"
+                  title="Stopwatch"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <circle cx="12" cy="13" r="8" />
+                    <path d="M12 9v4l3 2M9 2h6M12 2v3M18 7l2-2" />
+                  </svg>
+                </button>
+                <div className="message-menu" ref={messageMenuRef}>
+                  <button
+                    type="button"
+                    className="header-icon-button"
+                    onClick={() => {
+                      if (!isMessagesOpen) {
+                        setSelectedConversationId(null);
+                        setIsCreatingConversation(false);
+                        setMessageError("");
+                      }
+                      setIsMessagesOpen((open) => !open);
+                      setIsNotificationsOpen(false);
+                      setIsAccountMenuOpen(false);
+                    }}
+                    aria-expanded={isMessagesOpen}
+                    aria-haspopup="dialog"
+                    aria-label="Messages"
+                    title="Messages"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" />
+                    </svg>
+                    {unreadConversationCount > 0 ? (
+                      <span className="notification-badge" aria-label={`${unreadConversationCount} unread conversations`}>
+                        {unreadConversationCount > 9 ? "9+" : unreadConversationCount}
+                      </span>
+                    ) : null}
+                  </button>
+                  {isMessagesOpen ? (
+                    <div className="message-dropdown" role="dialog" aria-label="Messages">
+                      {isCreatingConversation ? (
+                        <form className="new-conversation-form" onSubmit={createTeamConversation}>
+                          <div className="message-popout-heading">
+                            <button
+                              type="button"
+                              className="message-back-button"
+                              onClick={() => {
+                                setIsCreatingConversation(false);
+                                setMessageError("");
+                              }}
+                              aria-label="Back to messages"
+                            >
+                              ←
+                            </button>
+                            <strong>New message</strong>
+                          </div>
+                          <fieldset className="message-member-picker">
+                            <legend>Add team members</legend>
+                            {activeEmployees
+                              .filter((employee) => employee.id !== activeEmployeeId)
+                              .map((employee) => (
+                                <label key={employee.id}>
+                                  <input
+                                    type="checkbox"
+                                    checked={newConversationMemberIds.includes(employee.id)}
+                                    onChange={() => toggleConversationMember(employee.id)}
+                                  />
+                                  <span className="message-member-avatar" aria-hidden="true">{employeeInitials(employee.name)}</span>
+                                  <span>{employee.name}</span>
+                                </label>
+                              ))}
+                          </fieldset>
+                          <textarea
+                            value={newConversationMessage}
+                            onChange={(event) => setNewConversationMessage(event.target.value)}
+                            placeholder="Write a message"
+                            aria-label="New message text"
+                            rows={3}
+                            required
+                          />
+                          {messageError ? <p className="message-error">{messageError}</p> : null}
+                          <button type="submit" className="start-chat-button">Start chat</button>
+                        </form>
+                      ) : selectedConversation ? (
+                        <div className="conversation-view">
+                          <div className="message-popout-heading">
+                            <button
+                              type="button"
+                              className="message-back-button"
+                              onClick={() => setSelectedConversationId(null)}
+                              aria-label="Back to messages"
+                            >
+                              ←
+                            </button>
+                            <strong>{conversationTitle(selectedConversation, state.employees, activeEmployeeId)}</strong>
+                          </div>
+                          <div className="conversation-messages">
+                            {selectedConversation.messages.map((message) => (
+                              <div
+                                className={message.senderEmployeeId === activeEmployeeId ? "team-message own" : "team-message"}
+                                key={message.id}
+                              >
+                                <span>{employeeById(state.employees, message.senderEmployeeId)?.name ?? "Team member"}</span>
+                                <p>{message.body}</p>
+                                <time dateTime={message.sentAt}>{formatMessageTime(message.sentAt)}</time>
+                              </div>
+                            ))}
+                          </div>
+                          <form className="message-reply-form" onSubmit={sendTeamMessage}>
+                            <input
+                              value={messageDraft}
+                              onChange={(event) => setMessageDraft(event.target.value)}
+                              placeholder="Write a message"
+                              aria-label="Reply message"
+                            />
+                            <button type="submit" disabled={!messageDraft.trim()}>Send</button>
+                          </form>
+                        </div>
+                      ) : (
+                        <>
+                          <strong className="notification-title">Messages</strong>
+                          <div className="notification-tabs" role="tablist" aria-label="Message filters">
+                            <button
+                              type="button"
+                              className={messageFilter === "all" ? "active" : ""}
+                              onClick={() => setMessageFilter("all")}
+                              role="tab"
+                              aria-selected={messageFilter === "all"}
+                            >
+                              All
+                            </button>
+                            <button
+                              type="button"
+                              className={messageFilter === "unread" ? "active" : ""}
+                              onClick={() => setMessageFilter("unread")}
+                              role="tab"
+                              aria-selected={messageFilter === "unread"}
+                            >
+                              Unread
+                            </button>
+                          </div>
+                          <div className="message-conversation-list">
+                            {visibleConversations.length > 0 ? visibleConversations.map((conversation) => {
+                              const lastMessage = conversation.messages.at(-1);
+                              return (
+                                <button type="button" key={conversation.id} onClick={() => openConversation(conversation.id)}>
+                                  <span className="message-member-avatar" aria-hidden="true">
+                                    {conversationInitials(conversation, state.employees, activeEmployeeId)}
+                                  </span>
+                                  <span className="conversation-preview">
+                                    <strong>{conversationTitle(conversation, state.employees, activeEmployeeId)}</strong>
+                                    <small>{lastMessage?.body ?? "No messages yet"}</small>
+                                  </span>
+                                  {conversationHasUnreadMessages(conversation, activeEmployeeId) ? (
+                                    <span className="unread-dot" aria-label="Unread" />
+                                  ) : null}
+                                </button>
+                              );
+                            }) : <p className="notification-empty">No {messageFilter === "unread" ? "unread " : ""}messages.</p>}
+                          </div>
+                          <button
+                            type="button"
+                            className="new-message-button"
+                            onClick={() => {
+                              setIsCreatingConversation(true);
+                              setSelectedConversationId(null);
+                              setMessageError("");
+                            }}
+                          >
+                            <span aria-hidden="true">+</span> New message
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  ) : null}
+                </div>
+                <div className="notification-menu" ref={notificationMenuRef}>
+                  <button
+                    type="button"
+                    className="notification-button"
+                    onClick={() => {
+                      setIsNotificationsOpen((open) => !open);
+                      setIsAccountMenuOpen(false);
+                      setIsMessagesOpen(false);
+                    }}
+                    aria-expanded={isNotificationsOpen}
+                    aria-haspopup="dialog"
+                    aria-label="Notifications"
+                    title="Notifications"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" />
+                    </svg>
+                    {pendingNotificationCount > 0 ? (
+                      <span className="notification-badge" aria-label={`${pendingNotificationCount} pending requests`}>
+                        {pendingNotificationCount > 9 ? "9+" : pendingNotificationCount}
+                      </span>
+                    ) : null}
+                  </button>
+                  {isNotificationsOpen ? (
+                    <div className="notification-dropdown" role="dialog" aria-label="Notifications">
+                      <strong className="notification-title">Notifications</strong>
+                      <div className="notification-tabs" role="tablist" aria-label="Notification categories">
+                        <button
+                          type="button"
+                          className={activeNotificationTab === "team_requests" ? "active" : ""}
+                          onClick={() => setActiveNotificationTab("team_requests")}
+                          role="tab"
+                          aria-selected={activeNotificationTab === "team_requests"}
+                        >
+                          Team requests
+                        </button>
+                        <button
+                          type="button"
+                          className={activeNotificationTab === "alerts" ? "active" : ""}
+                          onClick={() => setActiveNotificationTab("alerts")}
+                          role="tab"
+                          aria-selected={activeNotificationTab === "alerts"}
+                        >
+                          Alerts
+                        </button>
+                      </div>
+                      <div className="notification-list">
+                        {activeNotificationTab === "team_requests" ? (
+                          notificationRequests.length > 0 ? notificationRequests.map((request) => {
+                            const employee = employeeById(state.employees, request.employeeId);
+                            return (
+                              <div className="notification-item" key={request.id}>
+                                <strong>{employee?.name ?? "Employee"}</strong>
+                                <span>{formatShortDate(request.startDate)} · {capitalize(request.status)}</span>
+                              </div>
+                            );
+                          }) : <p className="notification-empty">No team requests.</p>
+                        ) : (
+                          <p className="notification-empty">No new alerts.</p>
+                        )}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+                <div className="account-menu" ref={accountMenuRef}>
+                  <button
+                    type="button"
+                    className="account-avatar"
+                    onClick={() => {
+                      setIsAccountMenuOpen((open) => !open);
+                      setIsNotificationsOpen(false);
+                      setIsMessagesOpen(false);
+                    }}
+                    aria-expanded={isAccountMenuOpen}
+                    aria-haspopup="menu"
+                    aria-label="Open account menu"
+                  >
+                    {activeEmployee?.name.trim().charAt(0).toUpperCase() || "A"}
+                  </button>
+                  {isAccountMenuOpen ? (
+                    <div className="account-dropdown" role="menu">
+                      <div className="account-dropdown-user">
+                        <strong>{activeEmployee?.name ?? "Account"}</strong>
+                        <span>{activeEmployee?.role ?? capitalize(mode)}</span>
+                      </div>
+                      <button type="button" role="menuitem" onClick={() => navigateToView("profile")}>Profile</button>
+                      <button type="button" role="menuitem" onClick={() => navigateToView("team_members")}>Team members</button>
+                      <button type="button" role="menuitem" className="account-sign-out" onClick={signOut}>Sign out</button>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            ) : (
+              <button type="button" className="public-back-button" onClick={signOut}>Back</button>
+            )}
           </header>
+
+          {activeView === "profile" && !isPublicSchedule ? (
+            <section className="panel feature-panel account-profile-panel">
+              <span className="profile-avatar" aria-hidden="true">
+                {activeEmployee?.name.trim().charAt(0).toUpperCase() || "A"}
+              </span>
+              <div>
+                <p className="eyebrow">Account profile</p>
+                <h3>{activeEmployee?.name ?? "Account"}</h3>
+                <p>{activeEmployee?.role ?? capitalize(mode)}</p>
+              </div>
+            </section>
+          ) : null}
+
+          {activeView === "team_members" && !isPublicSchedule ? (
+            <section className="panel feature-panel">
+              <PanelHeading eyebrow="People" title="Team members" />
+              <div className="account-team-list">
+                {activeEmployees.map((employee) => (
+                  <article key={employee.id}>
+                    <span className="schedule-avatar" aria-hidden="true">{employeeInitials(employee.name)}</span>
+                    <div>
+                      <strong>{employee.name}</strong>
+                      <span>{employee.role}</span>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </section>
+          ) : null}
+
+          {activeView === "settings" && mode === "manager" ? (
+            <div className="settings-layout">
+              <nav className="settings-navigation" aria-label="Settings sections">
+                {settingsGroups.map((group) => (
+                  <section key={group.label}>
+                    <p>{group.label}</p>
+                    {group.items.map((item) => (
+                      <button
+                        type="button"
+                        key={item}
+                        className={activeSettingsTab === item ? "active" : ""}
+                        onClick={() => setActiveSettingsTab(item)}
+                        aria-current={activeSettingsTab === item ? "page" : undefined}
+                      >
+                        {item}
+                      </button>
+                    ))}
+                  </section>
+                ))}
+              </nav>
+
+              {activeSettingsTab === "Basic info" ? (
+                <section className="panel settings-basic-panel">
+                  <div className="settings-panel-heading">
+                    <h3>Basic info</h3>
+                    <button type="button" onClick={saveBasicInfo} disabled={!isBasicInfoDirty}>Save</button>
+                  </div>
+                  <SettingsInfoSection
+                    title="Location details"
+                    info={basicInfo}
+                    editingField={editingBasicInfoField}
+                    onEdit={setEditingBasicInfoField}
+                    onChange={updateBasicInfo}
+                    rows={[
+                      { field: "locationName", label: "Location name" },
+                      { field: "locationPhone", label: "Location phone number", inputType: "tel" },
+                      { field: "address1", label: "Address 1" },
+                      { field: "address2", label: "Address 2" },
+                      { field: "city", label: "City" },
+                      { field: "stateProvince", label: "State/Province" },
+                      { field: "postalCode", label: "Zip/Postal code" },
+                      { field: "country", label: "Country" },
+                      { field: "timeZone", label: "Time zone" },
+                      { field: "businessType", label: "Business type" },
+                      { field: "businessCategory", label: "Business category" },
+                      { field: "website", label: "Website", inputType: "url" },
+                    ]}
+                  />
+                  <SettingsInfoSection
+                    title="Company info"
+                    info={basicInfo}
+                    editingField={editingBasicInfoField}
+                    onEdit={setEditingBasicInfoField}
+                    onChange={updateBasicInfo}
+                    rows={[
+                      { field: "companyName", label: "Company name" },
+                      { field: "accountOwner", label: "Account owner" },
+                      { field: "companyPhone", label: "Phone number", inputType: "tel" },
+                    ]}
+                  />
+                  <section className="settings-info-section company-locations-section">
+                    <h4>Company locations</h4>
+                    <div>
+                      <strong>{basicInfo.locationName.toUpperCase() || "DOMBASE"}</strong>
+                      <span>Primary location</span>
+                    </div>
+                    <button type="button">Add a new location</button>
+                  </section>
+                </section>
+              ) : (
+                <section className="panel settings-placeholder-panel">
+                  <p className="eyebrow">Settings</p>
+                  <h3>{activeSettingsTab}</h3>
+                  <p>This section is ready for the options you choose to add later.</p>
+                </section>
+              )}
+            </div>
+          ) : null}
 
           {activeView === "dashboard" && (
             <div className="content-grid">
@@ -1067,7 +1768,7 @@ export default function Home() {
                     <Metric label="Clocked in" value={clockedInIds.size.toString()} />
                   </div>
                   <div className="control-grid">
-                    <button type="button" onClick={() => setActiveView("employees")}>Manage employees</button>
+                    <button type="button" onClick={() => navigateToView("employees")}>Manage employees</button>
                     <button type="button" onClick={() => setActiveView("schedule")}>Manage schedule</button>
                     <button type="button" onClick={() => setActiveView("clockins")}>View clock-ins</button>
                     <button type="button" onClick={() => {
@@ -1119,9 +1820,16 @@ export default function Home() {
             </div>
           )}
 
+          {activeView === "departments_roles" && mode === "manager" && (
+            <section className="panel feature-panel team-placeholder-panel">
+              <PanelHeading eyebrow="Team" title="Department / Roles" />
+              <p>Department and role options will be added here.</p>
+            </section>
+          )}
+
           {activeView === "employees" && mode === "manager" && (
             <section className="panel feature-panel">
-              <PanelHeading eyebrow="People" title="Employees and roles" />
+              <PanelHeading eyebrow="Team" title="Roster" />
               <form className="quick-form employee-form" onSubmit={addEmployee}>
                 <input
                   value={employeeForm.name}
@@ -2077,8 +2785,13 @@ export default function Home() {
   );
 }
 
-function activeViewLabel(activeView: ViewId) {
-  return navItems.find((item) => item.id === activeView)?.label ?? "Calendar";
+function activeViewLabel(activeView: ViewId, mode: Mode) {
+  if (activeView === "dashboard") return mode === "manager" ? "Manager mode" : "Employee mode";
+  if (activeView === "employees") return "Roster";
+  if (activeView === "departments_roles") return "Department / Roles";
+  if (activeView === "profile") return "Profile";
+  if (activeView === "team_members") return "Team members";
+  return navItems.find((item) => item.id === activeView)?.label ?? "Home";
 }
 
 function employeeById(employees: Employee[], id: number) {
@@ -2298,6 +3011,32 @@ function nextId(items: { id: number }[]) {
   return items.reduce((max, item) => Math.max(max, item.id), 0) + 1;
 }
 
+function readStoredBasicInfo(): BasicInfo {
+  if (typeof window === "undefined") return defaultBasicInfo;
+
+  const stored = window.localStorage.getItem(basicInfoStorageKey);
+  if (!stored) return defaultBasicInfo;
+
+  try {
+    const parsed = { ...defaultBasicInfo, ...(JSON.parse(stored) as Partial<BasicInfo>) };
+    return {
+      ...parsed,
+      locationPhone: formatPhoneNumberInput(parsed.locationPhone),
+      companyPhone: formatPhoneNumberInput(parsed.companyPhone),
+    };
+  } catch {
+    window.localStorage.removeItem(basicInfoStorageKey);
+    return defaultBasicInfo;
+  }
+}
+
+function formatPhoneNumberInput(value: string) {
+  const digits = value.replace(/\D/g, "").slice(0, 10);
+  if (digits.length <= 3) return digits;
+  if (digits.length <= 6) return `(${digits.slice(0, 3)}) ${digits.slice(3)}`;
+  return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+}
+
 function readStoredState() {
   if (typeof window === "undefined") return starterState;
 
@@ -2322,6 +3061,16 @@ function readStoredState() {
       clockEvents: parsed.clockEvents.filter((event) => employeeIds.has(event.employeeId)),
       hoursAdjustments: (parsed.hoursAdjustments ?? []).filter((adjustment) => employeeIds.has(adjustment.employeeId)),
       ptoRequests: (parsed.ptoRequests ?? []).filter((request) => employeeIds.has(request.employeeId)),
+      conversations: (parsed.conversations ?? [])
+        .map((conversation) => ({
+          ...conversation,
+          participantIds: conversation.participantIds.filter((employeeId) => employeeIds.has(employeeId)),
+          messages: (conversation.messages ?? []).map((message) => ({
+            ...message,
+            readByEmployeeIds: message.readByEmployeeIds ?? [],
+          })),
+        }))
+        .filter((conversation) => conversation.participantIds.length > 0),
     };
   } catch {
     window.localStorage.removeItem(storageKey);
@@ -2727,6 +3476,47 @@ function workedHoursForRange(
   return workedMs / (60 * 60 * 1000);
 }
 
+function conversationLastSentAt(conversation: TeamConversation) {
+  return conversation.messages[conversation.messages.length - 1]?.sentAt ?? "";
+}
+
+function conversationHasUnreadMessages(conversation: TeamConversation, employeeId: number) {
+  return conversation.messages.some(
+    (message) => message.senderEmployeeId !== employeeId && !message.readByEmployeeIds.includes(employeeId),
+  );
+}
+
+function conversationTitle(conversation: TeamConversation, employees: Employee[], activeEmployeeId: number) {
+  const names = conversation.participantIds
+    .filter((employeeId) => employeeId !== activeEmployeeId)
+    .map((employeeId) => employeeById(employees, employeeId)?.name)
+    .filter((name): name is string => Boolean(name));
+
+  return names.length > 0 ? names.join(", ") : "Just you";
+}
+
+function conversationInitials(conversation: TeamConversation, employees: Employee[], activeEmployeeId: number) {
+  const members = conversation.participantIds
+    .filter((employeeId) => employeeId !== activeEmployeeId)
+    .map((employeeId) => employeeById(employees, employeeId))
+    .filter((employee): employee is Employee => Boolean(employee));
+
+  if (members.length === 0) return "ME";
+  if (members.length === 1) return employeeInitials(members[0].name);
+  return `${members[0].name.charAt(0)}${members[1].name.charAt(0)}`.toUpperCase();
+}
+
+function formatMessageTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+}
+
 function adjustedWorkedHoursForRange(
   events: ClockEvent[],
   adjustments: HoursAdjustment[],
@@ -2890,6 +3680,80 @@ function roundHoursToMinutes(hours: number, minutes: HoursRounding) {
 
 function permissionLabel(permission: Permission) {
   return permission.replaceAll("_", " ");
+}
+
+function SidebarNavIcon({ icon }: { icon: string }) {
+  return (
+    <span className="nav-icon" aria-hidden="true">
+      {icon === "gear" ? (
+        <svg viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="3" />
+          <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21h-4v-.08A1.7 1.7 0 0 0 8.94 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.57 15 1.7 1.7 0 0 0 3 14H3v-4h.08A1.7 1.7 0 0 0 4.6 8.94a1.7 1.7 0 0 0-.34-1.88L4.2 7l2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.57 1.7 1.7 0 0 0 10 3.08V3h4v.08A1.7 1.7 0 0 0 15.06 4.6a1.7 1.7 0 0 0 1.88-.34L17 4.2 19.8 7l-.06.06a1.7 1.7 0 0 0-.34 1.88A1.7 1.7 0 0 0 20.92 10H21v4h-.08A1.7 1.7 0 0 0 19.4 15Z" />
+        </svg>
+      ) : icon}
+    </span>
+  );
+}
+
+function SettingsInfoSection({
+  title,
+  rows,
+  info,
+  editingField,
+  onEdit,
+  onChange,
+}: {
+  title: string;
+  rows: { field: BasicInfoField; label: string; inputType?: "text" | "tel" | "url" }[];
+  info: BasicInfo;
+  editingField: BasicInfoField | null;
+  onEdit: (field: BasicInfoField | null) => void;
+  onChange: (field: BasicInfoField, value: string) => void;
+}) {
+  return (
+    <section className="settings-info-section">
+      <div className="settings-info-heading">
+        <h4>{title}</h4>
+        <button type="button" onClick={() => onEdit(rows[0].field)} aria-label={`Edit ${title}`} title={`Edit ${title}`}>
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="m4 20 4.5-1 10-10-3.5-3.5-10 10L4 20ZM13.5 7l3.5 3.5" />
+          </svg>
+        </button>
+      </div>
+      <dl className="settings-info-rows">
+        {rows.map(({ field, label, inputType = "text" }) => (
+          <div key={field}>
+            <dt>{label}</dt>
+            <dd>
+              {editingField === field ? (
+                <input
+                  type={inputType}
+                  inputMode={inputType === "tel" ? "tel" : undefined}
+                  maxLength={inputType === "tel" ? 14 : undefined}
+                  value={info[field]}
+                  onChange={(event) => onChange(field, event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") onEdit(null);
+                  }}
+                  placeholder={`Enter ${label.toLowerCase()}`}
+                  aria-label={label}
+                  autoFocus
+                />
+              ) : (
+                <button
+                  type="button"
+                  className={info[field] ? "settings-value-button" : "settings-add-button"}
+                  onClick={() => onEdit(field)}
+                >
+                  {info[field] || "Add"}
+                </button>
+              )}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  );
 }
 
 function Metric({ label, value }: { label: string; value: string }) {
