@@ -51,16 +51,8 @@ type BasicInfoField = keyof BasicInfo;
 type CopyRange = "week" | "month";
 type EmployeeScheduleTab = "day" | "week" | "month";
 type HoursRounding = "actual" | 5 | 10 | 15;
+type PtoHistoryStatusFilter = "all" | PtoRequest["status"];
 type TimeExceptionAction = "in" | "out" | "break_end";
-type Permission =
-  | "manage_employees"
-  | "manage_roles"
-  | "manage_shifts"
-  | "view_clockins"
-  | "view_hours"
-  | "clock_self"
-  | "view_schedule";
-
 type Employee = {
   id: number;
   name: string;
@@ -111,14 +103,38 @@ type HoursAdjustment = {
 type PtoRequest = {
   id: number;
   employeeId: number;
+  compensation: "paid" | "unpaid";
   startDate: string;
   endDate: string;
-  startTime?: string;
-  endTime?: string;
   reason: "sick_emergency" | "vacation";
   explanation: string;
   status: "pending" | "approved" | "denied" | "cancelled";
   requestedAt: string;
+  decidedAt?: string;
+  decidedByEmployeeId?: number;
+};
+
+type PtoPolicyMethod = "fixed" | "rate";
+
+type PtoPolicy = {
+  id: number;
+  name: string;
+  method: PtoPolicyMethod;
+  fixedHours: number;
+  earnedHours: number;
+  workedHours: number;
+  employeeIds: number[];
+  startingBalances: Record<number, { startDate: string; balance: number }>;
+};
+
+type PtoPolicyForm = {
+  name: string;
+  method: PtoPolicyMethod;
+  fixedHours: string;
+  earnedHours: string;
+  workedHours: string;
+  employeeIds: number[];
+  startingBalances: Record<number, { startDate: string; balance: string }>;
 };
 
 type TeamMessage = {
@@ -131,6 +147,8 @@ type TeamMessage = {
 
 type TeamConversation = {
   id: number;
+  name?: string;
+  creatorEmployeeId: number;
   participantIds: number[];
   messages: TeamMessage[];
 };
@@ -142,6 +160,7 @@ type StaffState = {
   clockEvents: ClockEvent[];
   hoursAdjustments: HoursAdjustment[];
   ptoRequests: PtoRequest[];
+  ptoPolicies: PtoPolicy[];
   conversations: TeamConversation[];
 };
 
@@ -158,24 +177,12 @@ const scheduleHourLabels = Array.from(
   (_, index) => scheduleStartHour + index,
 );
 
-const permissionsByMode: Record<Mode, Permission[]> = {
-  manager: [
-    "manage_employees",
-    "manage_roles",
-    "manage_shifts",
-    "view_clockins",
-    "view_hours",
-    "view_schedule",
-  ],
-  employee: ["clock_self", "view_schedule", "view_hours"],
-};
-
 const navItems: { id: ViewId; label: string; icon: string; managerOnly?: boolean }[] = [
-  { id: "dashboard", label: "Home", icon: "H" },
-  { id: "employees", label: "Team", icon: "T", managerOnly: true },
-  { id: "schedule", label: "Schedule", icon: "S" },
-  { id: "hours", label: "Hours", icon: "H" },
-  { id: "clockins", label: "Events", icon: "E", managerOnly: true },
+  { id: "dashboard", label: "Home", icon: "home" },
+  { id: "employees", label: "Team", icon: "person", managerOnly: true },
+  { id: "schedule", label: "Schedule", icon: "calendar" },
+  { id: "hours", label: "Hours", icon: "clock" },
+  { id: "clockins", label: "Events", icon: "flag", managerOnly: true },
   { id: "settings", label: "Settings", icon: "gear", managerOnly: true },
 ];
 
@@ -238,6 +245,16 @@ const starterState: StaffState = {
   clockEvents: [],
   hoursAdjustments: [],
   ptoRequests: [],
+  ptoPolicies: [{
+    id: 1,
+    name: "Standard PTO",
+    method: "rate",
+    fixedHours: 0,
+    earnedHours: 1,
+    workedHours: 30,
+    employeeIds: [1],
+    startingBalances: { 1: { startDate: getLocalDateValue(), balance: 0 } },
+  }],
   conversations: [],
 };
 
@@ -264,6 +281,9 @@ export default function Home() {
   const [messageFilter, setMessageFilter] = useState<"all" | "unread">("all");
   const [isCreatingConversation, setIsCreatingConversation] = useState(false);
   const [selectedConversationId, setSelectedConversationId] = useState<number | null>(null);
+  const [selectedConversationIds, setSelectedConversationIds] = useState<number[]>([]);
+  const [editingConversationNameId, setEditingConversationNameId] = useState<number | null>(null);
+  const [conversationNameDraft, setConversationNameDraft] = useState("");
   const [newConversationMemberIds, setNewConversationMemberIds] = useState<number[]>([]);
   const [newConversationMessage, setNewConversationMessage] = useState("");
   const [messageDraft, setMessageDraft] = useState("");
@@ -272,6 +292,7 @@ export default function Home() {
   const notificationMenuRef = useRef<HTMLDivElement>(null);
   const messageMenuRef = useRef<HTMLDivElement>(null);
   const employeeFilterRef = useRef<HTMLDivElement>(null);
+  const ptoHistoryEmployeeFilterRef = useRef<HTMLDivElement>(null);
   const [activeCalendarTab, setActiveCalendarTab] = useState<CalendarTab>("today");
   const [activeHoursTab, setActiveHoursTab] = useState<CalendarTab>("today");
   const [activeHoursSectionTab, setActiveHoursSectionTab] = useState<HoursSectionTab>("hours");
@@ -297,18 +318,26 @@ export default function Home() {
   } | null>(null);
   const [showHoursChangeWarning, setShowHoursChangeWarning] = useState(false);
   const [ptoRequestForm, setPtoRequestForm] = useState<{
+    compensation: PtoRequest["compensation"];
     startDate: string;
     endDate: string;
     reason: PtoRequest["reason"] | "";
     explanation: string;
-    useCustomTime: boolean;
-    startTime: string;
-    endTime: string;
   } | null>(null);
   const [ptoRequestError, setPtoRequestError] = useState("");
   const [reviewingPtoRequestId, setReviewingPtoRequestId] = useState<number | null>(null);
   const [ptoReviewError, setPtoReviewError] = useState("");
   const [arePtoRequestsExpanded, setArePtoRequestsExpanded] = useState(false);
+  const [isViewingPtoHistory, setIsViewingPtoHistory] = useState(false);
+  const [ptoHistoryMonth, setPtoHistoryMonth] = useState(`${today.slice(0, 7)}-01`);
+  const [ptoHistoryStatusFilter, setPtoHistoryStatusFilter] = useState<PtoHistoryStatusFilter>("all");
+  const [ptoHistoryEmployeeId, setPtoHistoryEmployeeId] = useState<number | "all">("all");
+  const [isPtoHistoryEmployeeFilterOpen, setIsPtoHistoryEmployeeFilterOpen] = useState(false);
+  const [ptoPolicyForm, setPtoPolicyForm] = useState<PtoPolicyForm | null>(null);
+  const [ptoPolicyStep, setPtoPolicyStep] = useState<"details" | "employees" | "balances">("details");
+  const [ptoPolicyError, setPtoPolicyError] = useState("");
+  const [isViewingPtoPolicies, setIsViewingPtoPolicies] = useState(false);
+  const [editingPtoPolicyId, setEditingPtoPolicyId] = useState<number | null>(null);
   const [employeeScheduleTab, setEmployeeScheduleTab] = useState<EmployeeScheduleTab>("week");
   const [isEmployeeFilterOpen, setIsEmployeeFilterOpen] = useState(false);
   const [visibleEmployeeIds, setVisibleEmployeeIds] = useState<number[] | null>(null);
@@ -439,6 +468,27 @@ export default function Home() {
   }, [isEmployeeFilterOpen]);
 
   useEffect(() => {
+    if (!isPtoHistoryEmployeeFilterOpen) return;
+
+    function closePtoHistoryEmployeeFilter(event: PointerEvent | KeyboardEvent) {
+      if (event instanceof KeyboardEvent) {
+        if (event.key === "Escape") setIsPtoHistoryEmployeeFilterOpen(false);
+        return;
+      }
+      if (!ptoHistoryEmployeeFilterRef.current?.contains(event.target as Node)) {
+        setIsPtoHistoryEmployeeFilterOpen(false);
+      }
+    }
+
+    document.addEventListener("pointerdown", closePtoHistoryEmployeeFilter);
+    document.addEventListener("keydown", closePtoHistoryEmployeeFilter);
+    return () => {
+      document.removeEventListener("pointerdown", closePtoHistoryEmployeeFilter);
+      document.removeEventListener("keydown", closePtoHistoryEmployeeFilter);
+    };
+  }, [isPtoHistoryEmployeeFilterOpen]);
+
+  useEffect(() => {
     if (editingEmployeeId === null) return;
 
     function finishRosterEditing(event: PointerEvent) {
@@ -454,10 +504,16 @@ export default function Home() {
 
   const activeEmployee = state.employees.find((employee) => employee.id === activeEmployeeId);
   const reviewingPtoRequest = (state.ptoRequests ?? []).find((request) => request.id === reviewingPtoRequestId);
-  const notificationRequests = (state.ptoRequests ?? [])
-    .filter((request) => mode === "manager" || request.employeeId === activeEmployeeId)
-    .sort((first, second) => (second.requestedAt ?? "").localeCompare(first.requestedAt ?? ""));
+  const notificationRequests = mode === "manager" ? [...(state.ptoRequests ?? [])]
+    .sort((first, second) => (second.requestedAt ?? "").localeCompare(first.requestedAt ?? ""))
+    : [];
   const pendingNotificationCount = notificationRequests.filter((request) => request.status === "pending").length;
+  const employeeScheduleNotifications = mode === "employee"
+    ? state.shifts
+        .filter((shift) => shift.employeeId === activeEmployeeId && shift.date >= today)
+        .sort((first, second) => `${first.date}-${first.start}`.localeCompare(`${second.date}-${second.start}`))
+        .slice(0, 5)
+    : [];
   const teamConversations = (state.conversations ?? [])
     .filter((conversation) => conversation.participantIds.includes(activeEmployeeId))
     .sort((first, second) => conversationLastSentAt(second).localeCompare(conversationLastSentAt(first)));
@@ -504,7 +560,6 @@ export default function Home() {
   const orderedShiftEmployees = useMemo(() => {
     return [...shiftEmployees].sort((first, second) => first.name.localeCompare(second.name));
   }, [shiftEmployees]);
-  const activePermissions = isPublicSchedule ? ["view_schedule" as Permission] : permissionsByMode[mode];
   const visibleNavItems = isPublicSchedule
     ? navItems.filter((item) => item.id === "schedule")
     : navItems.filter((item) => mode === "manager" || !item.managerOnly);
@@ -607,15 +662,27 @@ export default function Home() {
         yearToDate,
         currentTime,
       );
+      const ptoPolicy = (state.ptoPolicies ?? []).find((policy) => policy.employeeIds.includes(employee.id));
+      const policyStartDate = ptoPolicy?.startingBalances?.[employee.id]?.startDate;
+      const policyStart = policyStartDate ? startOfDay(parseLocalDate(policyStartDate)) : yearToDate.start;
+      const accrualHoursWorked = ptoPolicy && policyStart > yearToDate.start
+        ? adjustedWorkedHoursForRange(
+            state.clockEvents,
+            state.hoursAdjustments ?? [],
+            employee.id,
+            { start: policyStart, end: yearToDate.end },
+            currentTime,
+          )
+        : hoursWorked;
 
       return {
         employee,
         hoursWorked,
-        ptoHours: Math.floor(hoursWorked / 30),
+        ptoHours: ptoHoursEarnedForPolicy(accrualHoursWorked, ptoPolicy, employee.id),
         ptoUsed: ptoHoursUsedThisYear(state.ptoRequests ?? [], employee.id, new Date(currentTime).getFullYear()),
       };
     });
-  }, [currentTime, state.clockEvents, state.employees, state.hoursAdjustments, state.ptoRequests]);
+  }, [currentTime, state.clockEvents, state.employees, state.hoursAdjustments, state.ptoPolicies, state.ptoRequests]);
   const activeEmployeePto = ptoRows.find((row) => row.employee.id === activeEmployeeId);
   const sortedPtoRequests = useMemo(
     () => (state.ptoRequests ?? [])
@@ -623,7 +690,17 @@ export default function Home() {
       .sort((first, second) => second.requestedAt.localeCompare(first.requestedAt)),
     [activeEmployeeId, mode, state.ptoRequests],
   );
-  const displayedPtoRequests = arePtoRequestsExpanded ? sortedPtoRequests : sortedPtoRequests.slice(0, 3);
+  const pendingPtoRequests = sortedPtoRequests.filter((request) => request.status === "pending");
+  const nextPtoHistoryMonth = shiftDateByCalendarTab(ptoHistoryMonth, "month", 1);
+  const filteredHistoricalPtoRequests = sortedPtoRequests.filter((request) => (
+    request.startDate < nextPtoHistoryMonth
+    && request.endDate >= ptoHistoryMonth
+    && (ptoHistoryStatusFilter === "all" || request.status === ptoHistoryStatusFilter)
+    && (mode !== "manager" || ptoHistoryEmployeeId === "all" || request.employeeId === ptoHistoryEmployeeId)
+  ));
+  const displayedPtoRequests = arePtoRequestsExpanded
+    ? filteredHistoricalPtoRequests
+    : filteredHistoricalPtoRequests.slice(0, 1);
   const activeEmployeePtoLeft = activeEmployeePto
     ? activeEmployeePto.ptoHours - activeEmployeePto.ptoUsed
     : 0;
@@ -631,8 +708,6 @@ export default function Home() {
     ? ptoHoursForDateRange(
         ptoRequestForm.startDate,
         ptoRequestForm.endDate,
-        ptoRequestForm.useCustomTime ? ptoRequestForm.startTime : undefined,
-        ptoRequestForm.useCustomTime ? ptoRequestForm.endTime : undefined,
       )
     : 0;
 
@@ -677,6 +752,9 @@ export default function Home() {
 
   function openConversation(conversationId: number) {
     setSelectedConversationId(conversationId);
+    setSelectedConversationIds([]);
+    setEditingConversationNameId(null);
+    setConversationNameDraft("");
     setIsCreatingConversation(false);
     setMessageError("");
     setState((current) => ({
@@ -695,6 +773,84 @@ export default function Home() {
           : conversation,
       ),
     }));
+  }
+
+  function startEditingConversationName(conversation: TeamConversation) {
+    if (conversation.participantIds.length <= 2 || conversation.creatorEmployeeId !== activeEmployeeId) return;
+    setEditingConversationNameId(conversation.id);
+    setConversationNameDraft(conversation.name ?? "");
+  }
+
+  function saveConversationName(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (editingConversationNameId === null) return;
+
+    const name = conversationNameDraft.trim();
+    setState((current) => ({
+      ...current,
+      conversations: (current.conversations ?? []).map((conversation) => (
+        conversation.id === editingConversationNameId && conversation.creatorEmployeeId === activeEmployeeId
+          ? { ...conversation, name: name || undefined }
+          : conversation
+      )),
+    }));
+    setEditingConversationNameId(null);
+    setConversationNameDraft("");
+  }
+
+  function toggleConversationSelection(conversationId: number) {
+    setSelectedConversationIds((selectedIds) => (
+      selectedIds.includes(conversationId)
+        ? selectedIds.filter((selectedId) => selectedId !== conversationId)
+        : [...selectedIds, conversationId]
+    ));
+  }
+
+  function deleteSelectedConversations() {
+    if (selectedConversationIds.length === 0) return;
+
+    const conversationLabel = selectedConversationIds.length === 1 ? "conversation" : "conversations";
+    if (!window.confirm(`Delete ${selectedConversationIds.length} ${conversationLabel}? This will permanently erase all message history.`)) return;
+
+    setState((current) => ({
+      ...current,
+      conversations: (current.conversations ?? []).filter(
+        (conversation) => !selectedConversationIds.includes(conversation.id),
+      ),
+    }));
+    setSelectedConversationId((conversationId) => (
+      conversationId !== null && selectedConversationIds.includes(conversationId) ? null : conversationId
+    ));
+    setSelectedConversationIds([]);
+  }
+
+  function messagePtoRequestEmployee() {
+    if (!reviewingPtoRequest || mode !== "manager") return;
+
+    const employeeId = reviewingPtoRequest.employeeId;
+    const directConversation = (state.conversations ?? []).find((conversation) => (
+      conversation.participantIds.length === 2
+      && conversation.participantIds.includes(activeEmployeeId)
+      && conversation.participantIds.includes(employeeId)
+    ));
+
+    setReviewingPtoRequestId(null);
+    setPtoReviewError("");
+    setIsNotificationsOpen(false);
+    setIsAccountMenuOpen(false);
+    setIsMessagesOpen(true);
+
+    if (directConversation) {
+      openConversation(directConversation.id);
+      return;
+    }
+
+    const employee = employeeById(state.employees, employeeId);
+    setSelectedConversationId(null);
+    setIsCreatingConversation(true);
+    setNewConversationMemberIds([employeeId]);
+    setNewConversationMessage(`Hi ${employee?.name.split(" ")[0] ?? "there"}, I have a question about your time off request.`);
+    setMessageError("");
   }
 
   function toggleConversationMember(employeeId: number) {
@@ -720,6 +876,7 @@ export default function Home() {
     const conversationId = nextId(state.conversations ?? []);
     const conversation: TeamConversation = {
       id: conversationId,
+      creatorEmployeeId: activeEmployeeId,
       participantIds: Array.from(new Set([activeEmployeeId, ...newConversationMemberIds])),
       messages: [{
         id: 1,
@@ -808,7 +965,33 @@ export default function Home() {
   }
 
   function navigateToView(view: ViewId) {
-    if (view === "hours") setActiveHoursSectionTab("hours");
+    setIsViewingPtoHistory(false);
+    setIsPtoHistoryEmployeeFilterOpen(false);
+    setArePtoRequestsExpanded(false);
+    setIsViewingPtoPolicies(false);
+    setPtoRequestForm(null);
+    setPtoRequestError("");
+    setReviewingPtoRequestId(null);
+    setPtoReviewError("");
+    setPtoPolicyForm(null);
+    setPtoPolicyStep("details");
+    setPtoPolicyError("");
+    setEditingPtoPolicyId(null);
+    setEditingHours(null);
+    setShowHoursChangeWarning(false);
+    setEditingShift(null);
+    setEditShiftError("");
+    setSelectedEventExplanation(null);
+    setEditingBasicInfoField(null);
+    if (view === "schedule") {
+      setEmployeeScheduleTab("week");
+      setScheduleDate(today);
+    }
+    if (view === "hours") {
+      setActiveHoursSectionTab("hours");
+      setActiveHoursTab("today");
+      setHoursDate(today);
+    }
     if (view === "time_off") setActiveHoursSectionTab("pto");
     if (view === "settings") setActiveSettingsTab("Basic info");
     setIsTeamNavOpen(view === "employees" || view === "departments_roles");
@@ -990,6 +1173,10 @@ export default function Home() {
       clockEvents: current.clockEvents.filter((event) => event.employeeId !== employeeId),
       hoursAdjustments: (current.hoursAdjustments ?? []).filter((adjustment) => adjustment.employeeId !== employeeId),
       ptoRequests: (current.ptoRequests ?? []).filter((request) => request.employeeId !== employeeId),
+      ptoPolicies: (current.ptoPolicies ?? []).map((policy) => ({
+        ...policy,
+        employeeIds: policy.employeeIds.filter((id) => id !== employeeId),
+      })),
     }));
     setEmployeeMessage("");
     setEmployeePendingDeletion(null);
@@ -1157,15 +1344,164 @@ export default function Home() {
     setShowHoursChangeWarning(false);
   }
 
+  function openPtoPolicy() {
+    setEditingPtoPolicyId(null);
+    setPtoPolicyForm({
+      name: "",
+      method: "rate",
+      fixedHours: "120",
+      earnedHours: "1",
+      workedHours: "30",
+      employeeIds: [],
+      startingBalances: {},
+    });
+    setPtoPolicyStep("details");
+    setPtoPolicyError("");
+  }
+
+  function editPtoPolicy(policy: PtoPolicy) {
+    setEditingPtoPolicyId(policy.id);
+    setPtoPolicyForm({
+      name: policy.name,
+      method: policy.method,
+      fixedHours: String(policy.fixedHours || 120),
+      earnedHours: String(policy.earnedHours || 1),
+      workedHours: String(policy.workedHours || 30),
+      employeeIds: [...policy.employeeIds],
+      startingBalances: Object.fromEntries(policy.employeeIds.map((employeeId) => [
+        employeeId,
+        {
+          startDate: policy.startingBalances?.[employeeId]?.startDate ?? today,
+          balance: String(policy.startingBalances?.[employeeId]?.balance ?? 0),
+        },
+      ])),
+    });
+    setPtoPolicyStep("details");
+    setPtoPolicyError("");
+    setIsViewingPtoPolicies(false);
+  }
+
+  function closePtoPolicyEditor() {
+    setPtoPolicyForm(null);
+    setEditingPtoPolicyId(null);
+    setPtoPolicyStep("details");
+    setPtoPolicyError("");
+  }
+
+  function continuePtoPolicy() {
+    if (!ptoPolicyForm) return;
+    if (!ptoPolicyForm.name.trim()) {
+      setPtoPolicyError("Enter a name for this policy.");
+      return;
+    }
+
+    const fixedHours = Number(ptoPolicyForm.fixedHours);
+    const earnedHours = Number(ptoPolicyForm.earnedHours);
+    const workedHours = Number(ptoPolicyForm.workedHours);
+    if (ptoPolicyForm.method === "fixed" && (!Number.isFinite(fixedHours) || fixedHours <= 0)) {
+      setPtoPolicyError("Enter a fixed number of PTO hours greater than zero.");
+      return;
+    }
+    if (ptoPolicyForm.method === "rate" && (
+      !Number.isFinite(earnedHours) || earnedHours <= 0 || !Number.isFinite(workedHours) || workedHours <= 0
+    )) {
+      setPtoPolicyError("Enter valid earned and worked hour amounts greater than zero.");
+      return;
+    }
+
+    setPtoPolicyError("");
+    setPtoPolicyStep("employees");
+  }
+
+  function togglePtoPolicyEmployee(employeeId: number) {
+    setPtoPolicyForm((form) => form ? {
+      ...form,
+      employeeIds: form.employeeIds.includes(employeeId)
+        ? form.employeeIds.filter((id) => id !== employeeId)
+        : [...form.employeeIds, employeeId],
+    } : form);
+  }
+
+  function continuePtoPolicyEmployees() {
+    if (!ptoPolicyForm) return;
+    if (ptoPolicyForm.employeeIds.length === 0) {
+      setPtoPolicyError("Select at least one employee for this policy.");
+      return;
+    }
+
+    setPtoPolicyForm((form) => form ? {
+      ...form,
+      startingBalances: Object.fromEntries(form.employeeIds.map((employeeId) => [
+        employeeId,
+        form.startingBalances[employeeId] ?? { startDate: today, balance: "0" },
+      ])),
+    } : form);
+    setPtoPolicyError("");
+    setPtoPolicyStep("balances");
+  }
+
+  function savePtoPolicy() {
+    if (!ptoPolicyForm) return;
+    if (ptoPolicyForm.employeeIds.length === 0) {
+      setPtoPolicyError("Select at least one employee for this policy.");
+      return;
+    }
+    const hasInvalidStartingBalance = ptoPolicyForm.employeeIds.some((employeeId) => {
+      const startingBalance = ptoPolicyForm.startingBalances[employeeId];
+      return !startingBalance?.startDate || !Number.isFinite(Number(startingBalance.balance));
+    });
+    if (hasInvalidStartingBalance) {
+      setPtoPolicyError("Enter a start date and valid starting balance for every selected employee.");
+      return;
+    }
+
+    const editedPolicyId = editingPtoPolicyId;
+    setState((current) => {
+      const selectedIds = new Set(ptoPolicyForm.employeeIds);
+      const existingPolicies = (current.ptoPolicies ?? [])
+        .filter((policy) => policy.id !== editedPolicyId)
+        .map((policy) => {
+          const employeeIds = policy.employeeIds.filter((employeeId) => !selectedIds.has(employeeId));
+          return {
+            ...policy,
+            employeeIds,
+            startingBalances: Object.fromEntries(employeeIds.map((employeeId) => [
+              employeeId,
+              policy.startingBalances?.[employeeId] ?? { startDate: today, balance: 0 },
+            ])),
+          };
+        })
+        .filter((policy) => policy.employeeIds.length > 0);
+      const newPolicy: PtoPolicy = {
+        id: editedPolicyId ?? nextId(current.ptoPolicies ?? []),
+        name: ptoPolicyForm.name.trim(),
+        method: ptoPolicyForm.method,
+        fixedHours: ptoPolicyForm.method === "fixed" ? Number(ptoPolicyForm.fixedHours) : 0,
+        earnedHours: ptoPolicyForm.method === "rate" ? Number(ptoPolicyForm.earnedHours) : 0,
+        workedHours: ptoPolicyForm.method === "rate" ? Number(ptoPolicyForm.workedHours) : 0,
+        employeeIds: ptoPolicyForm.employeeIds,
+        startingBalances: Object.fromEntries(ptoPolicyForm.employeeIds.map((employeeId) => [
+          employeeId,
+          {
+            startDate: ptoPolicyForm.startingBalances[employeeId].startDate,
+            balance: Number(ptoPolicyForm.startingBalances[employeeId].balance),
+          },
+        ])),
+      };
+
+      return { ...current, ptoPolicies: [...existingPolicies, newPolicy] };
+    });
+    closePtoPolicyEditor();
+    if (editedPolicyId !== null) setIsViewingPtoPolicies(true);
+  }
+
   function openPtoRequest() {
     setPtoRequestForm({
+      compensation: "paid",
       startDate: today,
       endDate: today,
       reason: "",
       explanation: "",
-      useCustomTime: false,
-      startTime: "09:00",
-      endTime: "17:00",
     });
     setPtoRequestError("");
   }
@@ -1182,36 +1518,17 @@ export default function Home() {
       setPtoRequestError("The end date cannot be before the start date.");
       return;
     }
-    if (ptoRequestForm.useCustomTime) {
-      const startMinutes = timeToMinutes(ptoRequestForm.startTime);
-      const endMinutes = timeToMinutes(ptoRequestForm.endTime);
-      if (
-        startMinutes === null
-        || endMinutes === null
-        || startMinutes % 60 !== 0
-        || endMinutes % 60 !== 0
-      ) {
-        setPtoRequestError("PTO can only be requested in whole-hour increments. Choose times ending in :00.");
-        return;
-      }
-      if (startMinutes === null || endMinutes === null || startMinutes >= endMinutes) {
-        setPtoRequestError("The end time must be later than the start time.");
-        return;
-      }
-    }
     const requestedPtoHours = ptoHoursForDateRange(
       ptoRequestForm.startDate,
       ptoRequestForm.endDate,
-      ptoRequestForm.useCustomTime ? ptoRequestForm.startTime : undefined,
-      ptoRequestForm.useCustomTime ? ptoRequestForm.endTime : undefined,
     );
     if (requestedPtoHours <= 0) {
-      setPtoRequestError("Choose at least one weekday and a valid amount of PTO time.");
+      setPtoRequestError("Choose at least one weekday and a valid amount of time off.");
       return;
     }
     const employeePto = ptoRows.find((row) => row.employee.id === activeEmployee.id);
     const ptoHoursLeft = employeePto ? employeePto.ptoHours - employeePto.ptoUsed : 0;
-    if (ptoHoursLeft < requestedPtoHours) {
+    if (ptoRequestForm.compensation === "paid" && ptoHoursLeft < requestedPtoHours) {
       setPtoRequestError("You do not have enough PTO hours. You cannot submit this request.");
       return;
     }
@@ -1228,10 +1545,9 @@ export default function Home() {
         {
           id: nextId(current.ptoRequests ?? []),
           employeeId: activeEmployee.id,
+          compensation: ptoRequestForm.compensation,
           startDate: ptoRequestForm.startDate,
           endDate: ptoRequestForm.endDate,
-          startTime: ptoRequestForm.useCustomTime ? ptoRequestForm.startTime : undefined,
-          endTime: ptoRequestForm.useCustomTime ? ptoRequestForm.endTime : undefined,
           reason: ptoRequestForm.reason as PtoRequest["reason"],
           explanation,
           status: "pending",
@@ -1248,14 +1564,12 @@ export default function Home() {
 
     const request = (state.ptoRequests ?? []).find((entry) => entry.id === reviewingPtoRequestId);
     if (!request || request.status === "cancelled") return;
-    if (status === "approved" && request.status !== "approved") {
+    if (status === "approved" && request.status !== "approved" && request.compensation !== "unpaid") {
       const employeePto = ptoRows.find((row) => row.employee.id === request.employeeId);
       const ptoHoursLeft = employeePto ? employeePto.ptoHours - employeePto.ptoUsed : 0;
       const requestedHours = ptoHoursForDateRange(
         request.startDate,
         request.endDate,
-        request.startTime,
-        request.endTime,
       );
       if (ptoHoursLeft < requestedHours) {
         setPtoReviewError(
@@ -1268,7 +1582,14 @@ export default function Home() {
     setState((current) => ({
       ...current,
       ptoRequests: (current.ptoRequests ?? []).map((request) =>
-        request.id === reviewingPtoRequestId ? { ...request, status } : request,
+        request.id === reviewingPtoRequestId
+          ? {
+              ...request,
+              status,
+              decidedAt: new Date().toISOString(),
+              decidedByEmployeeId: activeEmployeeId,
+            }
+          : request,
       ),
     }));
     setReviewingPtoRequestId(null);
@@ -1288,6 +1609,17 @@ export default function Home() {
           : request,
       ),
     }));
+  }
+
+  function deletePtoRequest(requestId: number) {
+    if (mode !== "manager") return;
+    if (!window.confirm("Delete this time off request? This cannot be undone.")) return;
+
+    setState((current) => ({
+      ...current,
+      ptoRequests: (current.ptoRequests ?? []).filter((request) => request.id !== requestId),
+    }));
+    if (reviewingPtoRequestId === requestId) setReviewingPtoRequestId(null);
   }
 
   function saveWorkedHours(event: FormEvent<HTMLFormElement>) {
@@ -1566,8 +1898,8 @@ export default function Home() {
                   <span>Team</span>
                   <span className={isTeamNavOpen ? "sidebar-chevron open" : "sidebar-chevron"} aria-hidden="true">⌄</span>
                 </button>
-                {isTeamNavOpen ? (
-                  <div className="sidebar-submenu" id="team-sidebar-menu">
+                {isTeamNavOpen || isSidebarCollapsed ? (
+                  <div className={isSidebarCollapsed ? "sidebar-submenu sidebar-submenu-flyout" : "sidebar-submenu"} id="team-sidebar-menu">
                     <button
                       type="button"
                       className={activeView === "employees" ? "active" : ""}
@@ -1603,8 +1935,8 @@ export default function Home() {
                   <span>Schedule</span>
                   <span className={isScheduleNavOpen ? "sidebar-chevron open" : "sidebar-chevron"} aria-hidden="true">⌄</span>
                 </button>
-                {isScheduleNavOpen ? (
-                  <div className="sidebar-submenu" id="schedule-sidebar-menu">
+                {isScheduleNavOpen || isSidebarCollapsed ? (
+                  <div className={isSidebarCollapsed ? "sidebar-submenu sidebar-submenu-flyout" : "sidebar-submenu"} id="schedule-sidebar-menu">
                     <button type="button" className={activeView === "schedule" ? "active" : ""} onClick={() => navigateToView("schedule")}>Shifts</button>
                     <button type="button" className={activeView === "time_off" ? "active" : ""} onClick={() => navigateToView("time_off")}>Time off</button>
                     <button type="button" className={activeView === "my_availability" ? "active" : ""} onClick={() => navigateToView("my_availability")}>My availability</button>
@@ -1626,16 +1958,6 @@ export default function Home() {
               </button>
             ))}
           </nav>
-
-          <section className="side-panel" aria-labelledby="permission-title">
-            <p className="eyebrow">Permissions</p>
-            <h2 id="permission-title">{activeEmployee?.name ?? "Guest"}</h2>
-            <div className="permission-list">
-              {activePermissions.map((permission) => (
-                <span key={permission}>{permissionLabel(permission)}</span>
-              ))}
-            </div>
-          </section>
         </aside>
 
         <section className="workspace" aria-live="polite">
@@ -1664,6 +1986,7 @@ export default function Home() {
                     onClick={() => {
                       if (!isMessagesOpen) {
                         setSelectedConversationId(null);
+                        setSelectedConversationIds([]);
                         setIsCreatingConversation(false);
                         setMessageError("");
                       }
@@ -1741,19 +2064,66 @@ export default function Home() {
                             >
                               ←
                             </button>
-                            <strong>{conversationTitle(selectedConversation, state.employees, activeEmployeeId)}</strong>
+                            {editingConversationNameId === selectedConversation.id ? (
+                              <form className="conversation-name-form" onSubmit={saveConversationName}>
+                                <input
+                                  value={conversationNameDraft}
+                                  onChange={(event) => setConversationNameDraft(event.target.value)}
+                                  onKeyDown={(event) => {
+                                    if (event.key === "Escape") {
+                                      setEditingConversationNameId(null);
+                                      setConversationNameDraft("");
+                                    }
+                                  }}
+                                  placeholder="Group name"
+                                  aria-label="Group conversation name"
+                                  maxLength={60}
+                                  autoFocus
+                                />
+                                <button type="submit">Save</button>
+                              </form>
+                            ) : (
+                              <>
+                                <strong>{conversationTitle(selectedConversation, state.employees, activeEmployeeId)}</strong>
+                                {selectedConversation.participantIds.length > 2
+                                  && selectedConversation.creatorEmployeeId === activeEmployeeId ? (
+                                  <button
+                                    type="button"
+                                    className="edit-conversation-name-button"
+                                    onClick={() => startEditingConversationName(selectedConversation)}
+                                  >
+                                    Edit name
+                                  </button>
+                                ) : null}
+                              </>
+                            )}
                           </div>
                           <div className="conversation-messages">
-                            {selectedConversation.messages.map((message) => (
-                              <div
-                                className={message.senderEmployeeId === activeEmployeeId ? "team-message own" : "team-message"}
-                                key={message.id}
-                              >
-                                <span>{employeeById(state.employees, message.senderEmployeeId)?.name ?? "Team member"}</span>
-                                <p>{message.body}</p>
-                                <time dateTime={message.sentAt}>{formatMessageTime(message.sentAt)}</time>
-                              </div>
-                            ))}
+                            {selectedConversation.messages.map((message, messageIndex) => {
+                              const previousMessage = selectedConversation.messages[messageIndex - 1];
+                              const startsNewDay = !previousMessage || !messagesShareCalendarDay(previousMessage.sentAt, message.sentAt);
+
+                              return (
+                                <div className="message-entry" key={message.id}>
+                                  {startsNewDay ? (
+                                    <time className="message-day-divider" dateTime={message.sentAt}>
+                                      {formatMessageDate(message.sentAt)}
+                                    </time>
+                                  ) : null}
+                                  <div className={message.senderEmployeeId === activeEmployeeId ? "team-message own" : "team-message"}>
+                                    <p>{message.body}</p>
+                                    <div className="team-message-meta">
+                                      <time dateTime={message.sentAt}>{formatMessageTime(message.sentAt)}</time>
+                                      {message.senderEmployeeId === activeEmployeeId ? (
+                                        <span className="message-delivery-status">
+                                          {messageDeliveryStatus(message, selectedConversation)}
+                                        </span>
+                                      ) : null}
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
                           </div>
                           <form className="message-reply-form" onSubmit={sendTeamMessage}>
                             <input
@@ -1767,7 +2137,25 @@ export default function Home() {
                         </div>
                       ) : (
                         <>
-                          <strong className="notification-title">Messages</strong>
+                          <div className="message-list-heading">
+                            <strong className="notification-title">Messages</strong>
+                            {selectedConversationIds.length > 0 ? (
+                              <button
+                                type="button"
+                                className="delete-conversations-button"
+                                onClick={deleteSelectedConversations}
+                                aria-label={`Delete ${selectedConversationIds.length} selected ${selectedConversationIds.length === 1 ? "conversation" : "conversations"}`}
+                                title="Delete selected conversations"
+                              >
+                                <svg viewBox="0 0 24 24" aria-hidden="true">
+                                  <path d="M4 7h16" />
+                                  <path d="M9 7V4h6v3" />
+                                  <path d="m7 7 1 13h8l1-13" />
+                                  <path d="M10 11v5M14 11v5" />
+                                </svg>
+                              </button>
+                            ) : null}
+                          </div>
                           <div className="notification-tabs" role="tablist" aria-label="Message filters">
                             <button
                               type="button"
@@ -1791,19 +2179,30 @@ export default function Home() {
                           <div className="message-conversation-list">
                             {visibleConversations.length > 0 ? visibleConversations.map((conversation) => {
                               const lastMessage = conversation.messages.at(-1);
+                              const isSelected = selectedConversationIds.includes(conversation.id);
                               return (
-                                <button type="button" key={conversation.id} onClick={() => openConversation(conversation.id)}>
-                                  <span className="message-member-avatar" aria-hidden="true">
-                                    {conversationInitials(conversation, state.employees, activeEmployeeId)}
-                                  </span>
-                                  <span className="conversation-preview">
-                                    <strong>{conversationTitle(conversation, state.employees, activeEmployeeId)}</strong>
-                                    <small>{lastMessage?.body ?? "No messages yet"}</small>
-                                  </span>
-                                  {conversationHasUnreadMessages(conversation, activeEmployeeId) ? (
-                                    <span className="unread-dot" aria-label="Unread" />
-                                  ) : null}
-                                </button>
+                                <div className={isSelected ? "message-conversation-row selected" : "message-conversation-row"} key={conversation.id}>
+                                  <button
+                                    type="button"
+                                    className="message-avatar-select"
+                                    onClick={() => toggleConversationSelection(conversation.id)}
+                                    aria-label={`${isSelected ? "Deselect" : "Select"} conversation with ${conversationTitle(conversation, state.employees, activeEmployeeId)}`}
+                                    aria-pressed={isSelected}
+                                  >
+                                    <span className="message-member-avatar" aria-hidden="true">
+                                      {conversationInitials(conversation, state.employees, activeEmployeeId)}
+                                    </span>
+                                  </button>
+                                  <button type="button" className="conversation-open-button" onClick={() => openConversation(conversation.id)}>
+                                    <span className="conversation-preview">
+                                      <strong>{conversationTitle(conversation, state.employees, activeEmployeeId)}</strong>
+                                      <small>{lastMessage?.body ?? "No messages yet"}</small>
+                                    </span>
+                                    {conversationHasUnreadMessages(conversation, activeEmployeeId) ? (
+                                      <span className="unread-dot" aria-label="Unread" />
+                                    ) : null}
+                                  </button>
+                                </div>
                               );
                             }) : <p className="notification-empty">No {messageFilter === "unread" ? "unread " : ""}messages.</p>}
                           </div>
@@ -1834,8 +2233,8 @@ export default function Home() {
                     }}
                     aria-expanded={isNotificationsOpen}
                     aria-haspopup="dialog"
-                    aria-label="Notifications"
-                    title="Notifications"
+                    aria-label={mode === "manager" ? "Notifications" : "Schedule updates"}
+                    title={mode === "manager" ? "Notifications" : "Schedule updates"}
                   >
                     <svg viewBox="0 0 24 24" aria-hidden="true">
                       <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" />
@@ -1847,43 +2246,56 @@ export default function Home() {
                     ) : null}
                   </button>
                   {isNotificationsOpen ? (
-                    <div className="notification-dropdown" role="dialog" aria-label="Notifications">
-                      <strong className="notification-title">Notifications</strong>
-                      <div className="notification-tabs" role="tablist" aria-label="Notification categories">
-                        <button
-                          type="button"
-                          className={activeNotificationTab === "team_requests" ? "active" : ""}
-                          onClick={() => setActiveNotificationTab("team_requests")}
-                          role="tab"
-                          aria-selected={activeNotificationTab === "team_requests"}
-                        >
-                          Team requests
-                        </button>
-                        <button
-                          type="button"
-                          className={activeNotificationTab === "alerts" ? "active" : ""}
-                          onClick={() => setActiveNotificationTab("alerts")}
-                          role="tab"
-                          aria-selected={activeNotificationTab === "alerts"}
-                        >
-                          Alerts
-                        </button>
-                      </div>
-                      <div className="notification-list">
-                        {activeNotificationTab === "team_requests" ? (
-                          notificationRequests.length > 0 ? notificationRequests.map((request) => {
-                            const employee = employeeById(state.employees, request.employeeId);
-                            return (
-                              <div className="notification-item" key={request.id}>
-                                <strong>{employee?.name ?? "Employee"}</strong>
-                                <span>{formatShortDate(request.startDate)} · {capitalize(request.status)}</span>
-                              </div>
-                            );
-                          }) : <p className="notification-empty">No team requests.</p>
-                        ) : (
-                          <p className="notification-empty">No new alerts.</p>
-                        )}
-                      </div>
+                    <div className="notification-dropdown" role="dialog" aria-label={mode === "manager" ? "Notifications" : "Schedule updates"}>
+                      <strong className="notification-title">{mode === "manager" ? "Notifications" : "Schedule updates"}</strong>
+                      {mode === "manager" ? (
+                        <>
+                          <div className="notification-tabs" role="tablist" aria-label="Notification categories">
+                            <button
+                              type="button"
+                              className={activeNotificationTab === "team_requests" ? "active" : ""}
+                              onClick={() => setActiveNotificationTab("team_requests")}
+                              role="tab"
+                              aria-selected={activeNotificationTab === "team_requests"}
+                            >
+                              Team requests
+                            </button>
+                            <button
+                              type="button"
+                              className={activeNotificationTab === "alerts" ? "active" : ""}
+                              onClick={() => setActiveNotificationTab("alerts")}
+                              role="tab"
+                              aria-selected={activeNotificationTab === "alerts"}
+                            >
+                              Alerts
+                            </button>
+                          </div>
+                          <div className="notification-list">
+                            {activeNotificationTab === "team_requests" ? (
+                              notificationRequests.length > 0 ? notificationRequests.map((request) => {
+                                const employee = employeeById(state.employees, request.employeeId);
+                                return (
+                                  <div className="notification-item" key={request.id}>
+                                    <strong>{employee?.name ?? "Employee"}</strong>
+                                    <span>{formatShortDate(request.startDate)} · {capitalize(request.status)}</span>
+                                  </div>
+                                );
+                              }) : <p className="notification-empty">No team requests.</p>
+                            ) : (
+                              <p className="notification-empty">No new alerts.</p>
+                            )}
+                          </div>
+                        </>
+                      ) : (
+                        <div className="notification-list">
+                          {employeeScheduleNotifications.length > 0 ? employeeScheduleNotifications.map((shift) => (
+                            <div className="notification-item" key={shift.id}>
+                              <strong>{shift.role || "Scheduled shift"}</strong>
+                              <span>{formatShortDate(shift.date)} · {formatTimeRange(shift)}</span>
+                            </div>
+                          )) : <p className="notification-empty">No schedule updates.</p>}
+                        </div>
+                      )}
                     </div>
                   ) : null}
                 </div>
@@ -2098,11 +2510,11 @@ export default function Home() {
                   </div>
                   <div className="control-grid">
                     <button type="button" onClick={() => navigateToView("employees")}>Manage employees</button>
-                    <button type="button" onClick={() => setActiveView("schedule")}>Manage schedule</button>
-                    <button type="button" onClick={() => setActiveView("clockins")}>View clock-ins</button>
+                    <button type="button" onClick={() => navigateToView("schedule")}>Manage schedule</button>
+                    <button type="button" onClick={() => navigateToView("clockins")}>View clock-ins</button>
                     <button type="button" onClick={() => {
+                      navigateToView("hours");
                       setActiveHoursSectionTab("pto");
-                      setActiveView("hours");
                     }}>View PTO</button>
                   </div>
                 </section>
@@ -3116,84 +3528,270 @@ export default function Home() {
 
           {(activeView === "time_off" || (activeView === "hours" && activeHoursSectionTab === "pto")) && !isPublicSchedule && (
             <section className="panel feature-panel pto-timeoff-panel">
-              <div className="pto-request-section">
-                <div>
-                  <p className="eyebrow">Time off requests</p>
-                  {mode === "manager" ? <h3>Employee Requests</h3> : null}
-                </div>
-                {mode === "employee" ? (
-                  <button type="button" onClick={openPtoRequest}>Request PTO</button>
-                ) : null}
-              </div>
-              <div className="pto-request-list">
-                {displayedPtoRequests.map((request) => {
-                    const employee = employeeById(state.employees, request.employeeId);
-                    return (
-                      <article className={`pto-request-card${mode === "manager" && request.status !== "cancelled" ? " reviewable" : ""}`} key={request.id}>
-                        <strong className="pto-request-employee">{employee?.name ?? "Employee"}</strong>
-                        <dl className="pto-request-fields">
-                          <div>
-                            <dt>Date requested off:</dt>
-                            <dd>{formatShortDate(request.startDate)}{request.endDate !== request.startDate ? ` - ${formatShortDate(request.endDate)}` : ""}</dd>
+              {!isViewingPtoHistory ? (
+                <>
+                  <div className="pto-request-section pto-current-requests-heading">
+                    <h3>Requests ({pendingPtoRequests.length})</h3>
+                    <div className="pto-request-heading-actions">
+                      {mode === "employee" ? (
+                        <button type="button" className="pto-new-request-button" onClick={openPtoRequest}>Request time off</button>
+                      ) : null}
+                      <button type="button" className="pto-history-link" onClick={() => setIsViewingPtoHistory(true)}>View history</button>
+                    </div>
+                  </div>
+                  <div className="pto-current-request-table" role="table" aria-label="Current time off requests">
+                    <div className="pto-current-request-head" role="row">
+                      <span role="columnheader">Name</span>
+                      <span role="columnheader">Category</span>
+                      <span role="columnheader">Dates</span>
+                      <span role="columnheader">Total hours</span>
+                    </div>
+                    {pendingPtoRequests.map((request) => {
+                      const employee = employeeById(state.employees, request.employeeId);
+                      const totalHours = ptoHoursForDateRange(request.startDate, request.endDate);
+                      return (
+                        <article className="pto-current-request-row" role="row" key={request.id}>
+                          <span role="cell">{employee?.name ?? "Employee"}</span>
+                          <span role="cell">{request.compensation === "unpaid" ? "Unpaid Time Off" : "Paid Time Off"}</span>
+                          <span role="cell">{formatTimeOffRequestDate(request.startDate)}{request.endDate !== request.startDate ? ` – ${formatTimeOffRequestDate(request.endDate)}` : ""}</span>
+                          <div className="pto-current-request-hours" role="cell">
+                            <span>{formatPtoHours(totalHours)}</span>
+                            {mode === "employee" ? (
+                              <button type="button" onClick={() => cancelPtoRequest(request.id)}>Cancel</button>
+                            ) : null}
                           </div>
-                          {request.startTime && request.endTime ? (
-                            <div>
-                              <dt>Time requested:</dt>
-                              <dd>{formatTime12(request.startTime)} - {formatTime12(request.endTime)}</dd>
-                            </div>
+                          {mode === "manager" ? (
+                            <button
+                              type="button"
+                              className="pto-current-request-review"
+                              onClick={() => {
+                                setPtoReviewError("");
+                                setReviewingPtoRequestId(request.id);
+                              }}
+                              aria-label={`Review ${employee?.name ?? "employee"} time off request`}
+                            />
                           ) : null}
-                          <div>
-                            <dt>Reason:</dt>
-                            <dd>{request.reason === "vacation" ? "Vacation" : "Sick / Emergency"}</dd>
-                          </div>
-                          <div>
-                            <dt>Explanation:</dt>
-                            <dd>{request.explanation}</dd>
-                          </div>
-                        </dl>
-                        <span className="pto-request-timestamp">Requested at {formatDateTime(request.requestedAt)}</span>
-                        <div className="pto-request-card-actions">
-                          {mode === "employee" && request.status === "pending" ? (
-                            <button type="button" className="pto-cancel-action" onClick={() => cancelPtoRequest(request.id)}>Cancel</button>
-                          ) : null}
-                          <span className={`pto-request-status ${request.status}`}>{capitalize(request.status)}</span>
-                        </div>
-                        {mode === "manager" && request.status !== "cancelled" ? (
+                        </article>
+                      );
+                    })}
+                    {pendingPtoRequests.length === 0 ? <p className="pto-no-current-requests">No requests</p> : null}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="pto-request-section pto-history-heading">
+                    <h3>Request history</h3>
+                    <button type="button" className="pto-history-link" onClick={() => setIsViewingPtoHistory(false)}>Back to requests</button>
+                  </div>
+                  <div className="pto-history-toolbar">
+                    <strong>{ptoHistoryStatusLabel(ptoHistoryStatusFilter)} ({filteredHistoricalPtoRequests.length})</strong>
+                    <div className="pto-history-controls">
+                      <div className="pto-history-month-control">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPtoHistoryMonth(shiftDateByCalendarTab(ptoHistoryMonth, "month", -1));
+                            setArePtoRequestsExpanded(false);
+                          }}
+                          aria-label="Previous request-history month"
+                        >
+                          <span aria-hidden="true">‹</span>
+                        </button>
+                        <strong>{formatPtoHistoryMonth(ptoHistoryMonth)}</strong>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPtoHistoryMonth(nextPtoHistoryMonth);
+                            setArePtoRequestsExpanded(false);
+                          }}
+                          aria-label="Next request-history month"
+                        >
+                          <span aria-hidden="true">›</span>
+                        </button>
+                      </div>
+                      <div className="pto-history-select-control">
+                        <select
+                          value={ptoHistoryStatusFilter}
+                          onChange={(event) => {
+                            setPtoHistoryStatusFilter(event.target.value as PtoHistoryStatusFilter);
+                            setArePtoRequestsExpanded(false);
+                          }}
+                          aria-label="Filter request history by status"
+                        >
+                          <option value="all">All</option>
+                          <option value="pending">To Review</option>
+                          <option value="approved">Approved</option>
+                          <option value="denied">Denied</option>
+                          <option value="cancelled">Cancelled</option>
+                        </select>
+                      </div>
+                      {mode === "manager" ? (
+                        <div className="pto-history-employee-filter" ref={ptoHistoryEmployeeFilterRef}>
                           <button
                             type="button"
-                            className="pto-request-panel-button"
-                            onClick={() => {
-                              setPtoReviewError("");
-                              setReviewingPtoRequestId(request.id);
-                            }}
-                            aria-label={`Review ${employee?.name ?? "employee"} PTO request`}
-                          />
-                        ) : null}
-                      </article>
-                    );
-                  })}
-                {sortedPtoRequests.length === 0 ? (
-                  <EmptyState text="No PTO requests submitted." />
-                ) : null}
-                {sortedPtoRequests.length > 3 ? (
-                  <button
-                    type="button"
-                    className="pto-requests-expand-button"
-                    onClick={() => setArePtoRequestsExpanded((current) => !current)}
-                    aria-expanded={arePtoRequestsExpanded}
-                    aria-label={arePtoRequestsExpanded ? "Hide older time off requests" : "Show older time off requests"}
-                  >
-                    <span aria-hidden="true">{arePtoRequestsExpanded ? "⌃" : "⌄"}</span>
-                  </button>
-                ) : null}
-              </div>
+                            className="pto-history-employee-trigger"
+                            onClick={() => setIsPtoHistoryEmployeeFilterOpen((open) => !open)}
+                            aria-label="Filter request history by employee"
+                            aria-haspopup="listbox"
+                            aria-expanded={isPtoHistoryEmployeeFilterOpen}
+                          >
+                            <span>{ptoHistoryEmployeeId === "all" ? "All Employees" : employeeById(state.employees, ptoHistoryEmployeeId)?.name ?? "All Employees"}</span>
+                            <span className="pto-history-employee-chevron" aria-hidden="true" />
+                          </button>
+                          {isPtoHistoryEmployeeFilterOpen ? (
+                            <div className="pto-history-employee-menu" role="listbox" aria-label="Employees">
+                              <button
+                                type="button"
+                                className={ptoHistoryEmployeeId === "all" ? "selected" : ""}
+                                onClick={() => {
+                                  setPtoHistoryEmployeeId("all");
+                                  setArePtoRequestsExpanded(false);
+                                  setIsPtoHistoryEmployeeFilterOpen(false);
+                                }}
+                                role="option"
+                                aria-selected={ptoHistoryEmployeeId === "all"}
+                              >
+                                All Employees
+                              </button>
+                              <div className="pto-history-employee-divider" aria-hidden="true" />
+                              {activeEmployees.map((employee) => (
+                                <button
+                                  type="button"
+                                  className={ptoHistoryEmployeeId === employee.id ? "selected" : ""}
+                                  onClick={() => {
+                                    setPtoHistoryEmployeeId(employee.id);
+                                    setArePtoRequestsExpanded(false);
+                                    setIsPtoHistoryEmployeeFilterOpen(false);
+                                  }}
+                                  role="option"
+                                  aria-selected={ptoHistoryEmployeeId === employee.id}
+                                  key={employee.id}
+                                >
+                                  {employee.name}
+                                </button>
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                  <div className="pto-request-list">
+                    {displayedPtoRequests.length > 0 ? (
+                      <div className="pto-request-list-header" aria-hidden="true">
+                        <span>Employee</span>
+                        <span>Request</span>
+                        <span />
+                        <span />
+                      </div>
+                    ) : null}
+                    {displayedPtoRequests.map((request) => {
+                      const employee = employeeById(state.employees, request.employeeId);
+                      const decidedBy = request.decidedByEmployeeId
+                        ? employeeById(state.employees, request.decidedByEmployeeId)
+                        : null;
+                      return (
+                        <article className="pto-request-card" key={request.id}>
+                          <div className="pto-request-employee">
+                            <span className="schedule-avatar" aria-hidden="true">{employeeInitials(employee?.name ?? "Employee")}</span>
+                            <strong>{employee?.name ?? "Employee"}</strong>
+                          </div>
+                          <div className="pto-request-summary">
+                            <span className="pto-request-timestamp">Requested {formatRequestTimestamp(request.requestedAt)}</span>
+                            <strong>{formatTimeOffRequestDate(request.startDate)}{request.endDate !== request.startDate ? ` – ${formatTimeOffRequestDate(request.endDate)}` : ""}</strong>
+                            <span className="pto-request-type">{request.compensation === "unpaid" ? "Unpaid Time Off" : "Paid Time Off"}</span>
+                          </div>
+                          <div className="pto-request-decision">
+                            <strong className={`pto-request-status ${request.status}`}>{capitalize(request.status)}</strong>
+                            {request.decidedAt ? (
+                              <span>by {decidedBy?.name ?? "Manager"} on<br />{formatNumericDate(request.decidedAt)}</span>
+                            ) : null}
+                          </div>
+                          {mode === "manager" ? (
+                            <button
+                              type="button"
+                              className="pto-request-card-open"
+                              onClick={() => {
+                                setPtoReviewError("");
+                                setReviewingPtoRequestId(request.id);
+                              }}
+                              aria-label={`View ${employee?.name ?? "employee"} time off request details`}
+                            />
+                          ) : null}
+                          <div className="pto-request-card-actions">
+                            {mode === "manager" ? (
+                              <>
+                                {request.status !== "cancelled" ? (
+                                  <button
+                                    type="button"
+                                    className="pto-request-icon-action"
+                                    onClick={() => {
+                                      setPtoReviewError("");
+                                      setReviewingPtoRequestId(request.id);
+                                    }}
+                                    aria-label={`Review ${employee?.name ?? "employee"} time off request`}
+                                    title="Review request"
+                                  >
+                                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                                      <path d="M4 20h4l11-11-4-4L4 16v4Z" />
+                                      <path d="m13.8 6.2 4 4" />
+                                    </svg>
+                                  </button>
+                                ) : null}
+                                <button
+                                  type="button"
+                                  className="pto-request-icon-action delete"
+                                  onClick={() => deletePtoRequest(request.id)}
+                                  aria-label={`Delete ${employee?.name ?? "employee"} time off request`}
+                                  title="Delete request"
+                                >
+                                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                                    <path d="M4 7h16" />
+                                    <path d="M9 7V4h6v3" />
+                                    <path d="m7 7 1 13h8l1-13" />
+                                    <path d="M10 11v5M14 11v5" />
+                                  </svg>
+                                </button>
+                              </>
+                            ) : null}
+                          </div>
+                        </article>
+                      );
+                    })}
+                    {filteredHistoricalPtoRequests.length === 0 ? <EmptyState text="No request history for these filters." /> : null}
+                    {filteredHistoricalPtoRequests.length > 1 ? (
+                      <button
+                        type="button"
+                        className="pto-requests-expand-button"
+                        onClick={() => setArePtoRequestsExpanded((current) => !current)}
+                      aria-expanded={arePtoRequestsExpanded}
+                      aria-label={arePtoRequestsExpanded ? "Hide older time off requests" : "Show older time off requests"}
+                    >
+                        <span>{arePtoRequestsExpanded ? "Less" : "More"}</span>
+                    </button>
+                    ) : null}
+                  </div>
+                </>
+              )}
               <div className="pto-balance-section">
                 <div className="panel-heading pto-heading">
                   <div>
                     <p className="eyebrow">Paid time off</p>
-                    <p>Employees earn 1 hour of PTO for every 30 hours worked.</p>
-                    <p className="pto-usage-note">Approved requests use 8 PTO hours per weekday.</p>
                   </div>
+                  {mode === "manager" ? (
+                    <div className="pto-policy-heading-actions">
+                      <button type="button" className="pto-add-policy-button" onClick={openPtoPolicy}>Add policy</button>
+                      {(state.ptoPolicies ?? []).length > 0 ? (
+                        <button
+                          type="button"
+                          className="pto-add-policy-button"
+                          onClick={() => setIsViewingPtoPolicies(true)}
+                        >
+                          View policies
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </div>
                 <div className="pto-list" role="table" aria-label="Employee year-to-date PTO">
                   <div className="pto-row pto-table-head" role="row">
@@ -3250,7 +3848,7 @@ export default function Home() {
             onClick={() => navigateToView(item.id)}
             title={item.label}
           >
-            <span aria-hidden="true">{item.icon}</span>
+            <SidebarNavIcon icon={item.icon} />
             <span>{item.label}</span>
           </button>
         ))}
@@ -3277,12 +3875,271 @@ export default function Home() {
         </div>
       ) : null}
 
+      {mode === "manager" && ptoPolicyForm ? (
+        <div className="modal-backdrop" role="presentation">
+          <div className="pto-policy-modal" role="dialog" aria-modal="true" aria-labelledby="pto-policy-title">
+            <div className="modal-heading">
+              <div>
+                <p className="eyebrow">Paid time off</p>
+                <h2 id="pto-policy-title">
+                  {ptoPolicyStep === "details"
+                    ? editingPtoPolicyId === null ? "Add PTO policy" : "Edit PTO policy"
+                    : ptoPolicyStep === "employees" ? "Choose employees" : "Starting balances"}
+                </h2>
+              </div>
+              <button type="button" onClick={closePtoPolicyEditor} aria-label="Close PTO policy editor">
+                <span aria-hidden="true">&times;</span>
+              </button>
+            </div>
+
+            {ptoPolicyStep === "details" ? (
+              <div className="pto-policy-details">
+                <label className="pto-policy-name-field">
+                  <span>Name this policy</span>
+                  <input
+                    value={ptoPolicyForm.name}
+                    onChange={(event) => setPtoPolicyForm((form) => form ? { ...form, name: event.target.value } : form)}
+                    autoFocus
+                  />
+                </label>
+
+                <fieldset className="pto-policy-methods">
+                  <legend>Accrual method</legend>
+                  <label>
+                    <input
+                      type="radio"
+                      name="pto-policy-method"
+                      checked={ptoPolicyForm.method === "fixed"}
+                      onChange={() => setPtoPolicyForm((form) => form ? { ...form, method: "fixed" } : form)}
+                    />
+                    <span>Fixed <small>(example: 120 hours per year)</small></span>
+                  </label>
+                  <label>
+                    <input
+                      type="radio"
+                      name="pto-policy-method"
+                      checked={ptoPolicyForm.method === "rate"}
+                      onChange={() => setPtoPolicyForm((form) => form ? { ...form, method: "rate" } : form)}
+                    />
+                    <span>Rate <small>(example: 1 hour per 30 worked)</small></span>
+                  </label>
+                </fieldset>
+
+                {ptoPolicyForm.method === "fixed" ? (
+                  <label className="pto-policy-fixed-rate">
+                    <span>Annual allowance</span>
+                    <span className="pto-policy-number-field">
+                      <input
+                        type="number"
+                        min="0.01"
+                        step="0.01"
+                        value={ptoPolicyForm.fixedHours}
+                        onChange={(event) => setPtoPolicyForm((form) => form ? { ...form, fixedHours: event.target.value } : form)}
+                      />
+                      <b>hours per year</b>
+                    </span>
+                  </label>
+                ) : (
+                  <div className="pto-policy-rate">
+                    <strong>Rate</strong>
+                    <div>
+                      <span className="pto-policy-number-field">
+                        <input
+                          type="number"
+                          min="0.01"
+                          step="0.01"
+                          value={ptoPolicyForm.earnedHours}
+                          onChange={(event) => setPtoPolicyForm((form) => form ? { ...form, earnedHours: event.target.value } : form)}
+                          aria-label="PTO hours earned"
+                        />
+                        <b>hours</b>
+                      </span>
+                      <span>earned per</span>
+                      <span className="pto-policy-number-field">
+                        <input
+                          type="number"
+                          min="0.01"
+                          step="0.01"
+                          value={ptoPolicyForm.workedHours}
+                          onChange={(event) => setPtoPolicyForm((form) => form ? { ...form, workedHours: event.target.value } : form)}
+                          aria-label="Hours worked for PTO accrual"
+                        />
+                        <b>hours</b>
+                      </span>
+                      <span>worked</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : ptoPolicyStep === "employees" ? (
+              <div className="pto-policy-employee-step">
+                <p>Select everyone who should earn PTO through this policy. Managers can be included.</p>
+                <div className="pto-policy-employee-list">
+                  {activeEmployees.map((employee) => (
+                    <label key={employee.id}>
+                      <input
+                        type="checkbox"
+                        checked={ptoPolicyForm.employeeIds.includes(employee.id)}
+                        onChange={() => togglePtoPolicyEmployee(employee.id)}
+                      />
+                      <span className="schedule-avatar" aria-hidden="true">{employeeInitials(employee.name)}</span>
+                      <span>
+                        <strong>{employee.name}</strong>
+                        <small>{employee.accessLevel === "Manager" ? "Manager" : employee.role || "Employee"}</small>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="pto-policy-balance-step">
+                <p>If your team members have an existing balance, enter those hours here. Their PTO begins accruing from the selected start date.</p>
+                <div className="pto-policy-balance-table">
+                  <div className="pto-policy-balance-header" aria-hidden="true">
+                    <span>Employee</span>
+                    <span>Employee start date</span>
+                    <span>PTO start balance</span>
+                  </div>
+                  {ptoPolicyForm.employeeIds.map((employeeId) => {
+                    const employee = employeeById(activeEmployees, employeeId);
+                    const startingBalance = ptoPolicyForm.startingBalances[employeeId];
+                    if (!employee || !startingBalance) return null;
+
+                    return (
+                      <div className="pto-policy-balance-row" key={employeeId}>
+                        <div className="pto-policy-balance-employee">
+                          <span className="schedule-avatar" aria-hidden="true">{employeeInitials(employee.name)}</span>
+                          <span>
+                            <strong>{employee.name}</strong>
+                            <small>{employee.accessLevel === "Manager" ? "Manager" : employee.role || "Employee"}</small>
+                          </span>
+                        </div>
+                        <label>
+                          <span>Employee start date</span>
+                          <input
+                            type="date"
+                            value={startingBalance.startDate}
+                            onChange={(event) => setPtoPolicyForm((form) => form ? {
+                              ...form,
+                              startingBalances: {
+                                ...form.startingBalances,
+                                [employeeId]: { ...form.startingBalances[employeeId], startDate: event.target.value },
+                              },
+                            } : form)}
+                          />
+                        </label>
+                        <label>
+                          <span>PTO start balance</span>
+                          <span className="pto-policy-balance-input">
+                            <input
+                              type="number"
+                              step="0.01"
+                              value={startingBalance.balance}
+                              onChange={(event) => setPtoPolicyForm((form) => form ? {
+                                ...form,
+                                startingBalances: {
+                                  ...form.startingBalances,
+                                  [employeeId]: { ...form.startingBalances[employeeId], balance: event.target.value },
+                                },
+                              } : form)}
+                            />
+                            <b>hrs</b>
+                          </span>
+                        </label>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {ptoPolicyError ? <p className="shift-error-message" role="alert">{ptoPolicyError}</p> : null}
+            <div className="pto-policy-actions">
+              <button
+                type="button"
+                className="secondary-action"
+                onClick={() => {
+                  if (ptoPolicyStep === "balances") {
+                    setPtoPolicyStep("employees");
+                    setPtoPolicyError("");
+                  } else if (ptoPolicyStep === "employees") {
+                    setPtoPolicyStep("details");
+                    setPtoPolicyError("");
+                  } else {
+                    closePtoPolicyEditor();
+                  }
+                }}
+              >
+                {ptoPolicyStep === "details" ? "Cancel" : "Back"}
+              </button>
+              <button
+                type="button"
+                onClick={ptoPolicyStep === "details" ? continuePtoPolicy : ptoPolicyStep === "employees" ? continuePtoPolicyEmployees : savePtoPolicy}
+              >
+                {ptoPolicyStep === "balances" ? "Save policy" : "Next"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {mode === "manager" && isViewingPtoPolicies && (state.ptoPolicies ?? []).length > 0 ? (
+        <div className="modal-backdrop" role="presentation">
+          <div className="pto-policy-modal pto-saved-policies-modal" role="dialog" aria-modal="true" aria-labelledby="saved-pto-policies-title">
+            <div className="modal-heading">
+              <div>
+                <p className="eyebrow">Paid time off</p>
+                <h2 id="saved-pto-policies-title">Saved policies</h2>
+              </div>
+              <button type="button" onClick={() => setIsViewingPtoPolicies(false)} aria-label="Close saved PTO policies">
+                <span aria-hidden="true">&times;</span>
+              </button>
+            </div>
+            <div className="pto-saved-policy-list">
+              {(state.ptoPolicies ?? []).map((policy) => {
+                const assignedEmployees = policy.employeeIds
+                  .map((employeeId) => employeeById(state.employees, employeeId)?.name)
+                  .filter((name): name is string => Boolean(name));
+                return (
+                  <article className="pto-saved-policy-card" key={policy.id}>
+                    <button
+                      type="button"
+                      className="pto-policy-edit-button"
+                      onClick={() => editPtoPolicy(policy)}
+                      aria-label={`Edit ${policy.name} policy`}
+                      title="Edit policy"
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M4 20h4l11-11-4-4L4 16v4Z" />
+                        <path d="m13.8 6.2 4 4" />
+                      </svg>
+                    </button>
+                    <div>
+                      <h3>{policy.name}</h3>
+                      <p>
+                        {policy.method === "fixed"
+                          ? `${policy.fixedHours} hours per year`
+                          : `${policy.earnedHours} hours earned per ${policy.workedHours} hours worked`}
+                      </p>
+                    </div>
+                    <div>
+                      <span>Employees</span>
+                      <p>{assignedEmployees.length > 0 ? assignedEmployees.join(", ") : "No employees assigned"}</p>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {mode === "manager" && reviewingPtoRequest ? (
         <div className="modal-backdrop" role="presentation">
           <div className="pto-review-modal" role="dialog" aria-modal="true" aria-labelledby="pto-review-title">
             <div className="modal-heading">
               <div>
-                <p className="eyebrow">PTO request</p>
+                <p className="eyebrow">Time off request</p>
                 <h2 id="pto-review-title">{employeeById(state.employees, reviewingPtoRequest.employeeId)?.name ?? "Employee"}</h2>
               </div>
               <button type="button" onClick={() => setReviewingPtoRequestId(null)} aria-label="Close PTO review">
@@ -3291,25 +4148,29 @@ export default function Home() {
             </div>
             <dl className="pto-review-details">
               <div>
-                <dt>Date requested off</dt>
+                <dt>Date requested off:</dt>
                 <dd>{formatShortDate(reviewingPtoRequest.startDate)}{reviewingPtoRequest.endDate !== reviewingPtoRequest.startDate ? ` - ${formatShortDate(reviewingPtoRequest.endDate)}` : ""}</dd>
               </div>
               <div>
-                <dt>Reason</dt>
+                <dt>Time off type:</dt>
+                <dd>{reviewingPtoRequest.compensation === "unpaid" ? "Unpaid time off" : "Paid time off"}</dd>
+              </div>
+              <div>
+                <dt>Reason:</dt>
                 <dd>{reviewingPtoRequest.reason === "vacation" ? "Vacation" : "Sick / Emergency"}</dd>
               </div>
-              {reviewingPtoRequest.startTime && reviewingPtoRequest.endTime ? (
-                <div>
-                  <dt>Time requested</dt>
-                  <dd>{formatTime12(reviewingPtoRequest.startTime)} - {formatTime12(reviewingPtoRequest.endTime)}</dd>
-                </div>
-              ) : null}
             </dl>
             <div className="pto-review-explanation">
               <strong>Explanation</strong>
               <p>{reviewingPtoRequest.explanation}</p>
             </div>
-            <p className="pto-review-prompt">Approve or deny this PTO request?</p>
+            <button type="button" className="pto-message-employee-action" onClick={messagePtoRequestEmployee}>
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" />
+              </svg>
+              Message employee
+            </button>
+            <p className="pto-review-prompt">Approve or deny this time off request?</p>
             {ptoReviewError ? <p className="shift-error-message" role="alert">{ptoReviewError}</p> : null}
             <div className="pto-review-actions">
               <button type="button" className="approve-action" onClick={() => decidePtoRequest("approved")}>Approve</button>
@@ -3324,13 +4185,34 @@ export default function Home() {
           <form className="pto-request-modal" onSubmit={submitPtoRequest} role="dialog" aria-modal="true" aria-labelledby="pto-request-title">
             <div className="modal-heading">
               <div>
-                <p className="eyebrow">Paid time off</p>
-                <h2 id="pto-request-title">Request PTO</h2>
+                <p className="eyebrow">Time off</p>
+                <h2 id="pto-request-title">Request time off</h2>
               </div>
-              <button type="button" onClick={() => setPtoRequestForm(null)} aria-label="Close PTO request">
+              <button type="button" onClick={() => setPtoRequestForm(null)} aria-label="Close time off request">
                 <span aria-hidden="true">&times;</span>
               </button>
             </div>
+            <fieldset className="pto-compensation-options">
+              <legend>Time off type</legend>
+              <label>
+                <input
+                  type="radio"
+                  name="time-off-compensation"
+                  checked={ptoRequestForm.compensation === "paid"}
+                  onChange={() => setPtoRequestForm((form) => form ? { ...form, compensation: "paid" } : form)}
+                />
+                <span>Paid time off</span>
+              </label>
+              <label>
+                <input
+                  type="radio"
+                  name="time-off-compensation"
+                  checked={ptoRequestForm.compensation === "unpaid"}
+                  onChange={() => setPtoRequestForm((form) => form ? { ...form, compensation: "unpaid" } : form)}
+                />
+                <span>Unpaid time off</span>
+              </label>
+            </fieldset>
             <div className="pto-request-dates">
               <label>
                 <span>First day off</span>
@@ -3353,40 +4235,7 @@ export default function Home() {
                 />
               </label>
             </div>
-            <label className="pto-custom-time-toggle">
-              <input
-                type="checkbox"
-                checked={ptoRequestForm.useCustomTime}
-                onChange={(event) => setPtoRequestForm((form) => form ? { ...form, useCustomTime: event.target.checked } : form)}
-              />
-              <span>Specify hours instead of requesting full days</span>
-            </label>
-            {ptoRequestForm.useCustomTime ? (
-              <div className="pto-request-times">
-                <label>
-                  <span>Start time</span>
-                  <input
-                    type="time"
-                    step="3600"
-                    value={ptoRequestForm.startTime}
-                    onChange={(event) => setPtoRequestForm((form) => form ? { ...form, startTime: event.target.value } : form)}
-                    required
-                  />
-                </label>
-                <label>
-                  <span>End time</span>
-                  <input
-                    type="time"
-                    step="3600"
-                    value={ptoRequestForm.endTime}
-                    onChange={(event) => setPtoRequestForm((form) => form ? { ...form, endTime: event.target.value } : form)}
-                    required
-                  />
-                </label>
-              </div>
-            ) : (
-              <p className="pto-full-shift-note">Full-day requests use 8 PTO hours per selected weekday.</p>
-            )}
+            <p className="pto-full-shift-note">Each selected weekday counts as one full 8-hour day.</p>
             <fieldset className="pto-reason-options">
               <legend>Reason</legend>
               <label>
@@ -3411,26 +4260,30 @@ export default function Home() {
               <textarea
                 value={ptoRequestForm.explanation}
                 onChange={(event) => setPtoRequestForm((form) => form ? { ...form, explanation: event.target.value } : form)}
-                placeholder="Explain your PTO request"
+                placeholder="Explain your time off request"
                 maxLength={timeExceptionExplanationLimit}
                 required
               />
               <small>{ptoRequestForm.explanation.length}/{timeExceptionExplanationLimit}</small>
             </label>
-            <dl className="pto-request-preview" aria-live="polite">
-              <div>
-                <dt>PTO available:</dt>
-                <dd>{formatPtoHours(activeEmployeePtoLeft)}</dd>
-              </div>
-              <div>
-                <dt>PTO used:</dt>
-                <dd>{formatPtoHours(ptoRequestPreviewHours)}</dd>
-              </div>
-              <div className={ptoRequestPreviewHours > activeEmployeePtoLeft ? "insufficient" : ""}>
-                <dt>PTO left:</dt>
-                <dd>{formatPtoHours(activeEmployeePtoLeft - ptoRequestPreviewHours)}</dd>
-              </div>
-            </dl>
+            {ptoRequestForm.compensation === "paid" ? (
+              <dl className="pto-request-preview" aria-live="polite">
+                <div>
+                  <dt>PTO available:</dt>
+                  <dd>{formatPtoHours(activeEmployeePtoLeft)}</dd>
+                </div>
+                <div>
+                  <dt>PTO used:</dt>
+                  <dd>{formatPtoHours(ptoRequestPreviewHours)}</dd>
+                </div>
+                <div className={ptoRequestPreviewHours > activeEmployeePtoLeft ? "insufficient" : ""}>
+                  <dt>PTO left:</dt>
+                  <dd>{formatPtoHours(activeEmployeePtoLeft - ptoRequestPreviewHours)}</dd>
+                </div>
+              </dl>
+            ) : (
+              <p className="pto-unpaid-note" aria-live="polite">Unpaid time off will not use your PTO balance.</p>
+            )}
             {ptoRequestError ? <p className="shift-error-message" role="alert">{ptoRequestError}</p> : null}
             <div className="hours-edit-actions">
               <button type="button" onClick={() => setPtoRequestForm(null)}>Cancel</button>
@@ -3978,6 +4831,35 @@ function readStoredState() {
       unassignedDepartment ?? fallbackDepartment,
       ...savedDepartments.filter((department) => department !== unassignedDepartment),
     ];
+    const currentYearStart = `${new Date().getFullYear()}-01-01`;
+    const ptoPolicies: PtoPolicy[] = Array.isArray(parsed.ptoPolicies)
+      ? parsed.ptoPolicies.map((policy) => {
+          const policyEmployeeIds = (policy.employeeIds ?? []).filter((employeeId) => employeeIds.has(employeeId));
+          return {
+            ...policy,
+            fixedHours: Number(policy.fixedHours) || 0,
+            earnedHours: Number(policy.earnedHours) || 0,
+            workedHours: Number(policy.workedHours) || 0,
+            employeeIds: policyEmployeeIds,
+            startingBalances: Object.fromEntries(policyEmployeeIds.map((employeeId) => [
+              employeeId,
+              policy.startingBalances?.[employeeId] ?? { startDate: currentYearStart, balance: 0 },
+            ])),
+          };
+        })
+      : [{
+          id: 1,
+          name: "Standard PTO",
+          method: "rate",
+          fixedHours: 0,
+          earnedHours: 1,
+          workedHours: 30,
+          employeeIds: Array.from(employeeIds),
+          startingBalances: Object.fromEntries(Array.from(employeeIds).map((employeeId) => [
+            employeeId,
+            { startDate: currentYearStart, balance: 0 },
+          ])),
+        }];
 
     return {
       ...parsed,
@@ -3986,16 +4868,29 @@ function readStoredState() {
       shifts: parsed.shifts.filter((shift) => employeeIds.has(shift.employeeId)),
       clockEvents: parsed.clockEvents.filter((event) => employeeIds.has(event.employeeId)),
       hoursAdjustments: (parsed.hoursAdjustments ?? []).filter((adjustment) => employeeIds.has(adjustment.employeeId)),
-      ptoRequests: (parsed.ptoRequests ?? []).filter((request) => employeeIds.has(request.employeeId)),
+      ptoRequests: (parsed.ptoRequests ?? [])
+        .filter((request) => employeeIds.has(request.employeeId))
+        .map((request) => ({
+          ...request,
+          compensation: request.compensation === "unpaid" ? "unpaid" : "paid",
+        })),
+      ptoPolicies,
       conversations: (parsed.conversations ?? [])
-        .map((conversation) => ({
-          ...conversation,
-          participantIds: conversation.participantIds.filter((employeeId) => employeeIds.has(employeeId)),
-          messages: (conversation.messages ?? []).map((message) => ({
-            ...message,
-            readByEmployeeIds: message.readByEmployeeIds ?? [],
-          })),
-        }))
+        .map((conversation) => {
+          const participantIds = conversation.participantIds.filter((employeeId) => employeeIds.has(employeeId));
+          const creatorEmployeeId = participantIds.includes(conversation.creatorEmployeeId)
+            ? conversation.creatorEmployeeId
+            : participantIds[0] ?? 0;
+          return {
+            ...conversation,
+            creatorEmployeeId,
+            participantIds,
+            messages: (conversation.messages ?? []).map((message) => ({
+              ...message,
+              readByEmployeeIds: message.readByEmployeeIds ?? [],
+            })),
+          };
+        })
         .filter((conversation) => conversation.participantIds.length > 0),
     };
   } catch {
@@ -4042,6 +4937,32 @@ function formatSavedTime(value: number) {
     hour: "numeric",
     minute: "2-digit",
     second: "2-digit",
+  }).format(new Date(value));
+}
+
+function formatTimeOffRequestDate(date: string) {
+  return new Intl.DateTimeFormat("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(new Date(`${date}T12:00:00`)).replace(",", "");
+}
+
+function formatRequestTimestamp(value: string) {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(value)).replace(/\s([AP]M)$/i, (suffix) => suffix.trim().toLowerCase());
+}
+
+function formatNumericDate(value: string) {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "2-digit",
+    day: "2-digit",
+    year: "numeric",
   }).format(new Date(value));
 }
 
@@ -4159,6 +5080,17 @@ function shiftDateByRange(date: string, range: CopyRange, direction: -1 | 1) {
   }
 
   return toDateInputValue(selectedDate);
+}
+
+function formatPtoHistoryMonth(date: string) {
+  const month = new Intl.DateTimeFormat("en-US", { month: "short" }).format(new Date(`${date}T12:00:00`));
+  return `${month}, ${date.slice(0, 4)}`;
+}
+
+function ptoHistoryStatusLabel(status: PtoHistoryStatusFilter) {
+  if (status === "all") return "All";
+  if (status === "pending") return "To Review";
+  return capitalize(status);
 }
 
 function shiftDateByCalendarTab(date: string, tab: CalendarTab, direction: -1 | 1) {
@@ -4466,7 +5398,22 @@ function conversationHasUnreadMessages(conversation: TeamConversation, employeeI
   );
 }
 
+function messageDeliveryStatus(message: TeamMessage, conversation: TeamConversation) {
+  const recipientIds = conversation.participantIds.filter(
+    (employeeId) => employeeId !== message.senderEmployeeId,
+  );
+  const allRecipientsHaveRead = recipientIds.length > 0 && recipientIds.every(
+    (employeeId) => message.readByEmployeeIds.includes(employeeId),
+  );
+
+  return allRecipientsHaveRead ? "Read" : "Delivered";
+}
+
 function conversationTitle(conversation: TeamConversation, employees: Employee[], activeEmployeeId: number) {
+  if (conversation.participantIds.length > 2 && conversation.name?.trim()) {
+    return conversation.name.trim();
+  }
+
   const names = conversation.participantIds
     .filter((employeeId) => employeeId !== activeEmployeeId)
     .map((employeeId) => employeeById(employees, employeeId)?.name)
@@ -4490,11 +5437,28 @@ function formatMessageTime(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
   return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
     hour: "numeric",
     minute: "2-digit",
   }).format(date);
+}
+
+function formatMessageDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(date);
+}
+
+function messagesShareCalendarDay(firstValue: string, secondValue: string) {
+  const firstDate = new Date(firstValue);
+  const secondDate = new Date(secondValue);
+  if (Number.isNaN(firstDate.getTime()) || Number.isNaN(secondDate.getTime())) return false;
+  return firstDate.getFullYear() === secondDate.getFullYear()
+    && firstDate.getMonth() === secondDate.getMonth()
+    && firstDate.getDate() === secondDate.getDate();
 }
 
 function adjustedWorkedHoursForRange(
@@ -4591,9 +5555,22 @@ function yearToDateRange(date: Date) {
   };
 }
 
+function ptoHoursEarnedForPolicy(hoursWorked: number, policy: PtoPolicy | undefined, employeeId: number) {
+  if (!policy) return 0;
+  const startingBalance = policy.startingBalances?.[employeeId]?.balance ?? 0;
+  if (policy.method === "fixed") return startingBalance + policy.fixedHours;
+  if (policy.earnedHours <= 0 || policy.workedHours <= 0) return startingBalance;
+
+  return startingBalance + Math.floor((hoursWorked / policy.workedHours) * policy.earnedHours);
+}
+
 function ptoHoursUsedThisYear(requests: PtoRequest[], employeeId: number, year: number) {
   return requests
-    .filter((request) => request.employeeId === employeeId && request.status === "approved")
+    .filter((request) => (
+      request.employeeId === employeeId
+      && request.status === "approved"
+      && request.compensation !== "unpaid"
+    ))
     .reduce((total, request) => {
       const start = parseLocalDate(request.startDate);
       const end = parseLocalDate(request.endDate);
@@ -4606,13 +5583,11 @@ function ptoHoursUsedThisYear(requests: PtoRequest[], employeeId: number, year: 
       return total + ptoHoursForDateRange(
         toDateInputValue(current),
         toDateInputValue(finalDay),
-        request.startTime,
-        request.endTime,
       );
     }, 0);
 }
 
-function ptoHoursForDateRange(startDate: string, endDate: string, startTime?: string, endTime?: string) {
+function ptoHoursForDateRange(startDate: string, endDate: string) {
   const current = parseLocalDate(startDate);
   const end = parseLocalDate(endDate);
   let weekdays = 0;
@@ -4622,13 +5597,7 @@ function ptoHoursForDateRange(startDate: string, endDate: string, startTime?: st
     current.setDate(current.getDate() + 1);
   }
 
-  const startMinutes = startTime ? timeToMinutes(startTime) : null;
-  const endMinutes = endTime ? timeToMinutes(endTime) : null;
-  const hoursPerDay = startMinutes !== null && endMinutes !== null
-    ? Math.max(0, endMinutes - startMinutes) / 60
-    : 8;
-
-  return weekdays * hoursPerDay;
+  return weekdays * 8;
 }
 
 function formatWorkedHours(hours: number) {
@@ -4658,19 +5627,26 @@ function roundHoursToMinutes(hours: number, minutes: HoursRounding) {
   return roundedMinutes / 60;
 }
 
-function permissionLabel(permission: Permission) {
-  return permission.replaceAll("_", " ");
-}
-
 function SidebarNavIcon({ icon }: { icon: string }) {
+  let paths;
+
+  if (icon === "home") {
+    paths = <><path d="m3.5 10.5 8.5-7 8.5 7" /><path d="M5.5 9.5V21h13V9.5M9.5 21v-6h5v6" /></>;
+  } else if (icon === "person") {
+    paths = <><circle cx="12" cy="8" r="4" /><path d="M4.5 21c.7-4.3 3.2-6.5 7.5-6.5s6.8 2.2 7.5 6.5" /></>;
+  } else if (icon === "calendar") {
+    paths = <><rect x="3.5" y="5" width="17" height="16" rx="2.5" /><path d="M8 3v4M16 3v4M3.5 10h17M8 14h2M14 14h2M8 18h2M14 18h2" /></>;
+  } else if (icon === "clock") {
+    paths = <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3.5 2" /></>;
+  } else if (icon === "flag") {
+    paths = <><path d="M5 22V3" /><path d="M5 4h11.5l-1.8 3 1.8 3H5" /></>;
+  } else {
+    paths = <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21h-4v-.08A1.7 1.7 0 0 0 8.94 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.57 15 1.7 1.7 0 0 0 3 14H3v-4h.08A1.7 1.7 0 0 0 4.6 8.94a1.7 1.7 0 0 0-.34-1.88L4.2 7l2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.57 1.7 1.7 0 0 0 10 3.08V3h4v.08A1.7 1.7 0 0 0 15.06 4.6a1.7 1.7 0 0 0 1.88-.34L17 4.2 19.8 7l-.06.06a1.7 1.7 0 0 0-.34 1.88A1.7 1.7 0 0 0 20.92 10H21v4h-.08A1.7 1.7 0 0 0 19.4 15Z" /></>;
+  }
+
   return (
     <span className="nav-icon" aria-hidden="true">
-      {icon === "gear" ? (
-        <svg viewBox="0 0 24 24">
-          <circle cx="12" cy="12" r="3" />
-          <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21h-4v-.08A1.7 1.7 0 0 0 8.94 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.57 15 1.7 1.7 0 0 0 3 14H3v-4h.08A1.7 1.7 0 0 0 4.6 8.94a1.7 1.7 0 0 0-.34-1.88L4.2 7l2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.57 1.7 1.7 0 0 0 10 3.08V3h4v.08A1.7 1.7 0 0 0 15.06 4.6a1.7 1.7 0 0 0 1.88-.34L17 4.2 19.8 7l-.06.06a1.7 1.7 0 0 0-.34 1.88A1.7 1.7 0 0 0 20.92 10H21v4h-.08A1.7 1.7 0 0 0 19.4 15Z" />
-        </svg>
-      ) : icon}
+      <svg viewBox="0 0 24 24">{paths}</svg>
     </span>
   );
 }

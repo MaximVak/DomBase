@@ -43,7 +43,7 @@ test("server-renders the DomBase staff shell", async () => {
 test("dashboard navigation is labeled Home and shows the signed-in mode", async () => {
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
 
-  assert.match(page, /id: "dashboard", label: "Home", icon: "H"/);
+  assert.match(page, /id: "dashboard", label: "Home", icon: "home"/);
   assert.match(page, /mode === "manager" \? "Manager mode" : "Employee mode"/);
   assert.match(page, /activeViewLabel\(activeView, mode\)/);
 });
@@ -51,7 +51,7 @@ test("dashboard navigation is labeled Home and shows the signed-in mode", async 
 test("Team is a sidebar dropdown beneath Home with roster and role routes", async () => {
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
 
-  assert.match(page, /label: "Home", icon: "H"[^]*label: "Team", icon: "T"[^]*label: "Schedule", icon: "S"/);
+  assert.match(page, /label: "Home", icon: "home"[^]*label: "Team", icon: "person"[^]*label: "Schedule", icon: "calendar"/);
   assert.match(page, /className="sidebar-nav-group"/);
   assert.match(page, /aria-controls="team-sidebar-menu"/);
   assert.match(page, />\s*Roster\s*<\/button>/);
@@ -213,14 +213,29 @@ test("starter preview code is no longer wired into DomBase", async () => {
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
 });
 
-test("manager PTO view accrues one hour per 30 hours worked", async () => {
+test("manager PTO view supports configurable fixed and rate policies", async () => {
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
 
   assert.doesNotMatch(page, /id: "pto", label: "PTO"/);
   assert.match(page, /HoursSectionTab/);
   assert.match(page, /View hours/);
   assert.match(page, /View PTO/);
-  assert.match(page, /ptoHours: Math\.floor\(hoursWorked \/ 30\)/);
+  assert.match(page, /ptoHours: ptoHoursEarnedForPolicy\(accrualHoursWorked, ptoPolicy, employee\.id\)/);
+  assert.match(page, /function ptoHoursEarnedForPolicy/);
+  assert.match(page, /setPtoPolicyStep\("balances"\)/);
+  assert.match(page, /"Starting balances"/);
+  assert.match(page, />PTO start balance</);
+  assert.match(page, /startingBalances:/);
+  assert.match(page, /earnedHours: 1,[^]*workedHours: 30/);
+  assert.match(page, />Fixed <small>/);
+  assert.match(page, />Rate <small>/);
+  assert.match(page, /function savePtoPolicy/);
+  assert.match(page, /View policies/);
+  assert.match(page, /isViewingPtoPolicies/);
+  assert.match(page, />Saved policies</);
+  assert.match(page, /function editPtoPolicy/);
+  assert.match(page, /className="pto-policy-edit-button"/);
+  assert.match(page, /"Edit PTO policy"/);
   assert.doesNotMatch(page, /formatDecimalHours/);
   assert.match(page, /Hours worked YTD/);
   assert.match(page, /PTO earned/);
@@ -247,11 +262,11 @@ test("manager can persist manual worked-hour adjustments", async () => {
 test("employee Hours view is read-only and filtered to the signed-in employee", async () => {
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
 
-  assert.match(page, /id: "hours", label: "Hours", icon: "H"/);
+  assert.match(page, /id: "hours", label: "Hours", icon: "clock"/);
   assert.match(page, /employee\.id === activeEmployeeId/);
   assert.match(page, /mode === "manager" \? \(/);
   assert.match(page, /mode === "manager" \? hoursRounding : "actual"/);
-  assert.match(page, /if \(view === "hours"\) setActiveHoursSectionTab\("hours"\)/);
+  assert.match(page, /if \(view === "hours"\) \{[\s\S]*?setActiveHoursSectionTab\("hours"\)/);
 });
 
 test("employees can submit persistent PTO requests with required details", async () => {
@@ -261,31 +276,75 @@ test("employees can submit persistent PTO requests with required details", async
   assert.match(page, /function submitPtoRequest/);
   assert.match(page, /Sick \/ Emergency/);
   assert.match(page, /Vacation/);
-  assert.match(page, /Explain your PTO request/);
+  assert.match(page, /Explain your time off request/);
+  assert.match(page, />Paid time off</);
+  assert.match(page, />Unpaid time off</);
+  assert.match(page, /compensation: ptoRequestForm\.compensation/);
   assert.match(page, /Submit request/);
-  assert.match(page, /Requested at \{formatDateTime\(request\.requestedAt\)\}/);
+  assert.match(page, /Requested \{formatRequestTimestamp\(request\.requestedAt\)\}/);
   assert.match(page, /You do not have enough PTO hours\. You cannot submit this request\./);
   assert.match(page, /This employee does not have enough PTO hours/);
   assert.match(page, /function ptoHoursForDateRange/);
-  assert.match(page, /Specify hours instead of requesting full days/);
-  assert.match(page, /type="time"/);
-  assert.match(page, /step="3600"/);
-  assert.match(page, /PTO can only be requested in whole-hour increments/);
+  assert.doesNotMatch(page, /useCustomTime/);
+  assert.doesNotMatch(page, /Specify hours instead of requesting full days/);
+  assert.match(page, /Each selected weekday counts as one full 8-hour day/);
+  assert.match(page, /return weekdays \* 8/);
   assert.match(page, /PTO available:/);
   assert.match(page, /PTO used:/);
   assert.match(page, /PTO left:/);
   assert.match(page, /function cancelPtoRequest/);
   assert.match(page, />Cancel<\/button>/);
+  assert.match(page, /pendingPtoRequests/);
+  assert.match(page, /filteredHistoricalPtoRequests/);
+  assert.match(page, /View history/);
+  assert.match(page, /Back to requests/);
+  assert.match(page, /pto-current-request-table/);
+  assert.match(page, />Total hours</);
+});
+
+test("request history supports month, status, and employee filters", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+
+  assert.match(page, /ptoHistoryMonth/);
+  assert.match(page, /ptoHistoryStatusFilter/);
+  assert.match(page, /ptoHistoryEmployeeId/);
+  assert.match(page, /aria-label="Previous request-history month"/);
+  assert.match(page, /aria-label="Filter request history by status"/);
+  assert.match(page, /<option value="pending">To Review<\/option>/);
+  assert.match(page, /aria-label="Filter request history by employee"/);
+  assert.match(page, /className="pto-history-employee-divider"/);
+  assert.match(page, /className="pto-history-employee-menu"/);
+  assert.match(page, /className="pto-request-card-open"/);
+  assert.match(page, /function formatPtoHistoryMonth/);
+  assert.match(page, /function ptoHistoryStatusLabel/);
+});
+
+test("section navigation resets nested views to their main page", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+
+  assert.match(page, /function navigateToView\(view: ViewId\)/);
+  assert.match(page, /setIsViewingPtoHistory\(false\)/);
+  assert.match(page, /setIsViewingPtoPolicies\(false\)/);
+  assert.match(page, /setEmployeeScheduleTab\("week"\)/);
+  assert.match(page, /setActiveHoursSectionTab\("hours"\)/);
+  assert.match(page, /setActiveSettingsTab\("Basic info"\)/);
 });
 
 test("managers can approve or deny pending PTO requests", async () => {
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
 
   assert.match(page, /function decidePtoRequest/);
-  assert.match(page, /Approve or deny this PTO request/);
+  assert.match(page, /Approve or deny this time off request/);
+  assert.match(page, /request\.compensation !== "unpaid"/);
   assert.match(page, /decidePtoRequest\("approved"\)/);
   assert.match(page, /decidePtoRequest\("denied"\)/);
-  assert.match(page, /pto-request-panel-button/);
+  assert.match(page, /pto-request-list-header/);
+  assert.match(page, /pto-request-icon-action/);
+  assert.match(page, /function deletePtoRequest/);
+  assert.match(page, /function messagePtoRequestEmployee/);
+  assert.match(page, /className="pto-message-employee-action"/);
+  assert.match(page, /setNewConversationMemberIds\(\[employeeId\]\)/);
+  assert.match(page, /decidedByEmployeeId: activeEmployeeId/);
   assert.match(page, /Review \$\{employee\?\.name/);
   assert.match(page, /request\.status !== "cancelled"/);
 });
@@ -300,11 +359,15 @@ test("signed-in users have a header account menu instead of a sidebar logout pan
   assert.match(page, />Team members<\/button>/);
   assert.match(page, /className="account-sign-out"/);
   assert.match(page, /document\.addEventListener\("pointerdown", closeAccountMenu\)/);
-  assert.match(page, /aria-label="Notifications"/);
+  assert.match(page, /aria-label=\{mode === "manager" \? "Notifications" : "Schedule updates"\}/);
   assert.match(page, /aria-label="Messages"/);
   assert.match(page, /aria-label="Stopwatch"/);
   assert.match(page, />\s*Team requests\s*<\/button>/);
   assert.match(page, />\s*Alerts\s*<\/button>/);
+  assert.match(page, /notificationRequests = mode === "manager"/);
+  assert.match(page, /employeeScheduleNotifications/);
+  assert.match(page, /shift\.employeeId === activeEmployeeId/);
+  assert.match(page, /No schedule updates\./);
   assert.match(page, /formatShortDate\(request\.startDate\)/);
   assert.doesNotMatch(page, /formatShortDate\(parseLocalDate\(request\.startDate\)\)/);
   assert.match(page, /document\.addEventListener\("pointerdown", closeNotifications\)/);
@@ -320,7 +383,24 @@ test("team messaging supports filters, group chats, and persisted replies", asyn
   assert.match(page, /conversations: TeamConversation\[\]/);
   assert.match(page, /function createTeamConversation/);
   assert.match(page, /function sendTeamMessage/);
+  assert.match(page, /function toggleConversationSelection/);
+  assert.match(page, /function deleteSelectedConversations/);
+  assert.match(page, /function startEditingConversationName/);
+  assert.match(page, /function saveConversationName/);
+  assert.match(page, /creatorEmployeeId: activeEmployeeId/);
+  assert.match(page, /selectedConversation\.creatorEmployeeId === activeEmployeeId/);
+  assert.match(page, /conversation\.creatorEmployeeId === activeEmployeeId/);
+  assert.match(page, />\s*Edit name\s*<\/button>/);
+  assert.match(page, /permanently erase all message history/);
   assert.match(page, /function conversationHasUnreadMessages/);
+  assert.match(page, /function messageDeliveryStatus/);
+  assert.match(page, /allRecipientsHaveRead \? "Read" : "Delivered"/);
+  assert.match(page, /className="message-delivery-status"/);
+  assert.match(page, /className="message-day-divider"/);
+  assert.match(page, /className="message-avatar-select"/);
+  assert.match(page, /className="delete-conversations-button"/);
+  assert.match(page, /function messagesShareCalendarDay/);
+  assert.match(page, /function formatMessageDate/);
   assert.match(page, /aria-label="Message filters"/);
   assert.match(page, />\s*All\s*<\/button>/);
   assert.match(page, />\s*Unread\s*<\/button>/);
