@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 
 type Mode = "manager" | "employee";
-type ViewId = "dashboard" | "employees" | "departments_roles" | "schedule" | "clockins" | "hours" | "settings" | "profile" | "team_members";
+type ViewId = "dashboard" | "employees" | "departments_roles" | "schedule" | "time_off" | "my_availability" | "team_availability" | "clockins" | "hours" | "settings" | "profile" | "team_members";
 type CalendarTab = "today" | "week" | "month";
 type HoursSectionTab = "hours" | "pto";
 type NotificationTab = "team_requests" | "alerts";
@@ -49,7 +49,7 @@ type BasicInfo = {
 };
 type BasicInfoField = keyof BasicInfo;
 type CopyRange = "week" | "month";
-type EmployeeScheduleTab = "day" | "week";
+type EmployeeScheduleTab = "day" | "week" | "month";
 type HoursRounding = "actual" | 5 | 10 | 15;
 type TimeExceptionAction = "in" | "out" | "break_end";
 type Permission =
@@ -64,9 +64,21 @@ type Permission =
 type Employee = {
   id: number;
   name: string;
+  email: string;
+  phone: string;
+  accessLevel: "Manager" | "Employee" | "";
+  location: string;
   role: string;
+  wage: string;
   pin: string;
   active: boolean;
+};
+
+type Department = {
+  id: number;
+  name: string;
+  roles: string[];
+  managerIds: number[];
 };
 
 type Shift = {
@@ -125,6 +137,7 @@ type TeamConversation = {
 
 type StaffState = {
   employees: Employee[];
+  departments: Department[];
   shifts: Shift[];
   clockEvents: ClockEvent[];
   hoursAdjustments: HoursAdjustment[];
@@ -134,14 +147,15 @@ type StaffState = {
 
 const managerPin = "0000";
 const storageKey = "dombase-staff-state-v1";
+const unpublishedShiftsStorageKey = "dombase-unpublished-shifts-v1";
 const basicInfoStorageKey = "dombase-basic-info-v1";
 const timeExceptionExplanationLimit = 250;
-const calendarWeekdayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const scheduleStartHour = 6;
-const scheduleEndHour = 18;
+const calendarWeekdayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const scheduleStartHour = 7;
+const scheduleEndHour = 17;
 const scheduleHourLabels = Array.from(
-  { length: (scheduleEndHour - scheduleStartHour) / 2 + 1 },
-  (_, index) => scheduleStartHour + index * 2,
+  { length: scheduleEndHour - scheduleStartHour },
+  (_, index) => scheduleStartHour + index,
 );
 
 const permissionsByMode: Record<Mode, Permission[]> = {
@@ -193,10 +207,33 @@ const defaultBasicInfo: BasicInfo = {
   companyPhone: "",
 };
 
+const emptyEmployeeForm = {
+  firstName: "",
+  lastName: "",
+  email: "",
+  phone: "",
+  location: "",
+  role: "",
+  wage: "",
+  pin: "",
+};
+
 const starterState: StaffState = {
   employees: [
-    { id: 1, name: "Serge Vakulchik", role: "Manager", pin: "0000", active: true },
+    {
+      id: 1,
+      name: "Serge Vakulchik",
+      email: "",
+      phone: "",
+      accessLevel: "Manager",
+      location: "",
+      role: "Manager",
+      wage: "",
+      pin: "0000",
+      active: true,
+    },
   ],
+  departments: [{ id: 1, name: "Department not set", roles: [], managerIds: [1] }],
   shifts: [],
   clockEvents: [],
   hoursAdjustments: [],
@@ -213,7 +250,9 @@ export default function Home() {
   const [pin, setPin] = useState("");
   const [activeEmployeeId, setActiveEmployeeId] = useState<number>(1);
   const [activeView, setActiveView] = useState<ViewId>("dashboard");
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isTeamNavOpen, setIsTeamNavOpen] = useState(false);
+  const [isScheduleNavOpen, setIsScheduleNavOpen] = useState(false);
   const [activeSettingsTab, setActiveSettingsTab] = useState<SettingsTab>("Basic info");
   const [basicInfo, setBasicInfo] = useState<BasicInfo>(() => readStoredBasicInfo());
   const [savedBasicInfoSnapshot, setSavedBasicInfoSnapshot] = useState(() => JSON.stringify(readStoredBasicInfo()));
@@ -232,14 +271,22 @@ export default function Home() {
   const accountMenuRef = useRef<HTMLDivElement>(null);
   const notificationMenuRef = useRef<HTMLDivElement>(null);
   const messageMenuRef = useRef<HTMLDivElement>(null);
+  const employeeFilterRef = useRef<HTMLDivElement>(null);
   const [activeCalendarTab, setActiveCalendarTab] = useState<CalendarTab>("today");
   const [activeHoursTab, setActiveHoursTab] = useState<CalendarTab>("today");
   const [activeHoursSectionTab, setActiveHoursSectionTab] = useState<HoursSectionTab>("hours");
   const [hoursRounding, setHoursRounding] = useState<HoursRounding>("actual");
   const [authMessage, setAuthMessage] = useState("");
-  const [employeeForm, setEmployeeForm] = useState({ name: "", role: "", pin: "" });
+  const [employeeForm, setEmployeeForm] = useState(emptyEmployeeForm);
   const [employeeMessage, setEmployeeMessage] = useState("");
+  const [isAddingEmployee, setIsAddingEmployee] = useState(false);
   const [editingEmployeeId, setEditingEmployeeId] = useState<number | null>(null);
+  const [employeePendingDeletion, setEmployeePendingDeletion] = useState<Employee | null>(null);
+  const [isAddingDepartment, setIsAddingDepartment] = useState(false);
+  const [newDepartmentName, setNewDepartmentName] = useState("");
+  const [departmentRoleDrafts, setDepartmentRoleDrafts] = useState<Record<number, string>>({});
+  const [editingDepartmentId, setEditingDepartmentId] = useState<number | null>(null);
+  const [departmentNameDraft, setDepartmentNameDraft] = useState("");
   const [copyRange, setCopyRange] = useState<CopyRange>("week");
   const [scheduleDate, setScheduleDate] = useState(today);
   const [hoursDate, setHoursDate] = useState(today);
@@ -261,12 +308,16 @@ export default function Home() {
   const [ptoRequestError, setPtoRequestError] = useState("");
   const [reviewingPtoRequestId, setReviewingPtoRequestId] = useState<number | null>(null);
   const [ptoReviewError, setPtoReviewError] = useState("");
-  const [employeeScheduleTab, setEmployeeScheduleTab] = useState<EmployeeScheduleTab>("day");
+  const [arePtoRequestsExpanded, setArePtoRequestsExpanded] = useState(false);
+  const [employeeScheduleTab, setEmployeeScheduleTab] = useState<EmployeeScheduleTab>("week");
+  const [isEmployeeFilterOpen, setIsEmployeeFilterOpen] = useState(false);
+  const [visibleEmployeeIds, setVisibleEmployeeIds] = useState<number[] | null>(null);
   const [editingShift, setEditingShift] = useState<Shift | null>(null);
   const [createShiftError, setCreateShiftError] = useState("");
   const [editShiftError, setEditShiftError] = useState("");
   const [createdShiftTimes, setCreatedShiftTimes] = useState<Record<number, number>>({});
   const [editedShiftTimes, setEditedShiftTimes] = useState<Record<number, number>>({});
+  const [unpublishedShiftIds, setUnpublishedShiftIds] = useState<number[]>(() => readStoredUnpublishedShiftIds());
   const [lastEditedShiftId, setLastEditedShiftId] = useState<number | null>(null);
   const [showBreakOptions, setShowBreakOptions] = useState(false);
   const [pendingTimeException, setPendingTimeException] = useState<TimeExceptionAction | null>(null);
@@ -292,6 +343,10 @@ export default function Home() {
   useEffect(() => {
     window.localStorage.setItem(storageKey, JSON.stringify(state));
   }, [state]);
+
+  useEffect(() => {
+    window.localStorage.setItem(unpublishedShiftsStorageKey, JSON.stringify(unpublishedShiftIds));
+  }, [unpublishedShiftIds]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setCurrentTime(Date.now()), 1000);
@@ -364,6 +419,39 @@ export default function Home() {
     };
   }, [isMessagesOpen]);
 
+  useEffect(() => {
+    if (!isEmployeeFilterOpen) return;
+
+    function closeEmployeeFilter(event: PointerEvent | KeyboardEvent) {
+      if (event instanceof KeyboardEvent) {
+        if (event.key === "Escape") setIsEmployeeFilterOpen(false);
+        return;
+      }
+      if (!employeeFilterRef.current?.contains(event.target as Node)) setIsEmployeeFilterOpen(false);
+    }
+
+    document.addEventListener("pointerdown", closeEmployeeFilter);
+    document.addEventListener("keydown", closeEmployeeFilter);
+    return () => {
+      document.removeEventListener("pointerdown", closeEmployeeFilter);
+      document.removeEventListener("keydown", closeEmployeeFilter);
+    };
+  }, [isEmployeeFilterOpen]);
+
+  useEffect(() => {
+    if (editingEmployeeId === null) return;
+
+    function finishRosterEditing(event: PointerEvent) {
+      const target = event.target as Element | null;
+      if (!target?.closest(`[data-editing-employee-row="${editingEmployeeId}"]`)) {
+        setEditingEmployeeId(null);
+      }
+    }
+
+    document.addEventListener("pointerdown", finishRosterEditing);
+    return () => document.removeEventListener("pointerdown", finishRosterEditing);
+  }, [editingEmployeeId]);
+
   const activeEmployee = state.employees.find((employee) => employee.id === activeEmployeeId);
   const reviewingPtoRequest = (state.ptoRequests ?? []).find((request) => request.id === reviewingPtoRequestId);
   const notificationRequests = (state.ptoRequests ?? [])
@@ -385,7 +473,22 @@ export default function Home() {
     () => state.employees.filter((employee) => employee.active),
     [state.employees],
   );
+  const savedBasicInfo = JSON.parse(savedBasicInfoSnapshot) as BasicInfo;
+  const availableLocations = locationNamesFromBasicInfo(savedBasicInfo);
+  const rosterRoles = Array.from(new Set(
+    activeEmployees
+      .map((employee) => employee.role.trim())
+      .filter(Boolean),
+  ));
+  const availableRoles = Array.from(new Set(
+    [...state.departments.flatMap((department) => department.roles), ...rosterRoles],
+  )).sort((first, second) => first.localeCompare(second));
+  const availableManagers = activeEmployees.filter((employee) => employee.accessLevel === "Manager");
   const shiftEmployees = useMemo(
+    () => activeEmployees,
+    [activeEmployees],
+  );
+  const hoursEmployees = useMemo(
     () => activeEmployees.filter((employee) => !isManagerEmployee(employee)),
     [activeEmployees],
   );
@@ -393,45 +496,59 @@ export default function Home() {
     () => new Set(shiftEmployees.map((employee) => employee.id)),
     [shiftEmployees],
   );
+  const accessibleShifts = useMemo(
+    () => mode === "manager" ? state.shifts : state.shifts.filter((shift) => !unpublishedShiftIds.includes(shift.id)),
+    [mode, state.shifts, unpublishedShiftIds],
+  );
+  const unpublishedShiftCount = state.shifts.filter((shift) => unpublishedShiftIds.includes(shift.id)).length;
+  const orderedShiftEmployees = useMemo(() => {
+    return [...shiftEmployees].sort((first, second) => first.name.localeCompare(second.name));
+  }, [shiftEmployees]);
   const activePermissions = isPublicSchedule ? ["view_schedule" as Permission] : permissionsByMode[mode];
   const visibleNavItems = isPublicSchedule
     ? navItems.filter((item) => item.id === "schedule")
     : navItems.filter((item) => mode === "manager" || !item.managerOnly);
   const copyCalendarDays = useMemo(
-    () => copyRange === "week" ? weekCalendarDays(shiftForm.date) : monthCalendarDays(shiftForm.date),
+    () => copyRange === "week" ? mondayWeekCalendarDays(shiftForm.date) : mondayMonthCalendarDays(shiftForm.date),
     [copyRange, shiftForm.date],
   );
-  const todaysShifts = state.shifts
+  const todaysShifts = accessibleShifts
     .filter((shift) => shift.date === today && shiftEmployeeIds.has(shift.employeeId))
     .sort((a, b) => a.start.localeCompare(b.start));
   const calendarShifts = useMemo(
     () =>
-      shiftsForCalendarRange(state.shifts, shiftEmployeeIds, today, activeCalendarTab).sort(
+      shiftsForCalendarRange(accessibleShifts, shiftEmployeeIds, today, activeCalendarTab).sort(
         (a, b) => `${a.date}${a.start}`.localeCompare(`${b.date}${b.start}`),
       ),
-    [activeCalendarTab, shiftEmployeeIds, state.shifts, today],
+    [accessibleShifts, activeCalendarTab, shiftEmployeeIds, today],
   );
   const scheduleDayShifts = useMemo(
     () =>
-      state.shifts
+      accessibleShifts
         .filter((shift) => shift.date === scheduleDate && shiftEmployeeIds.has(shift.employeeId))
         .sort((a, b) => a.start.localeCompare(b.start)),
-    [scheduleDate, shiftEmployeeIds, state.shifts],
-  );
-  const scheduleDayEmployeeIds = useMemo(
-    () => new Set(scheduleDayShifts.map((shift) => shift.employeeId)),
-    [scheduleDayShifts],
+    [accessibleShifts, scheduleDate, shiftEmployeeIds],
   );
   const scheduleWeekDays = useMemo(
     () =>
-      weekCalendarDays(scheduleDate).map((day) => ({
+      mondayWeekCalendarDays(scheduleDate).map((day) => ({
         ...day,
-        shifts: state.shifts
+        shifts: accessibleShifts
           .filter((shift) => shift.date === day.date && shiftEmployeeIds.has(shift.employeeId))
           .sort((a, b) => a.start.localeCompare(b.start)),
       })),
-    [scheduleDate, shiftEmployeeIds, state.shifts],
+    [accessibleShifts, scheduleDate, shiftEmployeeIds],
   );
+  const scheduleMonthDays = useMemo(
+    () => scheduleMonthCalendarDays(scheduleDate).map((day) => ({
+      ...day,
+      shifts: accessibleShifts
+        .filter((shift) => shift.date === day.date && shiftEmployeeIds.has(shift.employeeId))
+        .sort((a, b) => a.start.localeCompare(b.start)),
+    })),
+    [accessibleShifts, scheduleDate, shiftEmployeeIds],
+  );
+  const visibleScheduleEmployees = orderedShiftEmployees.filter((employee) => visibleEmployeeIds === null || visibleEmployeeIds.includes(employee.id));
   const myShift = todaysShifts.find((shift) => shift.employeeId === activeEmployeeId);
   const clockedInIds = useMemo(() => {
     return new Set(
@@ -463,7 +580,7 @@ export default function Home() {
     () => {
       const range = dateRangeForCalendarTab(parseLocalDate(hoursDate), activeHoursTab);
 
-      return shiftEmployees.map((employee) => ({
+      return hoursEmployees.map((employee) => ({
         employee,
         hours: roundHoursToMinutes(
           adjustedWorkedHoursForRange(
@@ -477,7 +594,7 @@ export default function Home() {
         ),
       }));
     },
-    [activeHoursTab, currentTime, hoursDate, hoursRounding, mode, shiftEmployees, state.clockEvents, state.hoursAdjustments],
+    [activeHoursTab, currentTime, hoursDate, hoursEmployees, hoursRounding, mode, state.clockEvents, state.hoursAdjustments],
   );
   const ptoRows = useMemo(() => {
     const yearToDate = yearToDateRange(new Date(currentTime));
@@ -500,6 +617,13 @@ export default function Home() {
     });
   }, [currentTime, state.clockEvents, state.employees, state.hoursAdjustments, state.ptoRequests]);
   const activeEmployeePto = ptoRows.find((row) => row.employee.id === activeEmployeeId);
+  const sortedPtoRequests = useMemo(
+    () => (state.ptoRequests ?? [])
+      .filter((request) => mode === "manager" || request.employeeId === activeEmployeeId)
+      .sort((first, second) => second.requestedAt.localeCompare(first.requestedAt)),
+    [activeEmployeeId, mode, state.ptoRequests],
+  );
+  const displayedPtoRequests = arePtoRequestsExpanded ? sortedPtoRequests : sortedPtoRequests.slice(0, 3);
   const activeEmployeePtoLeft = activeEmployeePto
     ? activeEmployeePto.ptoHours - activeEmployeePto.ptoUsed
     : 0;
@@ -649,8 +773,22 @@ export default function Home() {
   }
 
   function saveBasicInfo() {
+    const previousBasicInfo = JSON.parse(savedBasicInfoSnapshot) as BasicInfo;
+    const previousLocationName = previousBasicInfo.locationName.trim();
+    const nextLocationName = basicInfo.locationName.trim();
+
     window.localStorage.setItem(basicInfoStorageKey, JSON.stringify(basicInfo));
     setSavedBasicInfoSnapshot(JSON.stringify(basicInfo));
+    if (previousLocationName !== nextLocationName) {
+      setState((current) => ({
+        ...current,
+        employees: current.employees.map((employee) => (
+          employee.location === previousLocationName
+            ? { ...employee, location: nextLocationName }
+            : employee
+        )),
+      }));
+    }
     setEditingBasicInfoField(null);
   }
 
@@ -666,12 +804,15 @@ export default function Home() {
     setIsNotificationsOpen(false);
     setIsMessagesOpen(false);
     setIsTeamNavOpen(false);
+    setIsScheduleNavOpen(false);
   }
 
   function navigateToView(view: ViewId) {
     if (view === "hours") setActiveHoursSectionTab("hours");
+    if (view === "time_off") setActiveHoursSectionTab("pto");
     if (view === "settings") setActiveSettingsTab("Basic info");
-    if (view === "employees" || view === "departments_roles") setIsTeamNavOpen(true);
+    setIsTeamNavOpen(view === "employees" || view === "departments_roles");
+    setIsScheduleNavOpen(["schedule", "time_off", "my_availability", "team_availability"].includes(view));
     setActiveView(view);
     setIsAccountMenuOpen(false);
   }
@@ -688,7 +829,7 @@ export default function Home() {
 
   function addEmployee(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const name = employeeForm.name.trim();
+    const name = [employeeForm.firstName.trim(), employeeForm.lastName.trim()].filter(Boolean).join(" ");
     const role = employeeForm.role.trim();
     const pin = employeeForm.pin.trim();
 
@@ -712,21 +853,128 @@ export default function Home() {
         {
           id: nextId(current.employees),
           name,
+          email: employeeForm.email.trim(),
+          phone: formatPhoneNumberInput(employeeForm.phone),
+          accessLevel: "Employee",
+          location: employeeForm.location,
           role,
+          wage: formatWageInput(employeeForm.wage),
           pin,
           active: true,
         },
       ],
     }));
-    setEmployeeForm({ name: "", role: "", pin: "" });
+    setEmployeeForm(emptyEmployeeForm);
     setEmployeeMessage("");
+    setIsAddingEmployee(false);
+  }
+
+  function cancelAddingEmployee() {
+    setEmployeeForm(emptyEmployeeForm);
+    setEmployeeMessage("");
+    setIsAddingEmployee(false);
+  }
+
+  function addDepartment() {
+    const name = newDepartmentName.trim();
+    if (name) {
+      setState((current) => ({
+        ...current,
+        departments: [
+          ...current.departments,
+          { id: nextId(current.departments), name, roles: [], managerIds: [] },
+        ],
+      }));
+    }
+    setNewDepartmentName("");
+    setIsAddingDepartment(false);
+  }
+
+  function addDepartmentRole(departmentId: number) {
+    const role = (departmentRoleDrafts[departmentId] ?? "").trim();
+    if (role) {
+      setState((current) => ({
+        ...current,
+        departments: current.departments.map((department) => (
+          department.id === departmentId && !department.roles.some((savedRole) => savedRole.toLowerCase() === role.toLowerCase())
+            ? { ...department, roles: [...department.roles, role] }
+            : department
+        )),
+      }));
+    }
+    setDepartmentRoleDrafts((current) => ({ ...current, [departmentId]: "" }));
+  }
+
+  function startEditingDepartment(department: Department) {
+    setEditingDepartmentId(department.id);
+    setDepartmentNameDraft(department.name === "Department not set" ? "" : department.name);
+  }
+
+  function saveDepartmentName(departmentId: number) {
+    const name = departmentNameDraft.trim() || "Department not set";
+    setState((current) => ({
+      ...current,
+      departments: current.departments.map((department) => (
+        department.id === departmentId ? { ...department, name } : department
+      )),
+    }));
+    setEditingDepartmentId(null);
+    setDepartmentNameDraft("");
+  }
+
+  function removeDepartment(departmentId: number) {
+    setState((current) => ({
+      ...current,
+      departments: current.departments.filter((department) => department.id !== departmentId),
+    }));
+  }
+
+  function removeDepartmentRole(departmentId: number, role: string) {
+    setState((current) => {
+      const departments = current.departments.map((department) => (
+        department.id === departmentId
+          ? { ...department, roles: department.roles.filter((savedRole) => savedRole !== role) }
+          : department
+      ));
+      const roleStillExists = departments.some((department) => department.roles.includes(role));
+
+      return {
+        ...current,
+        departments,
+        employees: roleStillExists
+          ? current.employees
+          : current.employees.map((employee) => (
+              employee.role === role ? { ...employee, role: "" } : employee
+            )),
+      };
+    });
+  }
+
+  function addDepartmentManager(departmentId: number, managerId: number) {
+    if (availableManagers.some((manager) => manager.id === managerId)) {
+      setState((current) => ({
+        ...current,
+        departments: current.departments.map((department) => (
+          department.id === departmentId && !department.managerIds.includes(managerId)
+            ? { ...department, managerIds: [...department.managerIds, managerId] }
+            : department
+        )),
+      }));
+    }
+  }
+
+  function removeDepartmentManager(departmentId: number, managerId: number) {
+    setState((current) => ({
+      ...current,
+      departments: current.departments.map((department) => (
+        department.id === departmentId
+          ? { ...department, managerIds: department.managerIds.filter((id) => id !== managerId) }
+          : department
+      )),
+    }));
   }
 
   function removeEmployee(employeeId: number) {
-    if (!window.confirm("Are you sure you want to remove this employee?")) {
-      return;
-    }
-
     if (activeEmployeeId === employeeId) {
       setActiveEmployeeId(1);
     }
@@ -734,12 +982,17 @@ export default function Home() {
     setState((current) => ({
       ...current,
       employees: current.employees.filter((employee) => employee.id !== employeeId),
+      departments: current.departments.map((department) => ({
+        ...department,
+        managerIds: department.managerIds.filter((managerId) => managerId !== employeeId),
+      })),
       shifts: current.shifts.filter((shift) => shift.employeeId !== employeeId),
       clockEvents: current.clockEvents.filter((event) => event.employeeId !== employeeId),
       hoursAdjustments: (current.hoursAdjustments ?? []).filter((adjustment) => adjustment.employeeId !== employeeId),
       ptoRequests: (current.ptoRequests ?? []).filter((request) => request.employeeId !== employeeId),
     }));
     setEmployeeMessage("");
+    setEmployeePendingDeletion(null);
   }
 
   function updateRole(employeeId: number, role: string) {
@@ -770,10 +1023,25 @@ export default function Home() {
   }
 
   function updateEmployeePin(employeeId: number, pin: string) {
+    const numericPin = pin.replace(/\D/g, "");
     setState((current) => ({
       ...current,
       employees: current.employees.map((employee) =>
-        employee.id === employeeId ? { ...employee, pin } : employee,
+        employee.id === employeeId ? { ...employee, pin: numericPin } : employee,
+      ),
+    }));
+  }
+
+  function updateEmployeeDetail(
+    employeeId: number,
+    field: "email" | "phone" | "accessLevel" | "location" | "wage",
+    value: string,
+  ) {
+    const nextValue = field === "phone" ? formatPhoneNumberInput(value) : value;
+    setState((current) => ({
+      ...current,
+      employees: current.employees.map((employee) =>
+        employee.id === employeeId ? { ...employee, [field]: nextValue } as Employee : employee,
       ),
     }));
   }
@@ -836,6 +1104,8 @@ export default function Home() {
         ...Object.fromEntries(createdShiftIds.map((id) => [id, createdAt])),
       }));
     }
+    const changedShiftIds = shiftForm.id ? [shiftForm.id] : createdShiftIds;
+    setUnpublishedShiftIds((current) => Array.from(new Set([...current, ...changedShiftIds])));
     setCreateShiftError("");
     setRepeatDates([]);
     setShiftForm({
@@ -868,7 +1138,8 @@ export default function Home() {
 
   function moveScheduleDate(direction: -1 | 1) {
     const nextDate = parseLocalDate(scheduleDate);
-    nextDate.setDate(nextDate.getDate() + direction * (employeeScheduleTab === "week" ? 7 : 1));
+    if (employeeScheduleTab === "month") nextDate.setMonth(nextDate.getMonth() + direction);
+    else nextDate.setDate(nextDate.getDate() + direction * (employeeScheduleTab === "week" ? 7 : 1));
     setScheduleDate(toDateInputValue(nextDate));
   }
 
@@ -1112,6 +1383,7 @@ export default function Home() {
       ),
     }));
     setEditedShiftTimes((current) => ({ ...current, [editingShift.id]: Date.now() }));
+    setUnpublishedShiftIds((current) => Array.from(new Set([...current, editingShift.id])));
     setLastEditedShiftId(editingShift.id);
     setEditShiftError("");
     setEditingShift(null);
@@ -1125,7 +1397,13 @@ export default function Home() {
       ...current,
       shifts: current.shifts.filter((shift) => shift.id !== editingShift.id),
     }));
+    setUnpublishedShiftIds((current) => current.filter((id) => id !== editingShift.id));
     setEditingShift(null);
+  }
+
+  function publishSchedule() {
+    if (mode !== "manager") return;
+    setUnpublishedShiftIds([]);
   }
 
   function requestTimeException(action: TimeExceptionAction) {
@@ -1242,8 +1520,25 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-[#f2f7fc] text-[#12213a]">
-      <div className="app-frame">
+      <div className={isSidebarCollapsed ? "app-frame sidebar-collapsed" : "app-frame"}>
         <aside className="sidebar" aria-label="DomBase staff sections">
+          <button
+            type="button"
+            className="sidebar-toggle"
+            onClick={() => {
+              setIsSidebarCollapsed((collapsed) => !collapsed);
+              setIsTeamNavOpen(false);
+              setIsScheduleNavOpen(false);
+            }}
+            aria-label={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            aria-expanded={!isSidebarCollapsed}
+            title={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="3" y="3" width="18" height="18" rx="4" />
+              <path d="M9 3v18" />
+            </svg>
+          </button>
           <div className="brand-lockup" aria-label="DomBase workforce">
             <span className="brand-mark">D</span>
             <div>
@@ -1258,7 +1553,11 @@ export default function Home() {
                 <button
                   type="button"
                   className={activeView === "employees" || activeView === "departments_roles" ? "nav-button active" : "nav-button"}
-                  onClick={() => setIsTeamNavOpen((open) => !open)}
+                  onClick={() => {
+                    const shouldOpen = !isTeamNavOpen;
+                    navigateToView("employees");
+                    setIsTeamNavOpen(shouldOpen);
+                  }}
                   aria-expanded={isTeamNavOpen}
                   aria-controls="team-sidebar-menu"
                   title="Team"
@@ -1283,6 +1582,33 @@ export default function Home() {
                     >
                       Department / Roles
                     </button>
+                  </div>
+                ) : null}
+              </div>
+            ) : item.id === "schedule" ? (
+              <div className="sidebar-nav-group" key={item.id}>
+                <button
+                  type="button"
+                  className={["schedule", "time_off", "my_availability", "team_availability"].includes(activeView) ? "nav-button active" : "nav-button"}
+                  onClick={() => {
+                    const shouldOpen = !isScheduleNavOpen;
+                    navigateToView("schedule");
+                    setIsScheduleNavOpen(shouldOpen);
+                  }}
+                  aria-expanded={isScheduleNavOpen}
+                  aria-controls="schedule-sidebar-menu"
+                  title="Schedule"
+                >
+                  <SidebarNavIcon icon={item.icon} />
+                  <span>Schedule</span>
+                  <span className={isScheduleNavOpen ? "sidebar-chevron open" : "sidebar-chevron"} aria-hidden="true">⌄</span>
+                </button>
+                {isScheduleNavOpen ? (
+                  <div className="sidebar-submenu" id="schedule-sidebar-menu">
+                    <button type="button" className={activeView === "schedule" ? "active" : ""} onClick={() => navigateToView("schedule")}>Shifts</button>
+                    <button type="button" className={activeView === "time_off" ? "active" : ""} onClick={() => navigateToView("time_off")}>Time off</button>
+                    <button type="button" className={activeView === "my_availability" ? "active" : ""} onClick={() => navigateToView("my_availability")}>My availability</button>
+                    <button type="button" className={activeView === "team_availability" ? "active" : ""} onClick={() => navigateToView("team_availability")}>Team availability</button>
                   </div>
                 ) : null}
               </div>
@@ -1687,8 +2013,11 @@ export default function Home() {
                   <section className="settings-info-section company-locations-section">
                     <h4>Company locations</h4>
                     <div>
-                      <strong>{basicInfo.locationName.toUpperCase() || "DOMBASE"}</strong>
-                      <span>Primary location</span>
+                      <p className="company-location-summary">
+                        <strong>{basicInfo.companyName.toUpperCase() || "DOMBASE"}</strong>
+                        <span aria-hidden="true">|</span>
+                        <span>{formatCompanyLocation(basicInfo)}</span>
+                      </p>
                     </div>
                     <button type="button">Add a new location</button>
                   </section>
@@ -1821,103 +2150,527 @@ export default function Home() {
           )}
 
           {activeView === "departments_roles" && mode === "manager" && (
-            <section className="panel feature-panel team-placeholder-panel">
-              <PanelHeading eyebrow="Team" title="Department / Roles" />
-              <p>Department and role options will be added here.</p>
+            <section className="department-roles-view">
+              <div className="department-roles-heading">
+                <h3>Departments and Roles</h3>
+                {isAddingDepartment ? (
+                  <input
+                    value={newDepartmentName}
+                    onChange={(event) => setNewDepartmentName(event.target.value)}
+                    onBlur={addDepartment}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") event.currentTarget.blur();
+                      if (event.key === "Escape") {
+                        setNewDepartmentName("");
+                        setIsAddingDepartment(false);
+                      }
+                    }}
+                    placeholder="Add department name"
+                    aria-label="Add department name"
+                    autoFocus
+                  />
+                ) : (
+                  <button type="button" onClick={() => setIsAddingDepartment(true)}>Add new department</button>
+                )}
+              </div>
+              <div className="panel department-roles-panel">
+                <div className="department-roles-table" role="table" aria-label="Departments and roles">
+                  <div className="department-roles-header" role="row">
+                    <span role="columnheader">Department</span>
+                    <span role="columnheader">Type to create a new role or search existing roles</span>
+                    <span role="columnheader">Add Managers to Departments</span>
+                  </div>
+                  {state.departments.map((department, departmentIndex) => {
+                    const displayedRoles = rolesForDepartment(department, state.departments, rosterRoles);
+                    const assignedManagers = department.managerIds
+                      .map((managerId) => employeeById(availableManagers, managerId))
+                      .filter((manager): manager is Employee => Boolean(manager));
+                    return (
+                      <div className="department-roles-row" role="row" key={department.id}>
+                      <div className="department-name-cell" role="cell">
+                        {editingDepartmentId === department.id ? (
+                          <input
+                            value={departmentNameDraft}
+                            onChange={(event) => setDepartmentNameDraft(event.target.value)}
+                            onBlur={() => saveDepartmentName(department.id)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") event.currentTarget.blur();
+                              if (event.key === "Escape") {
+                                setEditingDepartmentId(null);
+                                setDepartmentNameDraft("");
+                              }
+                            }}
+                            placeholder="Department not set"
+                            aria-label={`Department name for ${department.name}`}
+                            autoFocus
+                          />
+                        ) : (
+                          <>
+                            <span>{department.name || "Department not set"}</span>
+                            <button
+                              type="button"
+                              className="department-edit-button"
+                              onClick={() => startEditingDepartment(department)}
+                              aria-label={`Edit ${department.name || "department"} name`}
+                              title="Edit department name"
+                            >
+                              <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="m4 20 4.5-1 10-10-3.5-3.5-10 10L4 20ZM13.5 7l3.5 3.5" />
+                              </svg>
+                            </button>
+                          </>
+                        )}
+                      </div>
+                      <div
+                        className="department-role-tags"
+                        role="cell"
+                        onClick={(event) => event.currentTarget.querySelector("input")?.focus()}
+                      >
+                        {displayedRoles.map((role) => (
+                          <span key={role}>
+                            {role}
+                            <button
+                              type="button"
+                              onClick={() => removeDepartmentRole(department.id, role)}
+                              aria-label={`Remove ${role} role from ${department.name}`}
+                            >×</button>
+                          </span>
+                        ))}
+                        <input
+                          value={departmentRoleDrafts[department.id] ?? ""}
+                          onChange={(event) => setDepartmentRoleDrafts((current) => ({
+                            ...current,
+                            [department.id]: event.target.value,
+                          }))}
+                          onBlur={() => addDepartmentRole(department.id)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") event.currentTarget.blur();
+                          }}
+                          placeholder="Add role"
+                          aria-label={`Add role to ${department.name}`}
+                        />
+                      </div>
+                      <div
+                        className="department-manager-list"
+                        role="cell"
+                        onClick={(event) => event.currentTarget.querySelector("select")?.focus()}
+                      >
+                        {assignedManagers.map((manager) => (
+                            <span key={manager.id}>
+                              {manager.name}
+                              <button
+                                type="button"
+                                onClick={() => removeDepartmentManager(department.id, manager.id)}
+                                aria-label={`Remove ${manager.name} from ${department.name}`}
+                              >×</button>
+                            </span>
+                        ))}
+                        {assignedManagers.length === 0 ? (
+                          <select
+                            value=""
+                            onChange={(event) => {
+                              addDepartmentManager(department.id, Number(event.target.value));
+                              event.target.value = "";
+                            }}
+                            aria-label={`Add manager to ${department.name}`}
+                          >
+                            <option value="">Select manager</option>
+                            {availableManagers.map((manager) => (
+                              <option value={manager.id} key={manager.id}>{manager.name}</option>
+                            ))}
+                          </select>
+                        ) : null}
+                      </div>
+                      {departmentIndex > 0 ? (
+                        <button
+                          type="button"
+                          className="department-row-remove"
+                          onClick={() => removeDepartment(department.id)}
+                          aria-label={`Delete ${department.name} department`}
+                          title="Delete department"
+                        >×</button>
+                      ) : null}
+                    </div>
+                    );
+                  })}
+                </div>
+              </div>
             </section>
           )}
 
           {activeView === "employees" && mode === "manager" && (
             <section className="panel feature-panel">
-              <PanelHeading eyebrow="Team" title="Roster" />
-              <form className="quick-form employee-form" onSubmit={addEmployee}>
-                <input
-                  value={employeeForm.name}
-                  onChange={(event) => setEmployeeForm((form) => ({ ...form, name: event.target.value }))}
-                  placeholder="Employee name"
-                  aria-label="Employee name"
-                />
-                <input
-                  value={employeeForm.role}
-                  onChange={(event) => setEmployeeForm((form) => ({ ...form, role: event.target.value }))}
-                  placeholder="Role"
-                  aria-label="Employee role"
-                />
-                <input
-                  value={employeeForm.pin}
-                  onChange={(event) => setEmployeeForm((form) => ({ ...form, pin: event.target.value }))}
-                  placeholder="PIN"
-                  aria-label="Employee PIN"
-                  inputMode="numeric"
-                />
-                <button type="submit">Add</button>
-              </form>
-              {employeeMessage ? <p className="form-message" role="alert">{employeeMessage}</p> : null}
-              <div className="employee-grid">
-                {activeEmployees.map((employee) => (
-                  <article className="employee-card" key={employee.id}>
-                    <div className="employee-fields">
-                      <div className="employee-field">
-                        <span>Name:</span>
-                        {editingEmployeeId === employee.id ? (
-                          <input
-                            value={employee.name}
-                            onChange={(event) => updateEmployeeName(employee.id, event.target.value)}
-                            aria-label={`Name for ${employee.name}`}
-                          />
-                        ) : (
-                          <h3>{employee.name}</h3>
-                        )}
-                      </div>
-                      <div className="employee-field">
-                        <span>Role:</span>
-                        {editingEmployeeId === employee.id ? (
-                          <input
-                            value={employee.role}
-                            onChange={(event) => updateRole(employee.id, event.target.value)}
-                            aria-label={`Role for ${employee.name}`}
-                          />
-                        ) : (
-                          <p>{employee.role}</p>
-                        )}
-                      </div>
-                      <div className="employee-field">
-                        <span>PIN:</span>
-                        {editingEmployeeId === employee.id ? (
-                          <input
-                            value={employee.pin}
-                            onChange={(event) => updateEmployeePin(employee.id, event.target.value)}
-                            aria-label={`PIN for ${employee.name}`}
-                            inputMode="numeric"
-                          />
-                        ) : (
-                          <p>{employee.pin}</p>
-                        )}
-                      </div>
+              <div className="roster-heading">
+                <PanelHeading eyebrow="Team" title="Roster" />
+                <div className="roster-add-toolbar">
+                  <button
+                    type="button"
+                    className="primary-action"
+                    onClick={() => setIsAddingEmployee(true)}
+                    aria-expanded={isAddingEmployee}
+                    aria-controls="add-team-member-form"
+                    hidden={isAddingEmployee}
+                  >
+                    Add team member
+                  </button>
+                </div>
+              </div>
+              {isAddingEmployee ? (
+                <div className="modal-backdrop" role="presentation">
+                  <form
+                    id="add-team-member-form"
+                    className="team-member-modal"
+                    onSubmit={addEmployee}
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="add-team-member-title"
+                  >
+                    <div className="team-member-modal-heading">
+                      <h2 id="add-team-member-title">Add team member</h2>
+                      <button type="button" onClick={cancelAddingEmployee} aria-label="Close add team member">×</button>
                     </div>
-                    {employee.active && employee.id !== 1 ? (
-                      <div className="employee-actions">
-                        <button
-                          type="button"
-                          className="employee-edit-button"
-                          onClick={() => setEditingEmployeeId((current) => (current === employee.id ? null : employee.id))}
-                        >
-                          {editingEmployeeId === employee.id ? "Done" : "Edit"}
-                        </button>
-                        <button type="button" onClick={() => removeEmployee(employee.id)}>Remove</button>
-                      </div>
-                    ) : null}
-                  </article>
-                ))}
+                    <div className="team-member-modal-body">
+                      <section className="team-member-form-section">
+                        <h3>Contact information</h3>
+                        <div className="team-member-field-grid">
+                          <label>
+                            <span>First name <b aria-hidden="true">*</b></span>
+                            <input
+                              value={employeeForm.firstName}
+                              onChange={(event) => setEmployeeForm((form) => ({ ...form, firstName: event.target.value }))}
+                              autoComplete="given-name"
+                              autoFocus
+                              required
+                            />
+                          </label>
+                          <label>
+                            <span>Last name</span>
+                            <input
+                              value={employeeForm.lastName}
+                              onChange={(event) => setEmployeeForm((form) => ({ ...form, lastName: event.target.value }))}
+                              autoComplete="family-name"
+                            />
+                          </label>
+                          <label>
+                            <span>Email</span>
+                            <input
+                              type="email"
+                              value={employeeForm.email}
+                              onChange={(event) => setEmployeeForm((form) => ({ ...form, email: event.target.value }))}
+                              autoComplete="email"
+                            />
+                          </label>
+                          <label>
+                            <span>Mobile phone number</span>
+                            <input
+                              type="tel"
+                              value={employeeForm.phone}
+                              onChange={(event) => setEmployeeForm((form) => ({ ...form, phone: formatPhoneNumberInput(event.target.value) }))}
+                              placeholder="(___) ___-____"
+                              autoComplete="tel"
+                              maxLength={14}
+                            />
+                          </label>
+                        </div>
+                      </section>
+
+                      <section className="team-member-form-section">
+                        <h3>Job details</h3>
+                        <div className="team-member-field-grid job-details-grid">
+                          <label>
+                            <span>Location</span>
+                            <select
+                              value={employeeForm.location}
+                              onChange={(event) => setEmployeeForm((form) => ({ ...form, location: event.target.value }))}
+                            >
+                              <option value="">Select</option>
+                              {availableLocations.map((location) => (
+                                <option value={location} key={location}>{location}</option>
+                              ))}
+                            </select>
+                          </label>
+                          <label>
+                            <span>Role <b aria-hidden="true">*</b></span>
+                            <select
+                              value={employeeForm.role}
+                              onChange={(event) => setEmployeeForm((form) => ({ ...form, role: event.target.value }))}
+                              required
+                            >
+                              <option value="">Select</option>
+                              {availableRoles.map((role) => (
+                                <option value={role} key={role}>{role}</option>
+                              ))}
+                            </select>
+                          </label>
+                          <label>
+                            <span>Wage</span>
+                            <input
+                              value={employeeForm.wage}
+                              onChange={(event) => setEmployeeForm((form) => ({ ...form, wage: event.target.value }))}
+                              onBlur={() => setEmployeeForm((form) => ({ ...form, wage: formatWageInput(form.wage) }))}
+                              inputMode="decimal"
+                              placeholder="$0.00/hr"
+                            />
+                          </label>
+                          <label>
+                            <span>Employee PIN <b aria-hidden="true">*</b></span>
+                            <input
+                              value={employeeForm.pin}
+                              onChange={(event) => setEmployeeForm((form) => ({
+                                ...form,
+                                pin: event.target.value.replace(/\D/g, ""),
+                              }))}
+                              inputMode="numeric"
+                              pattern="[0-9]*"
+                              placeholder="PIN"
+                              required
+                            />
+                          </label>
+                        </div>
+                        <div className="team-member-access-level">
+                          <span>Access level</span>
+                          <strong>Employee</strong>
+                        </div>
+                      </section>
+                    </div>
+                    {employeeMessage ? <p className="form-message" role="alert">{employeeMessage}</p> : null}
+                    <div className="team-member-modal-actions">
+                      <button type="button" className="secondary-action" onClick={cancelAddingEmployee}>Cancel</button>
+                      <button type="submit">Add team member</button>
+                    </div>
+                  </form>
+                </div>
+              ) : null}
+              <div className="roster-table-wrap">
+                <div className="roster-table" role="table" aria-label="Team roster">
+                  <div className="roster-header" role="row">
+                    <span role="columnheader">Team member</span>
+                    <span role="columnheader">Contact information</span>
+                    <span role="columnheader">Access level</span>
+                    <span role="columnheader">Location</span>
+                    <span role="columnheader">Role</span>
+                    <span role="columnheader">Wage</span>
+                    <span role="columnheader">Status</span>
+                    <span role="columnheader" aria-label="Actions" />
+                  </div>
+                  {activeEmployees.map((employee) => {
+                    const isEditing = editingEmployeeId === employee.id;
+                    return (
+                      <article
+                        className="roster-row"
+                        role="row"
+                        key={employee.id}
+                        data-editing-employee-row={isEditing ? employee.id : undefined}
+                      >
+                        <div className="roster-member" role="cell">
+                          <span className="schedule-avatar" aria-hidden="true">{employeeInitials(employee.name)}</span>
+                          <div>
+                            {isEditing ? (
+                              <input
+                                value={employee.name}
+                                onChange={(event) => updateEmployeeName(employee.id, event.target.value)}
+                                aria-label={`Name for ${employee.name}`}
+                              />
+                            ) : <strong>{employee.name}</strong>}
+                            {isEditing ? (
+                              <input
+                                value={employee.pin}
+                                onChange={(event) => updateEmployeePin(employee.id, event.target.value)}
+                                aria-label={`PIN for ${employee.name}`}
+                                inputMode="numeric"
+                                pattern="[0-9]*"
+                                placeholder="PIN"
+                              />
+                            ) : <small>PIN: {employee.pin}</small>}
+                          </div>
+                        </div>
+                        <div className="roster-contact" role="cell">
+                          {isEditing ? (
+                            <>
+                              <input
+                                type="email"
+                                value={rosterInputValue(employee.email)}
+                                onChange={(event) => updateEmployeeDetail(employee.id, "email", event.target.value)}
+                                aria-label={`Email for ${employee.name}`}
+                                placeholder="Email"
+                              />
+                              <input
+                                type="tel"
+                                inputMode="tel"
+                                maxLength={14}
+                                value={rosterInputValue(employee.phone)}
+                                onChange={(event) => updateEmployeeDetail(employee.id, "phone", event.target.value)}
+                                aria-label={`Phone number for ${employee.name}`}
+                                placeholder="Phone number"
+                              />
+                            </>
+                          ) : (
+                            <><span>{employee.email}</span><span>{employee.phone}</span></>
+                          )}
+                        </div>
+                        <div role="cell">
+                          {employee.id === 1 ? (
+                            <span>Manager</span>
+                          ) : isEditing ? (
+                            <select
+                              value={employee.accessLevel}
+                              onChange={(event) => updateEmployeeDetail(employee.id, "accessLevel", event.target.value)}
+                              aria-label={`Access level for ${employee.name}`}
+                            >
+                              <option value="">Select</option>
+                              <option value="Employee">Employee</option>
+                            </select>
+                          ) : employee.accessLevel}
+                        </div>
+                        <div role="cell">
+                          {isEditing ? (
+                            <select
+                              value={employee.location}
+                              onChange={(event) => updateEmployeeDetail(employee.id, "location", event.target.value)}
+                              aria-label={`Location for ${employee.name}`}
+                            >
+                              <option value="">Select</option>
+                              {availableLocations.map((location) => (
+                                <option value={location} key={location}>{location}</option>
+                              ))}
+                            </select>
+                          ) : employee.location}
+                        </div>
+                        <div role="cell">
+                          {isEditing ? (
+                            <select
+                              value={employee.role}
+                              onChange={(event) => updateRole(employee.id, event.target.value)}
+                              aria-label={`Role for ${employee.name}`}
+                            >
+                              <option value="">Select</option>
+                              {availableRoles.map((role) => (
+                                <option value={role} key={role}>{role}</option>
+                              ))}
+                            </select>
+                          ) : employee.role}
+                        </div>
+                        <div role="cell">
+                          {isEditing ? (
+                            <input
+                              value={rosterInputValue(employee.wage)}
+                              onFocus={() => updateEmployeeDetail(employee.id, "wage", "")}
+                              onChange={(event) => updateEmployeeDetail(
+                                employee.id,
+                                "wage",
+                                event.target.value.replace(/\D/g, ""),
+                              )}
+                              onBlur={(event) => updateEmployeeDetail(employee.id, "wage", formatWageInput(event.target.value))}
+                              aria-label={`Wage for ${employee.name}`}
+                              inputMode="numeric"
+                              pattern="[0-9]*"
+                              placeholder="$0.00/hr"
+                            />
+                          ) : employee.wage}
+                        </div>
+                        <span role="cell" className={employee.active ? "roster-status active" : "roster-status"}>
+                          {employee.active ? "Active" : "Terminated"}
+                        </span>
+                        <div className="roster-actions" role="cell">
+                          <button
+                            type="button"
+                            className="employee-edit-button"
+                            onClick={() => setEditingEmployeeId((current) => (current === employee.id ? null : employee.id))}
+                            aria-label={isEditing ? `Finish editing ${employee.name}` : `Edit ${employee.name}`}
+                            title={isEditing ? "Finish editing" : "Edit employee"}
+                          >
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                              <path d="m4 20 4.5-1 10-10-3.5-3.5-10 10L4 20ZM13.5 7l3.5 3.5" />
+                            </svg>
+                          </button>
+                        </div>
+                        {employee.id !== 1 ? (
+                          <button
+                            type="button"
+                            className="roster-row-remove"
+                            onClick={() => setEmployeePendingDeletion(employee)}
+                            aria-label={`Delete ${employee.name}`}
+                            title="Delete employee"
+                          >×</button>
+                        ) : null}
+                      </article>
+                    );
+                  })}
+                </div>
               </div>
             </section>
           )}
 
           {activeView === "schedule" && (
-            <section className="panel feature-panel">
-              <PanelHeading eyebrow="Calendar" title="Schedule Calendar" />
+            <section className="panel feature-panel shift-planner-panel">
+              <div className="shift-planner-topbar">
+                <button type="button" className="shift-today-button" onClick={() => setScheduleDate(today)}>Today</button>
+                <label className="shift-date-control">
+                  <input type="date" value={scheduleDate} onChange={(event) => setScheduleDate(event.target.value)} aria-label="Schedule date" />
+                  <strong>{employeeScheduleTab === "day" ? formatLongDate(scheduleDate) : employeeScheduleTab === "month" ? formatMonthYear(scheduleDate) : `${formatShortDate(scheduleWeekDays[0].date)} – ${formatShortDate(scheduleWeekDays[6].date)}`}</strong>
+                </label>
+                <button type="button" className="shift-arrow-button" onClick={() => moveScheduleDate(-1)} aria-label={`Previous ${employeeScheduleTab}`}>‹</button>
+                <button type="button" className="shift-arrow-button" onClick={() => moveScheduleDate(1)} aria-label={`Next ${employeeScheduleTab}`}>›</button>
+                <div className="shift-planner-actions">
+                  <select className="shift-view-select" value={employeeScheduleTab} onChange={(event) => setEmployeeScheduleTab(event.target.value as EmployeeScheduleTab)} aria-label="Schedule view">
+                    <option value="week">Week</option>
+                    <option value="month">Month</option>
+                    <option value="day">Day</option>
+                  </select>
+                  <div className="shift-employee-filter" ref={employeeFilterRef}>
+                    <button
+                      type="button"
+                      className="shift-filter-button"
+                      aria-expanded={isEmployeeFilterOpen}
+                      aria-controls="employee-filter-popover"
+                      onClick={() => setIsEmployeeFilterOpen((open) => !open)}
+                    >
+                      Filter ({visibleEmployeeIds?.length ?? shiftEmployees.length}) <span className={isEmployeeFilterOpen ? "open" : ""} aria-hidden="true">▾</span>
+                    </button>
+                    {isEmployeeFilterOpen ? (
+                      <div className="shift-employee-filter-popover" id="employee-filter-popover">
+                        <div className="shift-employee-filter-list">
+                          <label className="view-all">
+                            <input
+                              type="checkbox"
+                              checked={visibleEmployeeIds === null || shiftEmployees.every((employee) => visibleEmployeeIds.includes(employee.id))}
+                              onChange={() => setVisibleEmployeeIds((ids) => {
+                                const allVisible = ids === null || shiftEmployees.every((employee) => ids.includes(employee.id));
+                                return allVisible ? [] : null;
+                              })}
+                            />
+                            <span>View all</span>
+                          </label>
+                          {shiftEmployees.map((employee) => (
+                            <label key={employee.id}>
+                              <input
+                                type="checkbox"
+                                checked={visibleEmployeeIds === null || visibleEmployeeIds.includes(employee.id)}
+                                onChange={() => setVisibleEmployeeIds((ids) => {
+                                  const currentIds = ids ?? shiftEmployees.map((entry) => entry.id);
+                                  return currentIds.includes(employee.id)
+                                    ? currentIds.filter((id) => id !== employee.id)
+                                    : [...currentIds, employee.id];
+                                })}
+                              />
+                              <span>{employee.name}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                  {mode === "manager" && unpublishedShiftCount > 0 ? (
+                    <button type="button" className="shift-publish-button pending" onClick={publishSchedule}>
+                      ↑ Publish ({unpublishedShiftCount})
+                    </button>
+                  ) : null}
+                </div>
+              </div>
               {mode === "manager" && (
-                <form className="quick-form shift-form" onSubmit={saveShift}>
+                <details className="shift-editor-drawer">
+                  <summary>Add shift</summary>
+                  <form className="quick-form shift-form" onSubmit={saveShift}>
                   <select
                     value={shiftForm.employeeId}
                     onChange={(event) => {
@@ -1937,20 +2690,24 @@ export default function Home() {
                     value={shiftForm.start}
                     onChange={(start) => setShiftForm((form) => ({ ...form, start }))}
                     ariaLabel="Shift start"
-                    placeholder="Start shift"
+                    placeholder="Start time"
                   />
                   <TimeInput
                     value={shiftForm.end}
                     onChange={(end) => setShiftForm((form) => ({ ...form, end }))}
                     ariaLabel="Shift end"
-                    placeholder="End shift"
+                    placeholder="End time"
                   />
-                  <input
+                  <select
                     value={shiftForm.role}
                     onChange={(event) => setShiftForm((form) => ({ ...form, role: event.target.value }))}
-                    placeholder="Role"
                     aria-label="Shift role"
-                  />
+                  >
+                    <option value="">Select role</option>
+                    {availableRoles.map((role) => (
+                      <option value={role} key={role}>{role}</option>
+                    ))}
+                  </select>
                   <fieldset className="copy-calendar" disabled={Boolean(shiftForm.id)}>
                     <legend>{copyRange === "week" ? "Week" : "Month"}</legend>
                     <div className="copy-calendar-toolbar">
@@ -2017,7 +2774,8 @@ export default function Home() {
                   </fieldset>
                   <button type="submit" disabled={shiftEmployees.length === 0}>Save</button>
                   {createShiftError ? <p className="shift-error-message" role="alert">{createShiftError}</p> : null}
-                </form>
+                  </form>
+                </details>
               )}
               {(mode === "employee" || mode === "manager") && (
                 <div className="employee-schedule">
@@ -2059,18 +2817,21 @@ export default function Home() {
                       aria-label="Schedule date"
                     />
                     {employeeScheduleTab === "day" ? (
-                      scheduleDayShifts.length > 0 ? (
+                      visibleScheduleEmployees.length > 0 ? (
                         <div className="schedule-chart" aria-label={`Team schedule for ${formatLongDate(scheduleDate)}`}>
-                          <div className="schedule-chart-header" aria-hidden="true">
-                            <span />
+                          <div className="schedule-chart-header">
+                            <div className="shift-day-member-heading" aria-hidden="true" />
                             <div className="schedule-time-grid">
                               {scheduleHourLabels.map((hour) => (
                                 <span key={hour}>{formatHourLabel(hour)}</span>
                               ))}
                             </div>
                           </div>
-                          {shiftEmployees.filter((employee) => scheduleDayEmployeeIds.has(employee.id)).map((employee) => {
+                          <div className="shift-day-section-label">Team members ({visibleScheduleEmployees.length})</div>
+                          {visibleScheduleEmployees.map((employee) => {
                             const employeeShifts = scheduleDayShifts.filter((shift) => shift.employeeId === employee.id);
+                            const dailyHours = employeeShifts.reduce((total, shift) => total + Number(formatScheduledHours(shift)), 0);
+                            const timeOff = (state.ptoRequests ?? []).find((request) => request.employeeId === employee.id && request.status === "approved" && request.startDate <= scheduleDate && request.endDate >= scheduleDate);
                             const employeeEditedTimes = employeeShifts
                               .map((shift) => editedShiftTimes[shift.id])
                               .filter((value): value is number => Boolean(value));
@@ -2088,8 +2849,7 @@ export default function Home() {
                             return (
                               <div className="schedule-chart-row" key={employee.id}>
                                 <div className={`schedule-member${isLastEditedEmployee ? " saved" : ""}`}>
-                                  <span className="schedule-avatar" aria-hidden="true">{employeeInitials(employee.name)}</span>
-                                  <strong>{employee.name}</strong>
+                                  <div><strong>{employee.name}</strong><span>{dailyHours.toFixed(2)} hrs</span></div>
                                   {employeeLastEditedAt ? (
                                     <small>Last edited at {formatSavedTime(employeeLastEditedAt)}</small>
                                   ) : employeeLastCreatedAt ? (
@@ -2117,66 +2877,100 @@ export default function Home() {
                                       <span>{shift.role} | {formatScheduledHours(shift)} hours</span>
                                     </div>
                                   ))}
+                                  {employeeShifts.length === 0 && timeOff ? (
+                                    <div className="schedule-bar time-off" style={{ "--shift-left": "0%", "--shift-width": "100%" } as CSSProperties}>
+                                      <strong>Time off</strong><span>{timeOff.startTime && timeOff.endTime ? `${formatTime12(timeOff.startTime)}–${formatTime12(timeOff.endTime)}` : "All day"}</span>
+                                    </div>
+                                  ) : null}
                                 </div>
                               </div>
                             );
                           })}
                         </div>
                       ) : (
-                        <EmptyState text="No team shifts scheduled for this day." />
+                        <EmptyState text="No team members match the selected filters." />
                       )
-                    ) : (
-                      <div className="week-schedule-list">
+                    ) : employeeScheduleTab === "week" ? (
+                      <div className="shift-week-board" role="table" aria-label="Weekly team schedule">
+                        <div className="shift-week-corner" role="columnheader" aria-label="Team member column" />
                         {scheduleWeekDays.map((day) => (
-                          <section className="week-schedule-day" key={day.date}>
-                            <button
-                              type="button"
-                              className="week-schedule-heading"
-                              onClick={() => {
-                                setScheduleDate(day.date);
-                                setEmployeeScheduleTab("day");
-                              }}
-                              aria-label={`View bar graph for ${formatLongDate(day.date)}`}
-                            >
-                              <strong>{weekday(day.date)}</strong>
-                              <span>{formatShortDate(day.date)}</span>
-                            </button>
-                            <div className="week-shift-list">
-                              {day.shifts.length > 0 ? day.shifts.map((shift) => {
-                                const employee = employeeById(state.employees, shift.employeeId);
+                          <button
+                            type="button"
+                            className={day.date === today ? "shift-week-day today" : "shift-week-day"}
+                            key={day.date}
+                            onClick={() => setScheduleDate(day.date)}
+                            role="columnheader"
+                          >
+                            {weekday(day.date).slice(0, 3)}, {parseLocalDate(day.date).getDate()}
+                          </button>
+                        ))}
+                        <div className="shift-week-section-label">Team members ({visibleScheduleEmployees.length})</div>
+                        {visibleScheduleEmployees.map((employee) => {
+                          const employeeWeekShifts = scheduleWeekDays.flatMap((day) => day.shifts.filter((shift) => shift.employeeId === employee.id));
+                          const weeklyHours = employeeWeekShifts.reduce((total, shift) => total + Number(formatScheduledHours(shift)), 0);
+
+                          return (
+                            <div className="shift-week-row" role="row" key={employee.id}>
+                              <div className="shift-week-member" role="rowheader">
+                                <div><strong>{employee.name}</strong><span>{weeklyHours.toFixed(2)} hrs</span></div>
+                              </div>
+                              {scheduleWeekDays.map((day) => {
+                                const dayShifts = day.shifts.filter((shift) => shift.employeeId === employee.id);
+                                const timeOff = (state.ptoRequests ?? []).find((request) => request.employeeId === employee.id && request.status === "approved" && request.startDate <= day.date && request.endDate >= day.date);
 
                                 return (
-                                  <article
-                                    className={`${mode === "employee" && shift.employeeId === activeEmployeeId ? "week-shift mine" : "week-shift"}${mode === "manager" ? " editable" : ""}${lastEditedShiftId === shift.id ? " saved" : ""}`}
-                                    key={shift.id}
-                                    role={mode === "manager" ? "button" : undefined}
-                                    tabIndex={mode === "manager" ? 0 : undefined}
-                                    onClick={() => openShiftEditor(shift)}
-                                    onKeyDown={(event) => {
-                                      if (event.key === "Enter" || event.key === " ") {
-                                        event.preventDefault();
-                                        openShiftEditor(shift);
-                                      }
-                                    }}
-                                  >
-                                    <span className="schedule-avatar" aria-hidden="true">{employeeInitials(employee?.name ?? "Open shift")}</span>
-                                    <div>
-                                      <strong>{employee?.name ?? "Open shift"}</strong>
-                                      <span>{formatTimeRange(shift)} | {shift.role} | {formatScheduledHours(shift)} hours</span>
-                                    </div>
-                                    {editedShiftTimes[shift.id] ? (
-                                      <small>Last edited at {formatSavedTime(editedShiftTimes[shift.id])}</small>
-                                    ) : createdShiftTimes[shift.id] ? (
-                                      <small className="created-timestamp">Created at {formatSavedTime(createdShiftTimes[shift.id])}</small>
+                                  <div className="shift-week-cell" role="cell" key={day.date}>
+                                    {dayShifts.map((shift) => (
+                                      <button
+                                        type="button"
+                                        className={`shift-week-card${mode === "employee" && shift.employeeId === activeEmployeeId ? " mine" : ""}${mode === "manager" ? " editable" : ""}`}
+                                        key={shift.id}
+                                        onClick={() => openShiftEditor(shift)}
+                                      >
+                                        <strong>{formatCompactTimeRange(shift)}</strong>
+                                        <span>{shift.role || "Shift"}</span>
+                                      </button>
+                                    ))}
+                                    {dayShifts.length === 0 && timeOff ? (
+                                      <div className="shift-time-off"><strong>⊘ Time off</strong><span>▣ {timeOff.startTime && timeOff.endTime ? `${formatTime12(timeOff.startTime)}–${formatTime12(timeOff.endTime)}` : "All day"}</span></div>
                                     ) : null}
-                                  </article>
+                                  </div>
                                 );
-                              }) : (
-                                <p className="employee-shift-empty">No shifts scheduled.</p>
-                              )}
+                              })}
                             </div>
-                          </section>
-                        ))}
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="shift-month-board" aria-label={`Monthly schedule for ${formatMonthYear(scheduleDate)}`}>
+                        {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((label) => <strong className="shift-month-weekday" key={label}>{label}</strong>)}
+                        {scheduleMonthDays.map((day) => {
+                          const visibleDayShifts = day.shifts.filter((shift) => visibleEmployeeIds === null || visibleEmployeeIds.includes(shift.employeeId));
+                          const timeOffRequests = (state.ptoRequests ?? []).filter((request) => request.status === "approved" && request.startDate <= day.date && request.endDate >= day.date && (visibleEmployeeIds === null || visibleEmployeeIds.includes(request.employeeId)));
+
+                          return (
+                            <div className={`${day.date === today ? "shift-month-day today" : "shift-month-day"}${day.inMonth ? "" : " outside"}`} key={day.date}>
+                              <button type="button" className="shift-month-date" onClick={() => { setScheduleDate(day.date); setEmployeeScheduleTab("day"); }}>
+                                {day.day === "1" ? `${parseLocalDate(day.date).toLocaleDateString("en-US", { month: "short" })} 1` : day.day}
+                              </button>
+                              {visibleDayShifts.map((shift) => {
+                                const employee = employeeById(state.employees, shift.employeeId);
+                                return (
+                                  <button type="button" className={`shift-month-card${mode === "employee" && shift.employeeId === activeEmployeeId ? " mine" : ""}`} key={shift.id} onClick={() => openShiftEditor(shift)}>
+                                    <strong>{formatCompactTimeRange(shift)}</strong>
+                                    <span>{employee?.name ?? "Open shift"} {shift.role ? `(${shift.role})` : ""}</span>
+                                  </button>
+                                );
+                              })}
+                              {timeOffRequests.map((request) => (
+                                <div className="shift-month-time-off" key={request.id}>
+                                  <strong>⊘ Time off {request.startTime && request.endTime ? `(${formatTime12(request.startTime)}–${formatTime12(request.endTime)})` : "(all day)"}</strong>
+                                  <span>{employeeById(state.employees, request.employeeId)?.name ?? "Team member"}</span>
+                                </div>
+                              ))}
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
                   </div>
@@ -2320,41 +3114,8 @@ export default function Home() {
             </section>
           )}
 
-          {activeView === "hours" && activeHoursSectionTab === "pto" && !isPublicSchedule && (
-            <section className="panel feature-panel">
-              <div className="panel-heading pto-heading">
-                <div>
-                  <p className="eyebrow">Paid time off</p>
-                  <p>Employees earn 1 hour of PTO for every 30 hours worked.</p>
-                  <p className="pto-usage-note">Approved requests use 8 PTO hours per weekday.</p>
-                </div>
-              </div>
-              <div className="pto-list" role="table" aria-label="Employee year-to-date PTO">
-                <div className="pto-row pto-table-head" role="row">
-                  <span role="columnheader">Employee</span>
-                  <span role="columnheader">Hours worked YTD</span>
-                  <span role="columnheader">PTO earned</span>
-                  <span role="columnheader">PTO used</span>
-                  <span role="columnheader">PTO left</span>
-                </div>
-                {ptoRows
-                  .filter(({ employee }) => mode === "manager" || employee.id === activeEmployeeId)
-                  .map(({ employee, hoursWorked, ptoHours, ptoUsed }) => (
-                  <div className="pto-row" role="row" key={employee.id}>
-                    <div role="cell" className="pto-employee">
-                      <span className="schedule-avatar" aria-hidden="true">{employeeInitials(employee.name)}</span>
-                      <div>
-                        <strong>{employee.name}</strong>
-                        <span>{employee.role}</span>
-                      </div>
-                    </div>
-                    <strong role="cell">{formatWorkedHours(hoursWorked)}</strong>
-                    <strong role="cell" className="pto-earned">{ptoHours} hrs</strong>
-                    <strong role="cell">{formatPtoHours(ptoUsed)}</strong>
-                    <strong role="cell" className="pto-left">{formatPtoHours(ptoHours - ptoUsed)}</strong>
-                  </div>
-                ))}
-              </div>
+          {(activeView === "time_off" || (activeView === "hours" && activeHoursSectionTab === "pto")) && !isPublicSchedule && (
+            <section className="panel feature-panel pto-timeoff-panel">
               <div className="pto-request-section">
                 <div>
                   <p className="eyebrow">Time off requests</p>
@@ -2365,10 +3126,7 @@ export default function Home() {
                 ) : null}
               </div>
               <div className="pto-request-list">
-                {(state.ptoRequests ?? [])
-                  .filter((request) => mode === "manager" || request.employeeId === activeEmployeeId)
-                  .sort((a, b) => b.requestedAt.localeCompare(a.requestedAt))
-                  .map((request) => {
+                {displayedPtoRequests.map((request) => {
                     const employee = employeeById(state.employees, request.employeeId);
                     return (
                       <article className={`pto-request-card${mode === "manager" && request.status !== "cancelled" ? " reviewable" : ""}`} key={request.id}>
@@ -2414,12 +3172,72 @@ export default function Home() {
                       </article>
                     );
                   })}
-                {(state.ptoRequests ?? []).filter((request) => mode === "manager" || request.employeeId === activeEmployeeId).length === 0 ? (
+                {sortedPtoRequests.length === 0 ? (
                   <EmptyState text="No PTO requests submitted." />
                 ) : null}
+                {sortedPtoRequests.length > 3 ? (
+                  <button
+                    type="button"
+                    className="pto-requests-expand-button"
+                    onClick={() => setArePtoRequestsExpanded((current) => !current)}
+                    aria-expanded={arePtoRequestsExpanded}
+                    aria-label={arePtoRequestsExpanded ? "Hide older time off requests" : "Show older time off requests"}
+                  >
+                    <span aria-hidden="true">{arePtoRequestsExpanded ? "⌃" : "⌄"}</span>
+                  </button>
+                ) : null}
+              </div>
+              <div className="pto-balance-section">
+                <div className="panel-heading pto-heading">
+                  <div>
+                    <p className="eyebrow">Paid time off</p>
+                    <p>Employees earn 1 hour of PTO for every 30 hours worked.</p>
+                    <p className="pto-usage-note">Approved requests use 8 PTO hours per weekday.</p>
+                  </div>
+                </div>
+                <div className="pto-list" role="table" aria-label="Employee year-to-date PTO">
+                  <div className="pto-row pto-table-head" role="row">
+                    <span role="columnheader">Employee</span>
+                    <span role="columnheader">Hours worked YTD</span>
+                    <span role="columnheader">PTO earned</span>
+                    <span role="columnheader">PTO used</span>
+                    <span role="columnheader">PTO left</span>
+                  </div>
+                  {ptoRows
+                    .filter(({ employee }) => mode === "manager" || employee.id === activeEmployeeId)
+                    .map(({ employee, hoursWorked, ptoHours, ptoUsed }) => (
+                    <div className="pto-row" role="row" key={employee.id}>
+                      <div role="cell" className="pto-employee">
+                        <span className="schedule-avatar" aria-hidden="true">{employeeInitials(employee.name)}</span>
+                        <div>
+                          <strong>{employee.name}</strong>
+                          <span>{employee.role}</span>
+                        </div>
+                      </div>
+                      <strong role="cell">{formatWorkedHours(hoursWorked)}</strong>
+                      <strong role="cell" className="pto-earned">{ptoHours} hrs</strong>
+                      <strong role="cell">{formatPtoHours(ptoUsed)}</strong>
+                      <strong role="cell" className="pto-left">{formatPtoHours(ptoHours - ptoUsed)}</strong>
+                    </div>
+                  ))}
+                </div>
               </div>
             </section>
           )}
+
+          {activeView === "my_availability" && !isPublicSchedule ? (
+            <section className="content-card">
+              <PanelHeading eyebrow="Schedule" title="My availability" />
+              <EmptyState text="Your availability has not been added yet." />
+            </section>
+          ) : null}
+
+          {activeView === "team_availability" && !isPublicSchedule ? (
+            <section className="content-card">
+              <PanelHeading eyebrow="Schedule" title="Team availability" />
+              <EmptyState text="No team availability has been added yet." />
+            </section>
+          ) : null}
         </section>
       </div>
 
@@ -2437,6 +3255,27 @@ export default function Home() {
           </button>
         ))}
       </nav>
+
+      {mode === "manager" && employeePendingDeletion ? (
+        <div className="modal-backdrop" role="presentation">
+          <div className="employee-delete-modal" role="dialog" aria-modal="true" aria-labelledby="employee-delete-title">
+            <div className="modal-heading">
+              <div>
+                <p className="eyebrow">Delete team member</p>
+                <h2 id="employee-delete-title">Delete {employeePendingDeletion.name}?</h2>
+              </div>
+              <button type="button" onClick={() => setEmployeePendingDeletion(null)} aria-label="Close delete confirmation">
+                <span aria-hidden="true">&times;</span>
+              </button>
+            </div>
+            <p>This will remove the employee and their saved shifts, hours, and PTO records. Are you sure you want to continue?</p>
+            <div className="employee-delete-actions">
+              <button type="button" onClick={() => setEmployeePendingDeletion(null)}>Cancel</button>
+              <button type="button" onClick={() => removeEmployee(employeePendingDeletion.id)}>Delete employee</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {mode === "manager" && reviewingPtoRequest ? (
         <div className="modal-backdrop" role="presentation">
@@ -2697,22 +3536,26 @@ export default function Home() {
               value={editingShift.start}
               onChange={(start) => setEditingShift((shift) => shift ? { ...shift, start } : shift)}
               ariaLabel="Edit shift start"
-              placeholder="Start shift"
+              placeholder="Start time"
               selectOnFocus
             />
             <TimeInput
               value={editingShift.end}
               onChange={(end) => setEditingShift((shift) => shift ? { ...shift, end } : shift)}
               ariaLabel="Edit shift end"
-              placeholder="End shift"
+              placeholder="End time"
               selectOnFocus
             />
-            <input
+            <select
               value={editingShift.role}
               onChange={(event) => setEditingShift((shift) => shift ? { ...shift, role: event.target.value } : shift)}
-              placeholder="Role"
               aria-label="Edit shift role"
-            />
+            >
+              <option value="">Select role</option>
+              {availableRoles.map((role) => (
+                <option value={role} key={role}>{role}</option>
+              ))}
+            </select>
             {editShiftError ? <p className="shift-error-message" role="alert">{editShiftError}</p> : null}
             <div className="modal-actions">
               <button type="button" className="delete-action" onClick={deleteEditingShift}>Delete</button>
@@ -3037,6 +3880,51 @@ function formatPhoneNumberInput(value: string) {
   return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
 }
 
+function formatWageInput(value: string) {
+  const numericValue = value.replace(/[^\d.]/g, "");
+  if (!numericValue) return "";
+
+  const amount = Number(numericValue);
+  if (!Number.isFinite(amount)) return "";
+  return `$${amount.toFixed(2)}/hr`;
+}
+
+function rosterInputValue(value: string) {
+  return value === "To be added" ? "" : value;
+}
+
+function clearRosterPlaceholder(value?: string) {
+  return value?.trim() === "To be added" ? "" : value?.trim() ?? "";
+}
+
+function formatCompanyLocation(info: BasicInfo) {
+  const location = [info.city, info.stateProvince, info.postalCode].filter(Boolean).join(", ");
+  return location || "Add city, state, and ZIP code";
+}
+
+function locationNamesFromBasicInfo(info: BasicInfo) {
+  return Array.from(new Set([info.locationName.trim()].filter(Boolean)));
+}
+
+function rolesForDepartment(
+  department: Department,
+  departments: Department[],
+  rosterRoles: string[],
+) {
+  const fallbackDepartment = departments.find(
+    (savedDepartment) => savedDepartment.name.trim().toLowerCase() === "department not set",
+  ) ?? departments[0];
+  if (department.id !== fallbackDepartment?.id) return department.roles;
+
+  const rolesAssignedToDepartments = new Set(
+    departments
+      .filter((savedDepartment) => savedDepartment.id !== department.id)
+      .flatMap((savedDepartment) => savedDepartment.roles),
+  );
+  const unassignedRosterRoles = rosterRoles.filter((role) => !rolesAssignedToDepartments.has(role));
+  return Array.from(new Set([...department.roles, ...unassignedRosterRoles]));
+}
+
 function readStoredState() {
   if (typeof window === "undefined") return starterState;
 
@@ -3046,17 +3934,55 @@ function readStoredState() {
   try {
     const parsed = JSON.parse(stored) as StaffState;
     const employees = parsed.employees
-      .map((employee) =>
-        employee.id === 1 && employee.pin === managerPin
+      .map((employee) => {
+        const normalizedEmployee = employee.id === 1 && employee.pin === managerPin
           ? { ...employee, name: "Serge Vakulchik" }
-          : employee,
-      )
+          : employee;
+        const savedPhone = clearRosterPlaceholder(normalizedEmployee.phone);
+        return {
+          ...normalizedEmployee,
+          email: clearRosterPlaceholder(normalizedEmployee.email),
+          phone: savedPhone ? formatPhoneNumberInput(savedPhone) : "",
+          accessLevel: normalizedEmployee.id === 1
+            ? "Manager"
+            : normalizedEmployee.accessLevel === "Employee" ? "Employee" : "",
+          location: clearRosterPlaceholder(normalizedEmployee.location),
+          role: clearRosterPlaceholder(normalizedEmployee.role),
+          wage: formatWageInput(clearRosterPlaceholder(normalizedEmployee.wage)),
+        };
+      })
       .filter((employee) => !isStarterPlaceholderEmployee(employee));
     const employeeIds = new Set(employees.map((employee) => employee.id));
+    const savedDepartments = Array.isArray(parsed.departments)
+      ? parsed.departments.map((department) => ({
+          ...department,
+          roles: Array.from(new Set((department.roles ?? []).map((role) => role.trim()).filter(Boolean))),
+          managerIds: (department.managerIds ?? []).filter((managerId) => employeeIds.has(managerId)),
+        }))
+      : [];
+    const unassignedDepartment = savedDepartments.find(
+      (department) => department.name.trim().toLowerCase() === "department not set",
+    );
+    const fallbackDepartment: Department = {
+      id: nextId(savedDepartments),
+      name: "Department not set",
+      roles: Array.from(new Set(
+        employees
+          .filter((employee) => !isManagerEmployee(employee))
+          .map((employee) => employee.role.trim())
+          .filter(Boolean),
+      )),
+      managerIds: employees.filter((employee) => employee.accessLevel === "Manager").map((employee) => employee.id),
+    };
+    const departments = [
+      unassignedDepartment ?? fallbackDepartment,
+      ...savedDepartments.filter((department) => department !== unassignedDepartment),
+    ];
 
     return {
       ...parsed,
       employees,
+      departments,
       shifts: parsed.shifts.filter((shift) => employeeIds.has(shift.employeeId)),
       clockEvents: parsed.clockEvents.filter((event) => employeeIds.has(event.employeeId)),
       hoursAdjustments: (parsed.hoursAdjustments ?? []).filter((adjustment) => employeeIds.has(adjustment.employeeId)),
@@ -3095,6 +4021,20 @@ function formatDateTime(value?: string) {
     hour: "numeric",
     minute: "2-digit",
   }).format(new Date(value));
+}
+
+function readStoredUnpublishedShiftIds() {
+  if (typeof window === "undefined") return [];
+  const stored = window.localStorage.getItem(unpublishedShiftsStorageKey);
+  if (!stored) return [];
+
+  try {
+    const parsed = JSON.parse(stored);
+    return Array.isArray(parsed) ? parsed.filter((id): id is number => Number.isInteger(id)) : [];
+  } catch {
+    window.localStorage.removeItem(unpublishedShiftsStorageKey);
+    return [];
+  }
 }
 
 function formatSavedTime(value: number) {
@@ -3254,22 +4194,54 @@ function weekCalendarDays(date: string) {
   });
 }
 
-function monthCalendarDays(date: string) {
+function mondayWeekCalendarDays(date: string) {
+  const selectedDate = parseLocalDate(date);
+  const weekStart = startOfDay(selectedDate);
+  weekStart.setDate(selectedDate.getDate() - ((selectedDate.getDay() + 6) % 7));
+
+  return Array.from({ length: 7 }, (_, index) => {
+    const calendarDate = startOfDay(weekStart);
+    calendarDate.setDate(weekStart.getDate() + index);
+    return { date: toDateInputValue(calendarDate), day: calendarDate.getDate().toString() };
+  });
+}
+
+function mondayMonthCalendarDays(date: string) {
   const selectedDate = parseLocalDate(date);
   const firstDay = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1);
   const lastDay = new Date(selectedDate.getFullYear(), selectedDate.getMonth() + 1, 0);
   const days: ({ date: string; day: string } | null)[] = [];
 
-  for (let index = 0; index < firstDay.getDay(); index += 1) {
-    days.push(null);
-  }
-
+  for (let index = 0; index < (firstDay.getDay() + 6) % 7; index += 1) days.push(null);
   for (let day = 1; day <= lastDay.getDate(); day += 1) {
     const calendarDate = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), day);
     days.push({ date: toDateInputValue(calendarDate), day: day.toString() });
   }
 
   return days;
+}
+
+function scheduleMonthCalendarDays(date: string) {
+  const selectedDate = parseLocalDate(date);
+  const monthStart = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1);
+  const monthEnd = new Date(selectedDate.getFullYear(), selectedDate.getMonth() + 1, 0);
+  const gridStart = startOfDay(monthStart);
+  const mondayOffset = (monthStart.getDay() + 6) % 7;
+  gridStart.setDate(gridStart.getDate() - mondayOffset);
+  const gridEnd = startOfDay(monthEnd);
+  const daysUntilSunday = (7 - monthEnd.getDay()) % 7;
+  gridEnd.setDate(gridEnd.getDate() + daysUntilSunday);
+  const calendarDayCount = Math.round((gridEnd.getTime() - gridStart.getTime()) / 86400000) + 1;
+
+  return Array.from({ length: calendarDayCount }, (_, index) => {
+    const calendarDate = startOfDay(gridStart);
+    calendarDate.setDate(gridStart.getDate() + index);
+    return {
+      date: toDateInputValue(calendarDate),
+      day: calendarDate.getDate().toString(),
+      inMonth: calendarDate.getMonth() === selectedDate.getMonth(),
+    };
+  });
 }
 
 function toDateInputValue(date: Date) {
@@ -3474,6 +4446,14 @@ function workedHoursForRange(
   }, 0);
 
   return workedMs / (60 * 60 * 1000);
+}
+
+function employeeLastName(name: string) {
+  return name.trim().split(/\s+/).at(-1) ?? name;
+}
+
+function employeeDepartmentName(employee: Employee, departments: Department[]) {
+  return departments.find((department) => department.roles.includes(employee.role))?.name ?? "Unassigned";
 }
 
 function conversationLastSentAt(conversation: TeamConversation) {
@@ -3714,14 +4694,9 @@ function SettingsInfoSection({
     <section className="settings-info-section">
       <div className="settings-info-heading">
         <h4>{title}</h4>
-        <button type="button" onClick={() => onEdit(rows[0].field)} aria-label={`Edit ${title}`} title={`Edit ${title}`}>
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="m4 20 4.5-1 10-10-3.5-3.5-10 10L4 20ZM13.5 7l3.5 3.5" />
-          </svg>
-        </button>
       </div>
       <dl className="settings-info-rows">
-        {rows.map(({ field, label, inputType = "text" }) => (
+        {rows.map(({ field, label, inputType = "text" }, index) => (
           <div key={field}>
             <dt>{label}</dt>
             <dd>
@@ -3740,13 +4715,28 @@ function SettingsInfoSection({
                   autoFocus
                 />
               ) : (
-                <button
-                  type="button"
-                  className={info[field] ? "settings-value-button" : "settings-add-button"}
-                  onClick={() => onEdit(field)}
-                >
-                  {info[field] || "Add"}
-                </button>
+                <div className="settings-field-value">
+                  <button
+                    type="button"
+                    className={info[field] ? "settings-value-button" : "settings-add-button"}
+                    onClick={() => onEdit(field)}
+                  >
+                    {info[field] || "Add"}
+                  </button>
+                  {index === 0 ? (
+                    <button
+                      type="button"
+                      className="settings-field-pencil"
+                      onClick={() => onEdit(field)}
+                      aria-label={`Edit ${label}`}
+                      title={`Edit ${label}`}
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="m4 20 4.5-1 10-10-3.5-3.5-10 10L4 20ZM13.5 7l3.5 3.5" />
+                      </svg>
+                    </button>
+                  ) : null}
+                </div>
               )}
             </dd>
           </div>
