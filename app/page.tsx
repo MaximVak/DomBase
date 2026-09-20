@@ -1,13 +1,12 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 
 type Mode = "manager" | "employee";
 type ViewId = "dashboard" | "employees" | "departments_roles" | "schedule" | "time_off" | "my_availability" | "team_availability" | "clockins" | "hours" | "settings" | "profile" | "team_members";
 type CalendarTab = "today" | "week" | "month";
 type HoursSectionTab = "hours" | "pto";
-type NotificationTab = "team_requests" | "alerts";
 type SettingsTab =
   | "Basic info"
   | "POS connection"
@@ -48,17 +47,17 @@ type BasicInfo = {
   companyPhone: string;
 };
 type BasicInfoField = keyof BasicInfo;
-type CopyRange = "week" | "month";
 type EmployeeScheduleTab = "day" | "week" | "month";
 type HoursRounding = "actual" | 5 | 10 | 15;
-type PtoHistoryStatusFilter = "all" | PtoRequest["status"];
+type AccessLevel = "Admin" | "Manager" | "Employee" | "";
+type PtoHistoryStatusFilter = "all" | Exclude<PtoRequest["status"], "pending">;
 type TimeExceptionAction = "in" | "out" | "break_end";
 type Employee = {
   id: number;
   name: string;
   email: string;
   phone: string;
-  accessLevel: "Manager" | "Employee" | "";
+  accessLevel: AccessLevel;
   location: string;
   role: string;
   wage: string;
@@ -81,6 +80,7 @@ type Shift = {
   end: string;
   role: string;
   station: string;
+  notes?: string;
 };
 
 type ClockEvent = {
@@ -91,6 +91,36 @@ type ClockEvent = {
   durationMinutes?: 30 | 45;
   durationSeconds?: 5;
   explanation?: string;
+};
+
+type OperationalAlert = {
+  id: string;
+  employeeId: number;
+  title: string;
+  detail: string;
+  at: string;
+  severity: "warning" | "danger";
+  eventTargetId: string;
+};
+
+type HeaderNotification = {
+  id: string;
+  kind: "alert" | "request" | "schedule";
+  title: string;
+  detail: string;
+  at: string;
+  requestId?: number;
+  eventTargetId?: string;
+  requestDate?: string;
+  requestStatus?: PtoRequest["status"];
+};
+
+type ScheduleUpdateNotification = {
+  id: string;
+  employeeId: number;
+  title: string;
+  detail: string;
+  at: string;
 };
 
 type HoursAdjustment = {
@@ -151,6 +181,14 @@ type TeamConversation = {
   creatorEmployeeId: number;
   participantIds: number[];
   messages: TeamMessage[];
+  pinnedByEmployeeIds?: number[];
+  mutedByEmployeeIds?: number[];
+};
+
+type ScheduleDraft = {
+  upsertedShifts: Shift[];
+  deletedShiftIds: number[];
+  affectedEmployeeIds: number[];
 };
 
 type StaffState = {
@@ -162,20 +200,38 @@ type StaffState = {
   ptoRequests: PtoRequest[];
   ptoPolicies: PtoPolicy[];
   conversations: TeamConversation[];
+  scheduleUpdates: ScheduleUpdateNotification[];
+  scheduleHasBeenPublished: boolean;
+  pendingScheduleUpdateEmployeeIds: number[];
+  scheduleDraftsByManager: Record<number, ScheduleDraft>;
 };
 
 const managerPin = "0000";
 const storageKey = "dombase-staff-state-v1";
+const stateBackupStorageKey = "dombase-staff-state-backup-v1";
 const unpublishedShiftsStorageKey = "dombase-unpublished-shifts-v1";
 const basicInfoStorageKey = "dombase-basic-info-v1";
+const openedNotificationsStorageKey = "dombase-opened-notifications-v1";
+const dismissedNotificationsStorageKey = "dombase-dismissed-notifications-v1";
 const timeExceptionExplanationLimit = 250;
-const calendarWeekdayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const missedClockInGraceMs = 5 * 60 * 1000;
+const missedBreakThresholdMs = 5 * 60 * 60 * 1000;
+const operationalAlertLookbackMs = 7 * 24 * 60 * 60 * 1000;
 const scheduleStartHour = 7;
 const scheduleEndHour = 17;
 const scheduleHourLabels = Array.from(
   { length: scheduleEndHour - scheduleStartHour },
   (_, index) => scheduleStartHour + index,
 );
+const shiftWeekdayOptions = [
+  { label: "Mon", value: 1 },
+  { label: "Tue", value: 2 },
+  { label: "Wed", value: 3 },
+  { label: "Thu", value: 4 },
+  { label: "Fri", value: 5 },
+  { label: "Sat", value: 6 },
+  { label: "Sun", value: 0 },
+];
 
 const navItems: { id: ViewId; label: string; icon: string; managerOnly?: boolean }[] = [
   { id: "dashboard", label: "Home", icon: "home" },
@@ -223,6 +279,8 @@ const emptyEmployeeForm = {
   role: "",
   wage: "",
   pin: "",
+  accessLevel: "Employee" as AccessLevel,
+  active: true,
 };
 
 const starterState: StaffState = {
@@ -232,7 +290,7 @@ const starterState: StaffState = {
       name: "Serge Vakulchik",
       email: "",
       phone: "",
-      accessLevel: "Manager",
+      accessLevel: "Admin",
       location: "",
       role: "Manager",
       wage: "",
@@ -256,6 +314,10 @@ const starterState: StaffState = {
     startingBalances: { 1: { startDate: getLocalDateValue(), balance: 0 } },
   }],
   conversations: [],
+  scheduleUpdates: [],
+  scheduleHasBeenPublished: false,
+  pendingScheduleUpdateEmployeeIds: [],
+  scheduleDraftsByManager: {},
 };
 
 export default function Home() {
@@ -277,20 +339,33 @@ export default function Home() {
   const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [isMessagesOpen, setIsMessagesOpen] = useState(false);
-  const [activeNotificationTab, setActiveNotificationTab] = useState<NotificationTab>("team_requests");
+  const [openedNotificationIdsByEmployee, setOpenedNotificationIdsByEmployee] = useState<Record<number, string[]>>(
+    () => readOpenedNotificationIds(),
+  );
+  const [dismissedNotificationIdsByEmployee, setDismissedNotificationIdsByEmployee] = useState<Record<number, string[]>>(
+    () => readDismissedNotificationIds(),
+  );
   const [messageFilter, setMessageFilter] = useState<"all" | "unread">("all");
   const [isCreatingConversation, setIsCreatingConversation] = useState(false);
   const [selectedConversationId, setSelectedConversationId] = useState<number | null>(null);
-  const [selectedConversationIds, setSelectedConversationIds] = useState<number[]>([]);
+  const [conversationMenuId, setConversationMenuId] = useState<number | null>(null);
+  const [conversationMenuTop, setConversationMenuTop] = useState(0);
+  const [viewingConversationInfoId, setViewingConversationInfoId] = useState<number | null>(null);
   const [editingConversationNameId, setEditingConversationNameId] = useState<number | null>(null);
   const [conversationNameDraft, setConversationNameDraft] = useState("");
   const [newConversationMemberIds, setNewConversationMemberIds] = useState<number[]>([]);
+  const [ptoMessageEmployeeId, setPtoMessageEmployeeId] = useState<number | null>(null);
+  const [isPtoMessageContext, setIsPtoMessageContext] = useState(false);
   const [newConversationMessage, setNewConversationMessage] = useState("");
   const [messageDraft, setMessageDraft] = useState("");
   const [messageError, setMessageError] = useState("");
+  const [ptoMessageOverlayPosition, setPtoMessageOverlayPosition] = useState<{ top: number; left: number; height: number } | null>(null);
   const accountMenuRef = useRef<HTMLDivElement>(null);
   const notificationMenuRef = useRef<HTMLDivElement>(null);
   const messageMenuRef = useRef<HTMLDivElement>(null);
+  const conversationMessagesRef = useRef<HTMLDivElement>(null);
+  const messageComposerRef = useRef<HTMLTextAreaElement>(null);
+  const ptoReviewModalRef = useRef<HTMLDivElement>(null);
   const employeeFilterRef = useRef<HTMLDivElement>(null);
   const ptoHistoryEmployeeFilterRef = useRef<HTMLDivElement>(null);
   const [activeCalendarTab, setActiveCalendarTab] = useState<CalendarTab>("today");
@@ -301,6 +376,9 @@ export default function Home() {
   const [employeeForm, setEmployeeForm] = useState(emptyEmployeeForm);
   const [employeeMessage, setEmployeeMessage] = useState("");
   const [isAddingEmployee, setIsAddingEmployee] = useState(false);
+  const [isAddingEmployeeRole, setIsAddingEmployeeRole] = useState(false);
+  const [newEmployeeRole, setNewEmployeeRole] = useState("");
+  const employeeRoleInputRef = useRef<HTMLInputElement>(null);
   const [editingEmployeeId, setEditingEmployeeId] = useState<number | null>(null);
   const [employeePendingDeletion, setEmployeePendingDeletion] = useState<Employee | null>(null);
   const [isAddingDepartment, setIsAddingDepartment] = useState(false);
@@ -308,7 +386,6 @@ export default function Home() {
   const [departmentRoleDrafts, setDepartmentRoleDrafts] = useState<Record<number, string>>({});
   const [editingDepartmentId, setEditingDepartmentId] = useState<number | null>(null);
   const [departmentNameDraft, setDepartmentNameDraft] = useState("");
-  const [copyRange, setCopyRange] = useState<CopyRange>("week");
   const [scheduleDate, setScheduleDate] = useState(today);
   const [hoursDate, setHoursDate] = useState(today);
   const [editingHours, setEditingHours] = useState<{
@@ -326,8 +403,11 @@ export default function Home() {
   } | null>(null);
   const [ptoRequestError, setPtoRequestError] = useState("");
   const [reviewingPtoRequestId, setReviewingPtoRequestId] = useState<number | null>(null);
+  const [highlightedPtoRequestId, setHighlightedPtoRequestId] = useState<number | null>(null);
+  const [highlightedEventTargetId, setHighlightedEventTargetId] = useState<string | null>(null);
   const [ptoReviewError, setPtoReviewError] = useState("");
   const [arePtoRequestsExpanded, setArePtoRequestsExpanded] = useState(false);
+  const [areEventsExpanded, setAreEventsExpanded] = useState(false);
   const [isViewingPtoHistory, setIsViewingPtoHistory] = useState(false);
   const [ptoHistoryMonth, setPtoHistoryMonth] = useState(`${today.slice(0, 7)}-01`);
   const [ptoHistoryStatusFilter, setPtoHistoryStatusFilter] = useState<PtoHistoryStatusFilter>("all");
@@ -342,23 +422,18 @@ export default function Home() {
   const [isEmployeeFilterOpen, setIsEmployeeFilterOpen] = useState(false);
   const [visibleEmployeeIds, setVisibleEmployeeIds] = useState<number[] | null>(null);
   const [editingShift, setEditingShift] = useState<Shift | null>(null);
+  const [createShiftWeekdays, setCreateShiftWeekdays] = useState<number[]>([]);
+  const [editingShiftWeekdays, setEditingShiftWeekdays] = useState<number[]>([]);
+  const [isAddingShift, setIsAddingShift] = useState(false);
   const [createShiftError, setCreateShiftError] = useState("");
   const [editShiftError, setEditShiftError] = useState("");
   const [createdShiftTimes, setCreatedShiftTimes] = useState<Record<number, number>>({});
   const [editedShiftTimes, setEditedShiftTimes] = useState<Record<number, number>>({});
-  const [unpublishedShiftIds, setUnpublishedShiftIds] = useState<number[]>(() => readStoredUnpublishedShiftIds());
   const [lastEditedShiftId, setLastEditedShiftId] = useState<number | null>(null);
   const [showBreakOptions, setShowBreakOptions] = useState(false);
   const [pendingTimeException, setPendingTimeException] = useState<TimeExceptionAction | null>(null);
   const [timeExceptionExplanation, setTimeExceptionExplanation] = useState("");
-  const [selectedEventExplanation, setSelectedEventExplanation] = useState<{
-    actualTime: string;
-    keyword: string;
-    scheduledTime: string;
-    text: string;
-  } | null>(null);
   const [currentTime, setCurrentTime] = useState(() => Date.now());
-  const [repeatDates, setRepeatDates] = useState<string[]>([]);
   const [shiftForm, setShiftForm] = useState({
     id: 0,
     employeeId: 0,
@@ -367,15 +442,25 @@ export default function Home() {
     end: "",
     role: "",
     station: "Floor",
+    notes: "",
   });
 
   useEffect(() => {
-    window.localStorage.setItem(storageKey, JSON.stringify(state));
+    const serializedState = JSON.stringify(state);
+    const previousState = window.localStorage.getItem(storageKey);
+    if (previousState && previousState !== serializedState && isRecoverableStaffRecord(previousState)) {
+      window.localStorage.setItem(stateBackupStorageKey, previousState);
+    }
+    window.localStorage.setItem(storageKey, serializedState);
   }, [state]);
 
   useEffect(() => {
-    window.localStorage.setItem(unpublishedShiftsStorageKey, JSON.stringify(unpublishedShiftIds));
-  }, [unpublishedShiftIds]);
+    window.localStorage.setItem(openedNotificationsStorageKey, JSON.stringify(openedNotificationIdsByEmployee));
+  }, [openedNotificationIdsByEmployee]);
+
+  useEffect(() => {
+    window.localStorage.setItem(dismissedNotificationsStorageKey, JSON.stringify(dismissedNotificationIdsByEmployee));
+  }, [dismissedNotificationIdsByEmployee]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setCurrentTime(Date.now()), 1000);
@@ -449,6 +534,71 @@ export default function Home() {
   }, [isMessagesOpen]);
 
   useEffect(() => {
+    if (reviewingPtoRequestId === null || !isMessagesOpen) {
+      setPtoMessageOverlayPosition(null);
+      return;
+    }
+
+    function positionMessageBesidePtoReview() {
+      const reviewModal = ptoReviewModalRef.current;
+      const messageDropdown = messageMenuRef.current?.querySelector<HTMLElement>(".message-dropdown");
+      if (!reviewModal || !messageDropdown) return;
+
+      const reviewBounds = reviewModal.getBoundingClientRect();
+      const edgePadding = 14;
+      const gap = 12;
+      const dropdownWidth = messageDropdown.offsetWidth;
+      const rightSideLeft = reviewBounds.right + gap;
+      const left = rightSideLeft + dropdownWidth <= window.innerWidth - edgePadding
+        ? rightSideLeft
+        : Math.max(edgePadding, window.innerWidth - dropdownWidth - edgePadding);
+      const top = Math.max(
+        edgePadding,
+        Math.min(reviewBounds.top, window.innerHeight - reviewBounds.height - edgePadding),
+      );
+
+      setPtoMessageOverlayPosition({ top, left, height: reviewBounds.height });
+    }
+
+    const animationFrame = window.requestAnimationFrame(positionMessageBesidePtoReview);
+    window.addEventListener("resize", positionMessageBesidePtoReview);
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+      window.removeEventListener("resize", positionMessageBesidePtoReview);
+    };
+  }, [isCreatingConversation, isMessagesOpen, isPtoMessageContext, reviewingPtoRequestId, selectedConversationId, viewingConversationInfoId]);
+
+  useEffect(() => {
+    if (highlightedPtoRequestId === null) return;
+
+    const animationFrame = window.requestAnimationFrame(() => {
+      document.querySelector<HTMLElement>(`[data-pto-request-id="${highlightedPtoRequestId}"]`)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+    const highlightTimeout = window.setTimeout(() => setHighlightedPtoRequestId(null), 3000);
+
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+      window.clearTimeout(highlightTimeout);
+    };
+  }, [highlightedPtoRequestId]);
+
+  useEffect(() => {
+    if (highlightedEventTargetId === null) return;
+
+    const animationFrame = window.requestAnimationFrame(() => {
+      document.querySelector<HTMLElement>(`[data-event-target-id="${highlightedEventTargetId}"]`)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+    const highlightTimeout = window.setTimeout(() => setHighlightedEventTargetId(null), 3000);
+
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+      window.clearTimeout(highlightTimeout);
+    };
+  }, [highlightedEventTargetId]);
+
+  useEffect(() => {
     if (!isEmployeeFilterOpen) return;
 
     function closeEmployeeFilter(event: PointerEvent | KeyboardEvent) {
@@ -503,27 +653,159 @@ export default function Home() {
   }, [editingEmployeeId]);
 
   const activeEmployee = state.employees.find((employee) => employee.id === activeEmployeeId);
+  const activeUserIsAdmin = activeEmployee?.accessLevel === "Admin";
+  const activeScheduleDraft = mode === "manager"
+    ? state.scheduleDraftsByManager?.[activeEmployeeId]
+    : undefined;
+  const workingScheduleShifts = mode === "manager"
+    ? applyScheduleDraft(state.shifts, activeScheduleDraft)
+    : state.shifts;
+  const savedEditingShift = editingShift
+    ? workingScheduleShifts.find((shift) => shift.id === editingShift.id) ?? editingShift
+    : null;
+  const editingShiftHasStarted = Boolean(
+    savedEditingShift && currentTime >= shiftStartDateTime(savedEditingShift).getTime(),
+  );
+  const editingShiftHasEnded = Boolean(
+    savedEditingShift && currentTime >= shiftEndDateTime(savedEditingShift).getTime(),
+  );
+  const editingShiftClockEvents = savedEditingShift
+    ? state.clockEvents.filter((event) => (
+        (event.type === "in" || event.type === "out")
+        && shiftForClockEvent(event, workingScheduleShifts)?.id === savedEditingShift.id
+      ))
+    : [];
+  const editingShiftClockIn = editingShiftClockEvents
+    .filter((event) => event.type === "in")
+    .sort((first, second) => first.at.localeCompare(second.at))[0];
+  const editingShiftClockOut = editingShiftClockEvents
+    .filter((event) => event.type === "out")
+    .sort((first, second) => second.at.localeCompare(first.at))[0];
+  const editingShiftIsNoShow = Boolean(
+    editingShiftHasEnded
+    && savedEditingShift
+    && state.shifts.some((shift) => shift.id === savedEditingShift.id)
+    && !hasClockInForShift(savedEditingShift, state.clockEvents, state.shifts),
+  );
   const reviewingPtoRequest = (state.ptoRequests ?? []).find((request) => request.id === reviewingPtoRequestId);
-  const notificationRequests = mode === "manager" ? [...(state.ptoRequests ?? [])]
+  const reviewingOwnPtoRequest = reviewingPtoRequest?.employeeId === activeEmployeeId;
+  const activeUserCanManage = Boolean(activeEmployee && isManagerEmployee(activeEmployee));
+  const notificationRequests = activeUserCanManage ? [...(state.ptoRequests ?? [])]
+    .filter((request) => request.employeeId !== activeEmployeeId)
     .sort((first, second) => (second.requestedAt ?? "").localeCompare(first.requestedAt ?? ""))
     : [];
-  const pendingNotificationCount = notificationRequests.filter((request) => request.status === "pending").length;
-  const employeeScheduleNotifications = mode === "employee"
-    ? state.shifts
-        .filter((shift) => shift.employeeId === activeEmployeeId && shift.date >= today)
-        .sort((first, second) => `${first.date}-${first.start}`.localeCompare(`${second.date}-${second.start}`))
-        .slice(0, 5)
+  const alertEligibleShifts = state.shifts;
+  const operationalAlerts = activeUserCanManage
+    ? operationalAlertsFor(
+        state.employees,
+        alertEligibleShifts,
+        state.clockEvents,
+        currentTime,
+      )
     : [];
+  const noShowEvents = activeUserCanManage
+    ? noShowAlertsFor(state.employees, alertEligibleShifts, state.clockEvents, currentTime)
+    : [];
+  const eventHistoryItems = [
+    ...state.clockEvents.map((event) => ({ kind: "clock" as const, at: event.at, event })),
+    ...noShowEvents.map((alert) => ({ kind: "no-show" as const, at: alert.at, alert })),
+  ].sort((first, second) => second.at.localeCompare(first.at));
+  const displayedEventHistoryItems = areEventsExpanded
+    ? eventHistoryItems
+    : eventHistoryItems.slice(0, 10);
+  const employeeScheduleNotifications = (state.scheduleUpdates ?? [])
+    .filter((notification) => notification.employeeId === activeEmployeeId)
+    .sort((first, second) => second.at.localeCompare(first.at))
+    .slice(0, 40);
   const teamConversations = (state.conversations ?? [])
     .filter((conversation) => conversation.participantIds.includes(activeEmployeeId))
-    .sort((first, second) => conversationLastSentAt(second).localeCompare(conversationLastSentAt(first)));
+    .sort((first, second) => {
+      const pinDifference = Number(second.pinnedByEmployeeIds?.includes(activeEmployeeId))
+        - Number(first.pinnedByEmployeeIds?.includes(activeEmployeeId));
+      return pinDifference || conversationLastSentAt(second).localeCompare(conversationLastSentAt(first));
+    });
+  const unreadConversationCount = teamConversations.filter(
+    (conversation) => conversationHasUnreadMessages(conversation, activeEmployeeId),
+  ).length;
+  const unreadMessageCount = teamConversations.reduce(
+    (total, conversation) => total + conversationUnreadMessageCount(conversation, activeEmployeeId),
+    0,
+  );
   const visibleConversations = teamConversations.filter(
     (conversation) => messageFilter === "all" || conversationHasUnreadMessages(conversation, activeEmployeeId),
   );
   const selectedConversation = teamConversations.find((conversation) => conversation.id === selectedConversationId);
-  const unreadConversationCount = teamConversations.filter(
-    (conversation) => conversationHasUnreadMessages(conversation, activeEmployeeId),
+  const selectedConversationMessageCount = selectedConversation?.messages.length ?? 0;
+  const latestOwnMessageId = selectedConversation?.messages.reduce<number | null>(
+    (latestMessageId, message) => (
+      message.senderEmployeeId === activeEmployeeId ? message.id : latestMessageId
+    ),
+    null,
+  ) ?? null;
+  const viewingConversationInfo = teamConversations.find((conversation) => conversation.id === viewingConversationInfoId);
+  const conversationWithOpenMenu = teamConversations.find((conversation) => conversation.id === conversationMenuId);
+  const requestNotifications: HeaderNotification[] = notificationRequests.map((request) => {
+    const employee = employeeById(state.employees, request.employeeId);
+    return {
+      id: `request-${request.id}`,
+      kind: "request",
+      title: `${employee?.name ?? "Employee"} · Time off request`,
+      detail: `${formatShortDate(request.startDate)} · ${capitalize(request.status)}`,
+      at: request.requestedAt,
+      requestId: request.id,
+      requestDate: formatShortDate(request.startDate),
+      requestStatus: request.status,
+    };
+  });
+  const alertNotifications: HeaderNotification[] = operationalAlerts.map((alert) => ({
+    id: `alert-${alert.id}`,
+    kind: "alert",
+    title: alert.title,
+    detail: alert.detail,
+    at: alert.at,
+    eventTargetId: alert.eventTargetId,
+  }));
+  const scheduleNotifications: HeaderNotification[] = employeeScheduleNotifications.map((notification) => ({
+    id: `schedule-${notification.id}`,
+    kind: "schedule",
+    title: notification.title,
+    detail: notification.detail,
+    at: notification.at,
+  }));
+  const allHeaderNotifications = [
+    ...requestNotifications,
+    ...alertNotifications,
+    ...scheduleNotifications,
+  ].sort((first, second) => second.at.localeCompare(first.at));
+  const dismissedNotificationIds = dismissedNotificationIdsByEmployee[activeEmployeeId] ?? [];
+  const headerNotifications = allHeaderNotifications
+    .filter((notification) => !dismissedNotificationIds.includes(notification.id))
+    .slice(0, 40);
+  const openedNotificationIds = openedNotificationIdsByEmployee[activeEmployeeId] ?? [];
+  const unreadNotificationCount = headerNotifications.filter(
+    (notification) => !openedNotificationIds.includes(notification.id),
   ).length;
+
+  useEffect(() => {
+    if (!isMessagesOpen || selectedConversationId === null) return;
+
+    const animationFrame = window.requestAnimationFrame(() => {
+      const messageList = conversationMessagesRef.current;
+      if (messageList) messageList.scrollTop = messageList.scrollHeight;
+    });
+
+    return () => window.cancelAnimationFrame(animationFrame);
+  }, [isMessagesOpen, ptoMessageOverlayPosition?.height, selectedConversationId, selectedConversationMessageCount]);
+
+  useEffect(() => {
+    const hasOpenComposer = selectedConversationId !== null
+      || (isCreatingConversation && ptoMessageEmployeeId !== null);
+    if (!isMessagesOpen || !hasOpenComposer) return;
+
+    const animationFrame = window.requestAnimationFrame(() => messageComposerRef.current?.focus());
+    return () => window.cancelAnimationFrame(animationFrame);
+  }, [isCreatingConversation, isMessagesOpen, ptoMessageEmployeeId, selectedConversationId]);
+
   const isBasicInfoDirty = JSON.stringify(basicInfo) !== savedBasicInfoSnapshot;
   const activeEmployees = useMemo(
     () => state.employees.filter((employee) => employee.active),
@@ -539,7 +821,7 @@ export default function Home() {
   const availableRoles = Array.from(new Set(
     [...state.departments.flatMap((department) => department.roles), ...rosterRoles],
   )).sort((first, second) => first.localeCompare(second));
-  const availableManagers = activeEmployees.filter((employee) => employee.accessLevel === "Manager");
+  const availableManagers = activeEmployees.filter((employee) => isManagerEmployee(employee));
   const shiftEmployees = useMemo(
     () => activeEmployees,
     [activeEmployees],
@@ -552,21 +834,20 @@ export default function Home() {
     () => new Set(shiftEmployees.map((employee) => employee.id)),
     [shiftEmployees],
   );
-  const accessibleShifts = useMemo(
-    () => mode === "manager" ? state.shifts : state.shifts.filter((shift) => !unpublishedShiftIds.includes(shift.id)),
-    [mode, state.shifts, unpublishedShiftIds],
-  );
-  const unpublishedShiftCount = state.shifts.filter((shift) => unpublishedShiftIds.includes(shift.id)).length;
+  const accessibleShifts = workingScheduleShifts;
+  const unpublishedShiftCount = activeScheduleDraft
+    ? new Set([
+        ...activeScheduleDraft.upsertedShifts.map((shift) => shift.id),
+        ...activeScheduleDraft.deletedShiftIds,
+      ]).size
+    : 0;
+  const draftShiftIds = new Set(activeScheduleDraft?.upsertedShifts.map((shift) => shift.id) ?? []);
   const orderedShiftEmployees = useMemo(() => {
     return [...shiftEmployees].sort((first, second) => first.name.localeCompare(second.name));
   }, [shiftEmployees]);
   const visibleNavItems = isPublicSchedule
     ? navItems.filter((item) => item.id === "schedule")
     : navItems.filter((item) => mode === "manager" || !item.managerOnly);
-  const copyCalendarDays = useMemo(
-    () => copyRange === "week" ? mondayWeekCalendarDays(shiftForm.date) : mondayMonthCalendarDays(shiftForm.date),
-    [copyRange, shiftForm.date],
-  );
   const todaysShifts = accessibleShifts
     .filter((shift) => shift.date === today && shiftEmployeeIds.has(shift.employeeId))
     .sort((a, b) => a.start.localeCompare(b.start));
@@ -580,28 +861,40 @@ export default function Home() {
   const scheduleDayShifts = useMemo(
     () =>
       accessibleShifts
-        .filter((shift) => shift.date === scheduleDate && shiftEmployeeIds.has(shift.employeeId))
+        .filter((shift) => (
+          shift.date === scheduleDate
+          && shiftEmployeeIds.has(shift.employeeId)
+          && !employeeHasApprovedTimeOffOnDate(state.ptoRequests ?? [], shift.employeeId, shift.date)
+        ))
         .sort((a, b) => a.start.localeCompare(b.start)),
-    [accessibleShifts, scheduleDate, shiftEmployeeIds],
+    [accessibleShifts, scheduleDate, shiftEmployeeIds, state.ptoRequests],
   );
   const scheduleWeekDays = useMemo(
     () =>
       mondayWeekCalendarDays(scheduleDate).map((day) => ({
         ...day,
         shifts: accessibleShifts
-          .filter((shift) => shift.date === day.date && shiftEmployeeIds.has(shift.employeeId))
+          .filter((shift) => (
+            shift.date === day.date
+            && shiftEmployeeIds.has(shift.employeeId)
+            && !employeeHasApprovedTimeOffOnDate(state.ptoRequests ?? [], shift.employeeId, shift.date)
+          ))
           .sort((a, b) => a.start.localeCompare(b.start)),
       })),
-    [accessibleShifts, scheduleDate, shiftEmployeeIds],
+    [accessibleShifts, scheduleDate, shiftEmployeeIds, state.ptoRequests],
   );
   const scheduleMonthDays = useMemo(
     () => scheduleMonthCalendarDays(scheduleDate).map((day) => ({
       ...day,
       shifts: accessibleShifts
-        .filter((shift) => shift.date === day.date && shiftEmployeeIds.has(shift.employeeId))
+        .filter((shift) => (
+          shift.date === day.date
+          && shiftEmployeeIds.has(shift.employeeId)
+          && !employeeHasApprovedTimeOffOnDate(state.ptoRequests ?? [], shift.employeeId, shift.date)
+        ))
         .sort((a, b) => a.start.localeCompare(b.start)),
     })),
-    [accessibleShifts, scheduleDate, shiftEmployeeIds],
+    [accessibleShifts, scheduleDate, shiftEmployeeIds, state.ptoRequests],
   );
   const visibleScheduleEmployees = orderedShiftEmployees.filter((employee) => visibleEmployeeIds === null || visibleEmployeeIds.includes(employee.id));
   const myShift = todaysShifts.find((shift) => shift.employeeId === activeEmployeeId);
@@ -653,6 +946,10 @@ export default function Home() {
   );
   const ptoRows = useMemo(() => {
     const yearToDate = yearToDateRange(new Date(currentTime));
+    const ptoPolicyByEmployeeId = new Map<number, PtoPolicy>();
+    (state.ptoPolicies ?? []).forEach((policy) => {
+      policy.employeeIds.forEach((employeeId) => ptoPolicyByEmployeeId.set(employeeId, policy));
+    });
 
     return state.employees.map((employee) => {
       const hoursWorked = adjustedWorkedHoursForRange(
@@ -662,7 +959,7 @@ export default function Home() {
         yearToDate,
         currentTime,
       );
-      const ptoPolicy = (state.ptoPolicies ?? []).find((policy) => policy.employeeIds.includes(employee.id));
+      const ptoPolicy = ptoPolicyByEmployeeId.get(employee.id);
       const policyStartDate = ptoPolicy?.startingBalances?.[employee.id]?.startDate;
       const policyStart = policyStartDate ? startOfDay(parseLocalDate(policyStartDate)) : yearToDate.start;
       const accrualHoursWorked = ptoPolicy && policyStart > yearToDate.start
@@ -692,12 +989,17 @@ export default function Home() {
   );
   const pendingPtoRequests = sortedPtoRequests.filter((request) => request.status === "pending");
   const nextPtoHistoryMonth = shiftDateByCalendarTab(ptoHistoryMonth, "month", 1);
-  const filteredHistoricalPtoRequests = sortedPtoRequests.filter((request) => (
-    request.startDate < nextPtoHistoryMonth
-    && request.endDate >= ptoHistoryMonth
-    && (ptoHistoryStatusFilter === "all" || request.status === ptoHistoryStatusFilter)
-    && (mode !== "manager" || ptoHistoryEmployeeId === "all" || request.employeeId === ptoHistoryEmployeeId)
-  ));
+  const filteredHistoricalPtoRequests = sortedPtoRequests
+    .filter((request) => (
+      request.status !== "pending"
+      && request.startDate < nextPtoHistoryMonth
+      && request.endDate >= ptoHistoryMonth
+      && (ptoHistoryStatusFilter === "all" || request.status === ptoHistoryStatusFilter)
+      && (mode !== "manager" || ptoHistoryEmployeeId === "all" || request.employeeId === ptoHistoryEmployeeId)
+    ))
+    .sort((first, second) => (
+      (second.decidedAt ?? second.requestedAt).localeCompare(first.decidedAt ?? first.requestedAt)
+    ));
   const displayedPtoRequests = arePtoRequestsExpanded
     ? filteredHistoricalPtoRequests
     : filteredHistoricalPtoRequests.slice(0, 1);
@@ -725,13 +1027,16 @@ export default function Home() {
     event.preventDefault();
     const employee = state.employees.find((entry) => entry.pin === pin && entry.active);
 
-    if (pin === managerPin) {
+    if (pin === managerPin || (employee && isManagerEmployee(employee))) {
       setIsPublicSchedule(false);
       setMode("manager");
       setActiveEmployeeId(employee?.id ?? 1);
       setActiveView("dashboard");
       setIsUnlocked(true);
       setAuthMessage("Manager mode active. All controls are available.");
+      setCreatedShiftTimes({});
+      setEditedShiftTimes({});
+      setLastEditedShiftId(null);
       setPin("");
       return;
     }
@@ -750,9 +1055,13 @@ export default function Home() {
     setAuthMessage("PIN not recognized.");
   }
 
-  function openConversation(conversationId: number) {
+  function openConversation(conversationId: number, fromPtoRequest = false) {
+    setPtoMessageEmployeeId(null);
+    setIsPtoMessageContext(fromPtoRequest);
+    if (!fromPtoRequest) setMessageDraft("");
     setSelectedConversationId(conversationId);
-    setSelectedConversationIds([]);
+    setConversationMenuId(null);
+    setViewingConversationInfoId(null);
     setEditingConversationNameId(null);
     setConversationNameDraft("");
     setIsCreatingConversation(false);
@@ -773,6 +1082,80 @@ export default function Home() {
           : conversation,
       ),
     }));
+  }
+
+  function markHeaderNotificationsOpened() {
+    const visibleNotificationIds = headerNotifications.map((notification) => notification.id);
+    if (visibleNotificationIds.length === 0) return;
+
+    setOpenedNotificationIdsByEmployee((current) => ({
+      ...current,
+      [activeEmployeeId]: Array.from(new Set([
+        ...(current[activeEmployeeId] ?? []),
+        ...visibleNotificationIds,
+      ])).slice(-200),
+    }));
+  }
+
+  function dismissHeaderNotification(notificationId: string) {
+    setDismissedNotificationIdsByEmployee((current) => ({
+      ...current,
+      [activeEmployeeId]: Array.from(new Set([
+        ...(current[activeEmployeeId] ?? []),
+        notificationId,
+      ])).slice(-500),
+    }));
+  }
+
+  function clearAllHeaderNotifications() {
+    const notificationIds = allHeaderNotifications.map((notification) => notification.id);
+    if (notificationIds.length === 0) return;
+
+    setDismissedNotificationIdsByEmployee((current) => ({
+      ...current,
+      [activeEmployeeId]: Array.from(new Set([
+        ...(current[activeEmployeeId] ?? []),
+        ...notificationIds,
+      ])).slice(-500),
+    }));
+  }
+
+  function openTimeOffRequestFromNotification(requestId: number) {
+    const request = (state.ptoRequests ?? []).find((item) => item.id === requestId);
+    if (!request) return;
+
+    setIsNotificationsOpen(false);
+    navigateToView("time_off");
+    setHighlightedPtoRequestId(requestId);
+
+    if (request.status !== "pending") {
+      setIsViewingPtoHistory(true);
+      setPtoHistoryMonth(`${request.startDate.slice(0, 7)}-01`);
+      setPtoHistoryStatusFilter("all");
+      setPtoHistoryEmployeeId("all");
+      setArePtoRequestsExpanded(true);
+      return;
+    }
+
+    setIsViewingPtoHistory(false);
+  }
+
+  function openEventFromNotification(eventTargetId: string) {
+    const eventIndex = eventHistoryItems.findIndex((item) => (
+      item.kind === "clock"
+        ? `clock-${item.event.id}` === eventTargetId
+        : item.alert.eventTargetId === eventTargetId
+    ));
+    if (eventIndex < 0) return;
+
+    setIsNotificationsOpen(false);
+    navigateToView("clockins");
+    if (eventIndex >= 10) setAreEventsExpanded(true);
+    setHighlightedEventTargetId(eventTargetId);
+  }
+
+  function dismissModalFromBackdrop(event: ReactMouseEvent<HTMLDivElement>, dismiss: () => void) {
+    if (event.target === event.currentTarget) dismiss();
   }
 
   function startEditingConversationName(conversation: TeamConversation) {
@@ -798,58 +1181,84 @@ export default function Home() {
     setConversationNameDraft("");
   }
 
-  function toggleConversationSelection(conversationId: number) {
-    setSelectedConversationIds((selectedIds) => (
-      selectedIds.includes(conversationId)
-        ? selectedIds.filter((selectedId) => selectedId !== conversationId)
-        : [...selectedIds, conversationId]
-    ));
+  function toggleConversationPinned(conversationId: number) {
+    setState((current) => ({
+      ...current,
+      conversations: (current.conversations ?? []).map((conversation) => {
+        if (conversation.id !== conversationId) return conversation;
+        const pinnedByEmployeeIds = conversation.pinnedByEmployeeIds ?? [];
+        return {
+          ...conversation,
+          pinnedByEmployeeIds: pinnedByEmployeeIds.includes(activeEmployeeId)
+            ? pinnedByEmployeeIds.filter((employeeId) => employeeId !== activeEmployeeId)
+            : [...pinnedByEmployeeIds, activeEmployeeId],
+        };
+      }),
+    }));
+    setConversationMenuId(null);
   }
 
-  function deleteSelectedConversations() {
-    if (selectedConversationIds.length === 0) return;
+  function toggleConversationMuted(conversationId: number) {
+    setState((current) => ({
+      ...current,
+      conversations: (current.conversations ?? []).map((conversation) => {
+        if (conversation.id !== conversationId) return conversation;
+        const mutedByEmployeeIds = conversation.mutedByEmployeeIds ?? [];
+        return {
+          ...conversation,
+          mutedByEmployeeIds: mutedByEmployeeIds.includes(activeEmployeeId)
+            ? mutedByEmployeeIds.filter((employeeId) => employeeId !== activeEmployeeId)
+            : [...mutedByEmployeeIds, activeEmployeeId],
+        };
+      }),
+    }));
+    setConversationMenuId(null);
+  }
 
-    const conversationLabel = selectedConversationIds.length === 1 ? "conversation" : "conversations";
-    if (!window.confirm(`Delete ${selectedConversationIds.length} ${conversationLabel}? This will permanently erase all message history.`)) return;
+  function deleteConversation(conversationId: number) {
+    if (!window.confirm("Delete this conversation? This will permanently erase all message history.")) return;
 
     setState((current) => ({
       ...current,
       conversations: (current.conversations ?? []).filter(
-        (conversation) => !selectedConversationIds.includes(conversation.id),
+        (conversation) => conversation.id !== conversationId,
       ),
     }));
-    setSelectedConversationId((conversationId) => (
-      conversationId !== null && selectedConversationIds.includes(conversationId) ? null : conversationId
+    setSelectedConversationId((selectedId) => (
+      selectedId === conversationId ? null : selectedId
     ));
-    setSelectedConversationIds([]);
+    setViewingConversationInfoId((infoId) => (infoId === conversationId ? null : infoId));
+    setConversationMenuId(null);
   }
 
   function messagePtoRequestEmployee() {
     if (!reviewingPtoRequest || mode !== "manager") return;
 
     const employeeId = reviewingPtoRequest.employeeId;
+    const employee = employeeById(state.employees, employeeId);
+    const pretypedMessage = `Hi ${employee?.name.split(" ")[0] ?? "there"}, I have a question about your time off request.`;
     const directConversation = (state.conversations ?? []).find((conversation) => (
       conversation.participantIds.length === 2
       && conversation.participantIds.includes(activeEmployeeId)
       && conversation.participantIds.includes(employeeId)
     ));
-
-    setReviewingPtoRequestId(null);
     setPtoReviewError("");
     setIsNotificationsOpen(false);
     setIsAccountMenuOpen(false);
     setIsMessagesOpen(true);
+    setIsPtoMessageContext(true);
 
     if (directConversation) {
-      openConversation(directConversation.id);
+      setMessageDraft(pretypedMessage);
+      openConversation(directConversation.id, true);
       return;
     }
 
-    const employee = employeeById(state.employees, employeeId);
     setSelectedConversationId(null);
     setIsCreatingConversation(true);
+    setPtoMessageEmployeeId(employeeId);
     setNewConversationMemberIds([employeeId]);
-    setNewConversationMessage(`Hi ${employee?.name.split(" ")[0] ?? "there"}, I have a question about your time off request.`);
+    setNewConversationMessage(pretypedMessage);
     setMessageError("");
   }
 
@@ -864,7 +1273,10 @@ export default function Home() {
   function createTeamConversation(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const body = newConversationMessage.trim();
-    if (newConversationMemberIds.length === 0) {
+    const recipientIds = ptoMessageEmployeeId === null
+      ? newConversationMemberIds
+      : [ptoMessageEmployeeId];
+    if (recipientIds.length === 0) {
       setMessageError("Select at least one team member.");
       return;
     }
@@ -873,16 +1285,52 @@ export default function Home() {
       return;
     }
 
+    const existingDirectConversation = ptoMessageEmployeeId === null
+      ? undefined
+      : (state.conversations ?? []).find((conversation) => (
+          conversation.participantIds.length === 2
+          && conversation.participantIds.includes(activeEmployeeId)
+          && conversation.participantIds.includes(ptoMessageEmployeeId)
+        ));
+    const sentAt = new Date().toISOString();
+
+    if (existingDirectConversation) {
+      setState((current) => ({
+        ...current,
+        conversations: (current.conversations ?? []).map((conversation) => (
+          conversation.id === existingDirectConversation.id
+            ? {
+                ...conversation,
+                messages: [...conversation.messages, {
+                  id: nextId(conversation.messages),
+                  senderEmployeeId: activeEmployeeId,
+                  body,
+                  sentAt,
+                  readByEmployeeIds: [activeEmployeeId],
+                }],
+              }
+            : conversation
+        )),
+      }));
+      setNewConversationMemberIds([]);
+      setPtoMessageEmployeeId(null);
+      setNewConversationMessage("");
+      setMessageError("");
+      setIsCreatingConversation(false);
+      setSelectedConversationId(existingDirectConversation.id);
+      return;
+    }
+
     const conversationId = nextId(state.conversations ?? []);
     const conversation: TeamConversation = {
       id: conversationId,
       creatorEmployeeId: activeEmployeeId,
-      participantIds: Array.from(new Set([activeEmployeeId, ...newConversationMemberIds])),
+      participantIds: Array.from(new Set([activeEmployeeId, ...recipientIds])),
       messages: [{
         id: 1,
         senderEmployeeId: activeEmployeeId,
         body,
-        sentAt: new Date().toISOString(),
+        sentAt,
         readByEmployeeIds: [activeEmployeeId],
       }],
     };
@@ -891,6 +1339,7 @@ export default function Home() {
       conversations: [...(current.conversations ?? []), conversation],
     }));
     setNewConversationMemberIds([]);
+    setPtoMessageEmployeeId(null);
     setNewConversationMessage("");
     setMessageError("");
     setIsCreatingConversation(false);
@@ -920,6 +1369,7 @@ export default function Home() {
       ),
     }));
     setMessageDraft("");
+    window.requestAnimationFrame(() => messageComposerRef.current?.focus());
   }
 
   function updateBasicInfo(field: BasicInfoField, value: string) {
@@ -981,7 +1431,6 @@ export default function Home() {
     setShowHoursChangeWarning(false);
     setEditingShift(null);
     setEditShiftError("");
-    setSelectedEventExplanation(null);
     setEditingBasicInfoField(null);
     if (view === "schedule") {
       setEmployeeScheduleTab("week");
@@ -1016,7 +1465,14 @@ export default function Home() {
     const role = employeeForm.role.trim();
     const pin = employeeForm.pin.trim();
 
-    if (!name || !role || !pin) return;
+    if (
+      !employeeForm.firstName.trim()
+      || !employeeForm.lastName.trim()
+      || !employeeForm.email.trim()
+      || !employeeForm.phone.trim()
+      || !role
+      || pin.length !== 4
+    ) return;
 
     const employeeWithPin = findEmployeeWithPin(state.employees, pin);
     if (employeeWithPin) {
@@ -1038,24 +1494,66 @@ export default function Home() {
           name,
           email: employeeForm.email.trim(),
           phone: formatPhoneNumberInput(employeeForm.phone),
-          accessLevel: "Employee",
+          accessLevel: employeeForm.accessLevel,
           location: employeeForm.location,
           role,
           wage: formatWageInput(employeeForm.wage),
           pin,
-          active: true,
+          active: employeeForm.active,
         },
       ],
     }));
     setEmployeeForm(emptyEmployeeForm);
+    setIsAddingEmployeeRole(false);
+    setNewEmployeeRole("");
     setEmployeeMessage("");
     setIsAddingEmployee(false);
   }
 
   function cancelAddingEmployee() {
     setEmployeeForm(emptyEmployeeForm);
+    setIsAddingEmployeeRole(false);
+    setNewEmployeeRole("");
     setEmployeeMessage("");
     setIsAddingEmployee(false);
+  }
+
+  function addRoleFromEmployeeForm() {
+    const requestedRole = newEmployeeRole.trim();
+    if (!requestedRole) return;
+
+    const existingRole = availableRoles.find(
+      (role) => role.toLocaleLowerCase() === requestedRole.toLocaleLowerCase(),
+    );
+    const role = existingRole ?? requestedRole;
+
+    if (!existingRole) {
+      setState((current) => {
+        const fallbackDepartment = current.departments.find(
+          (department) => department.name.trim().toLocaleLowerCase() === "department not set",
+        ) ?? current.departments[0];
+
+        if (!fallbackDepartment) {
+          return {
+            ...current,
+            departments: [{ id: 1, name: "Department not set", roles: [role], managerIds: [] }],
+          };
+        }
+
+        return {
+          ...current,
+          departments: current.departments.map((department) => (
+            department.id === fallbackDepartment.id
+              ? { ...department, roles: [...department.roles, role] }
+              : department
+          )),
+        };
+      });
+    }
+
+    setEmployeeForm((form) => ({ ...form, role }));
+    setNewEmployeeRole("");
+    setIsAddingEmployeeRole(false);
   }
 
   function addDepartment() {
@@ -1158,8 +1656,9 @@ export default function Home() {
   }
 
   function removeEmployee(employeeId: number) {
-    if (activeEmployeeId === employeeId) {
-      setActiveEmployeeId(1);
+    if (!activeUserIsAdmin || employeeId === activeEmployeeId) {
+      setEmployeePendingDeletion(null);
+      return;
     }
 
     setState((current) => ({
@@ -1177,6 +1676,15 @@ export default function Home() {
         ...policy,
         employeeIds: policy.employeeIds.filter((id) => id !== employeeId),
       })),
+      scheduleDraftsByManager: Object.fromEntries(
+        Object.entries(current.scheduleDraftsByManager ?? {})
+          .filter(([managerId]) => Number(managerId) !== employeeId)
+          .map(([managerId, draft]) => [managerId, {
+            ...draft,
+            upsertedShifts: draft.upsertedShifts.filter((shift) => shift.employeeId !== employeeId),
+            affectedEmployeeIds: draft.affectedEmployeeIds.filter((id) => id !== employeeId),
+          }]),
+      ),
     }));
     setEmployeeMessage("");
     setEmployeePendingDeletion(null);
@@ -1190,6 +1698,14 @@ export default function Home() {
       ),
       shifts: current.shifts.map((shift) =>
         shift.employeeId === employeeId ? { ...shift, role } : shift,
+      ),
+      scheduleDraftsByManager: Object.fromEntries(
+        Object.entries(current.scheduleDraftsByManager ?? {}).map(([managerId, draft]) => [managerId, {
+          ...draft,
+          upsertedShifts: draft.upsertedShifts.map((shift) => (
+            shift.employeeId === employeeId ? { ...shift, role } : shift
+          )),
+        }]),
       ),
     }));
   }
@@ -1210,12 +1726,21 @@ export default function Home() {
   }
 
   function updateEmployeePin(employeeId: number, pin: string) {
-    const numericPin = pin.replace(/\D/g, "");
+    const numericPin = pin.replace(/\D/g, "").slice(0, 4);
     setState((current) => ({
       ...current,
       employees: current.employees.map((employee) =>
         employee.id === employeeId ? { ...employee, pin: numericPin } : employee,
       ),
+    }));
+  }
+
+  function updateEmployeeStatus(employeeId: number, active: boolean) {
+    setState((current) => ({
+      ...current,
+      employees: current.employees.map((employee) => (
+        employee.id === employeeId ? { ...employee, active } : employee
+      )),
     }));
   }
 
@@ -1235,7 +1760,14 @@ export default function Home() {
 
   function saveShift(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!shiftEmployeeIds.has(shiftForm.employeeId)) return;
+    if (!shiftEmployeeIds.has(shiftForm.employeeId) || !shiftForm.date || !shiftForm.role.trim()) {
+      setCreateShiftError("Date, clock-in time, clock-out time, and role are required.");
+      return;
+    }
+    if (createShiftWeekdays.length === 0) {
+      setCreateShiftError("Choose at least one day to apply this shift to.");
+      return;
+    }
 
     const start = parseTypedTime(shiftForm.start);
     const end = parseTypedTime(shiftForm.end);
@@ -1248,41 +1780,53 @@ export default function Home() {
       return;
     }
 
-    const shiftDates = shiftForm.id
-      ? [shiftForm.date]
-      : repeatDatesForRange(shiftForm.date, repeatDates, copyRange);
-    const duplicateDates = shiftDates.filter((date) =>
-      state.shifts.some((shift) =>
-        shift.employeeId === shiftForm.employeeId
-        && shift.id !== shiftForm.id
-        && shift.date === date,
-      ),
-    );
-    if (duplicateDates.length > 0) {
-      const duplicateDays = duplicateDates.map((date) => parseLocalDate(date).getDate()).join(", ");
-      window.alert(`Shifts already scheduled for: ${duplicateDays}`);
+    const shiftDates = shiftDatesForWeekdays(shiftForm.date, createShiftWeekdays);
+    const duplicateDate = shiftDates.find((date) => workingScheduleShifts.some((shift) => (
+      shift.id !== shiftForm.id
+      && shift.employeeId === shiftForm.employeeId
+      && shift.date === date
+    )));
+    if (duplicateDate) {
+      setCreateShiftError(`This employee already has a shift on ${formatTimeOffRequestDate(duplicateDate)}.`);
       return;
     }
-
-    const firstCreatedShiftId = nextId(state.shifts);
+    const firstCreatedShiftId = nextScheduleShiftId(state);
     const createdShiftIds = shiftForm.id
       ? []
       : shiftDates.map((_, index) => firstCreatedShiftId + index);
 
     setState((current) => {
-      let nextShiftId = nextId(current.shifts);
-      const savedShifts = shiftDates.map((date) => ({
+      const currentDraft = current.scheduleDraftsByManager?.[activeEmployeeId];
+      const currentWorkingShifts = applyScheduleDraft(current.shifts, currentDraft);
+      const previousEmployeeId = shiftForm.id
+        ? currentWorkingShifts.find((shift) => shift.id === shiftForm.id)?.employeeId
+        : undefined;
+      const savedShifts = shiftDates.map((date, index) => ({
         ...shiftForm,
         date,
         start,
         end,
-        id: shiftForm.id || nextShiftId++,
+        role: shiftForm.role.trim(),
+        notes: shiftForm.notes.trim(),
+        id: shiftForm.id || firstCreatedShiftId + index,
       }));
-      const shifts = shiftForm.id
-        ? current.shifts.map((shift) => (shift.id === shiftForm.id ? savedShifts[0] : shift))
-        : [...current.shifts, ...savedShifts];
+      const affectedEmployeeIds = [previousEmployeeId, shiftForm.employeeId]
+        .filter((employeeId): employeeId is number => typeof employeeId === "number");
+      const scheduleDraft = mergeScheduleDraft(
+        current.shifts,
+        currentDraft,
+        shiftForm.id ? [savedShifts[0]] : savedShifts,
+        [],
+        affectedEmployeeIds,
+      );
 
-      return { ...current, shifts };
+      return {
+        ...current,
+        scheduleDraftsByManager: {
+          ...(current.scheduleDraftsByManager ?? {}),
+          [activeEmployeeId]: scheduleDraft,
+        },
+      };
     });
     if (createdShiftIds.length > 0) {
       const createdAt = Date.now();
@@ -1291,36 +1835,70 @@ export default function Home() {
         ...Object.fromEntries(createdShiftIds.map((id) => [id, createdAt])),
       }));
     }
-    const changedShiftIds = shiftForm.id ? [shiftForm.id] : createdShiftIds;
-    setUnpublishedShiftIds((current) => Array.from(new Set([...current, ...changedShiftIds])));
     setCreateShiftError("");
-    setRepeatDates([]);
+    setIsAddingShift(false);
     setShiftForm({
       id: 0,
       employeeId: 0,
-      date: today,
+      date: scheduleDate,
       start: "",
       end: "",
       role: "",
       station: "Floor",
+      notes: "",
     });
+    setCreateShiftWeekdays([]);
   }
 
-  function toggleRepeatDate(date: string) {
-    setShiftForm((form) => ({ ...form, date }));
-    setRepeatDates((current) =>
-      current.includes(date)
-        ? current.filter((entry) => entry !== date)
-        : [...current, date].sort(),
-    );
+  function openShiftCreator(employee: Employee, date: string) {
+    if (mode !== "manager") return;
+    setCreateShiftError("");
+    setShiftForm({
+      id: 0,
+      employeeId: employee.id,
+      date,
+      start: "",
+      end: "",
+      role: employee.role || "",
+      station: "Floor",
+      notes: "",
+    });
+    setCreateShiftWeekdays([weekdayForDate(date)]);
+    setIsAddingShift(true);
   }
 
-  function moveCopyRange(direction: -1 | 1) {
-    setRepeatDates([]);
-    setShiftForm((form) => ({
-      ...form,
-      date: shiftDateByRange(form.date, copyRange, direction),
-    }));
+  function openMonthShiftCreator(date: string) {
+    if (mode !== "manager") return;
+    setCreateShiftError("");
+    setShiftForm({
+      id: 0,
+      employeeId: 0,
+      date,
+      start: "",
+      end: "",
+      role: "",
+      station: "Floor",
+      notes: "",
+    });
+    setCreateShiftWeekdays([weekdayForDate(date)]);
+    setIsAddingShift(true);
+  }
+
+  function toggleCreateShiftWeekday(weekday: number) {
+    setCreateShiftWeekdays((weekdays) => (
+      weekdays.includes(weekday)
+        ? (weekdays.length > 1 ? weekdays.filter((day) => day !== weekday) : weekdays)
+        : [...weekdays, weekday]
+    ));
+  }
+
+  function toggleEditingShiftWeekday(weekday: number) {
+    if (!editingShift || weekday === weekdayForDate(editingShift.date)) return;
+    setEditingShiftWeekdays((weekdays) => (
+      weekdays.includes(weekday)
+        ? weekdays.filter((day) => day !== weekday)
+        : [...weekdays, weekday]
+    ));
   }
 
   function moveScheduleDate(direction: -1 | 1) {
@@ -1386,6 +1964,21 @@ export default function Home() {
     setEditingPtoPolicyId(null);
     setPtoPolicyStep("details");
     setPtoPolicyError("");
+  }
+
+  function cancelPtoPolicyEditor() {
+    const wasEditingSavedPolicy = editingPtoPolicyId !== null;
+    closePtoPolicyEditor();
+    if (wasEditingSavedPolicy) setIsViewingPtoPolicies(true);
+  }
+
+  function deletePtoPolicy(policy: PtoPolicy) {
+    if (!window.confirm(`Delete ${policy.name}? Employees assigned to it will no longer earn PTO through this policy.`)) return;
+
+    setState((current) => ({
+      ...current,
+      ptoPolicies: (current.ptoPolicies ?? []).filter((item) => item.id !== policy.id),
+    }));
   }
 
   function continuePtoPolicy() {
@@ -1508,7 +2101,7 @@ export default function Home() {
 
   function submitPtoRequest(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!ptoRequestForm || !activeEmployee || mode !== "employee") return;
+    if (!ptoRequestForm || !activeEmployee) return;
 
     if (!ptoRequestForm.reason) {
       setPtoRequestError("Choose Sick/Emergency or Vacation.");
@@ -1523,7 +2116,7 @@ export default function Home() {
       ptoRequestForm.endDate,
     );
     if (requestedPtoHours <= 0) {
-      setPtoRequestError("Choose at least one weekday and a valid amount of time off.");
+      setPtoRequestError("Choose at least one valid day for time off.");
       return;
     }
     const employeePto = ptoRows.find((row) => row.employee.id === activeEmployee.id);
@@ -1533,10 +2126,9 @@ export default function Home() {
       return;
     }
     const explanation = ptoRequestForm.explanation.trim();
-    if (!explanation) {
-      setPtoRequestError("An explanation is required.");
-      return;
-    }
+    const requestedAt = new Date().toISOString();
+    const autoApproved = activeEmployee.accessLevel === "Admin";
+    const initialStatus: PtoRequest["status"] = autoApproved ? "approved" : "pending";
 
     setState((current) => ({
       ...current,
@@ -1550,8 +2142,10 @@ export default function Home() {
           endDate: ptoRequestForm.endDate,
           reason: ptoRequestForm.reason as PtoRequest["reason"],
           explanation,
-          status: "pending",
-          requestedAt: new Date().toISOString(),
+          status: initialStatus,
+          requestedAt,
+          decidedAt: autoApproved ? requestedAt : undefined,
+          decidedByEmployeeId: autoApproved ? activeEmployee.id : undefined,
         },
       ],
     }));
@@ -1564,6 +2158,10 @@ export default function Home() {
 
     const request = (state.ptoRequests ?? []).find((entry) => entry.id === reviewingPtoRequestId);
     if (!request || request.status === "cancelled") return;
+    if (request.employeeId === activeEmployeeId) {
+      setPtoReviewError("You cannot approve or deny your own time off request.");
+      return;
+    }
     if (status === "approved" && request.status !== "approved" && request.compensation !== "unpaid") {
       const employeePto = ptoRows.find((row) => row.employee.id === request.employeeId);
       const ptoHoursLeft = employeePto ? employeePto.ptoHours - employeePto.ptoUsed : 0;
@@ -1597,15 +2195,19 @@ export default function Home() {
   }
 
   function cancelPtoRequest(requestId: number) {
-    if (mode !== "employee") return;
-
+    const cancelledAt = new Date().toISOString();
     setState((current) => ({
       ...current,
       ptoRequests: (current.ptoRequests ?? []).map((request) =>
         request.id === requestId
         && request.employeeId === activeEmployeeId
         && request.status === "pending"
-          ? { ...request, status: "cancelled" }
+          ? {
+              ...request,
+              status: "cancelled",
+              decidedAt: cancelledAt,
+              decidedByEmployeeId: activeEmployeeId,
+            }
           : request,
       ),
     }));
@@ -1676,16 +2278,19 @@ export default function Home() {
   function openShiftEditor(shift: Shift) {
     if (mode !== "manager") return;
     setEditShiftError("");
-    setEditingShift(shift);
+    setEditingShift({ ...shift, notes: shift.notes ?? "" });
+    setEditingShiftWeekdays([weekdayForDate(shift.date)]);
   }
 
   function saveEditedShift(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!editingShift) return;
 
+    const savedShift = workingScheduleShifts.find((shift) => shift.id === editingShift.id);
     const start = parseTypedTime(editingShift.start);
     const end = parseTypedTime(editingShift.end);
     const role = editingShift.role.trim();
+    const notes = editingShift.notes?.trim() ?? "";
     if (!start || !end) {
       setEditShiftError("Enter a valid start and end time.");
       return;
@@ -1694,48 +2299,159 @@ export default function Home() {
       setEditShiftError("Start time must be earlier than end time.");
       return;
     }
+    const shiftHasStarted = Boolean(savedShift && currentTime >= shiftStartDateTime(savedShift).getTime());
+    const shiftHasEnded = Boolean(savedShift && currentTime >= shiftEndDateTime(savedShift).getTime());
+    if (shiftHasEnded) {
+      setEditShiftError("This shift has ended and can no longer be changed.");
+      return;
+    }
+    if (shiftHasStarted && savedShift && (
+      editingShift.employeeId !== savedShift.employeeId
+      || editingShift.date !== savedShift.date
+      || start !== savedShift.start
+      || role !== savedShift.role.trim()
+      || notes !== (savedShift.notes?.trim() ?? "")
+    )) {
+      setEditShiftError("Once a shift starts, only its clock-out time can be changed.");
+      return;
+    }
+    if (shiftHasStarted && shiftEndDateTime({ ...editingShift, start, end, role }).getTime() <= currentTime) {
+      setEditShiftError("Clock-out time must remain in the future while the shift is active.");
+      return;
+    }
     if (!role || !shiftEmployeeIds.has(editingShift.employeeId)) return;
 
-    const hasDuplicate = state.shifts.some((shift) =>
+    if (editingShiftWeekdays.length === 0) {
+      setEditShiftError("Choose at least one day to apply this shift to.");
+      return;
+    }
+    const targetDates = Array.from(new Set([
+      editingShift.date,
+      ...shiftDatesForWeekdays(editingShift.date, editingShiftWeekdays),
+    ]));
+    if (shiftHasStarted && savedShift && targetDates.some((date) => date !== savedShift.date)) {
+      setEditShiftError("Days cannot be added after a shift starts.");
+      return;
+    }
+    const duplicateDate = targetDates.find((date) => workingScheduleShifts.some((shift) => (
       shift.id !== editingShift.id
       && shift.employeeId === editingShift.employeeId
-      && shift.date === editingShift.date,
-    );
-    if (hasDuplicate) {
-      window.alert("This employee already has a shift scheduled that day.");
+      && shift.date === date
+    )));
+    if (duplicateDate) {
+      setEditShiftError(`This employee already has a shift on ${formatTimeOffRequestDate(duplicateDate)}.`);
       return;
     }
 
-    setState((current) => ({
-      ...current,
-      shifts: current.shifts.map((shift) =>
-        shift.id === editingShift.id
-          ? { ...editingShift, start, end, role }
-        : shift,
-      ),
+    const additionalDates = targetDates.filter((date) => date !== editingShift.date);
+    const firstAdditionalShiftId = nextScheduleShiftId(state);
+    const additionalShifts = additionalDates.map((date, index) => ({
+      ...editingShift,
+      id: firstAdditionalShiftId + index,
+      date,
+      start,
+      end,
+      role,
+      notes,
     }));
+
+    setState((current) => {
+      const currentDraft = current.scheduleDraftsByManager?.[activeEmployeeId];
+      const currentWorkingShifts = applyScheduleDraft(current.shifts, currentDraft);
+      const editedSavedShift = { ...editingShift, start, end, role, notes };
+      const affectedEmployeeIds = [
+        currentWorkingShifts.find((shift) => shift.id === editingShift.id)?.employeeId ?? editingShift.employeeId,
+        editingShift.employeeId,
+      ];
+      const scheduleDraft = mergeScheduleDraft(
+        current.shifts,
+        currentDraft,
+        [editedSavedShift, ...additionalShifts],
+        [],
+        affectedEmployeeIds,
+      );
+
+      return {
+        ...current,
+        scheduleDraftsByManager: {
+          ...(current.scheduleDraftsByManager ?? {}),
+          [activeEmployeeId]: scheduleDraft,
+        },
+      };
+    });
     setEditedShiftTimes((current) => ({ ...current, [editingShift.id]: Date.now() }));
-    setUnpublishedShiftIds((current) => Array.from(new Set([...current, editingShift.id])));
+    if (additionalShifts.length > 0) {
+      const createdAt = Date.now();
+      setCreatedShiftTimes((current) => ({
+        ...current,
+        ...Object.fromEntries(additionalShifts.map((shift) => [shift.id, createdAt])),
+      }));
+    }
     setLastEditedShiftId(editingShift.id);
     setEditShiftError("");
     setEditingShift(null);
   }
 
   function deleteEditingShift() {
-    if (!editingShift) return;
+    if (!editingShift || !activeUserIsAdmin) return;
     if (!window.confirm("Are you sure you want to delete this shift?")) return;
 
-    setState((current) => ({
-      ...current,
-      shifts: current.shifts.filter((shift) => shift.id !== editingShift.id),
-    }));
-    setUnpublishedShiftIds((current) => current.filter((id) => id !== editingShift.id));
+    setState((current) => {
+      const currentDraft = current.scheduleDraftsByManager?.[activeEmployeeId];
+      const scheduleDraft = mergeScheduleDraft(
+        current.shifts,
+        currentDraft,
+        [],
+        [editingShift.id],
+        [editingShift.employeeId],
+      );
+
+      return {
+        ...current,
+        scheduleDraftsByManager: {
+          ...(current.scheduleDraftsByManager ?? {}),
+          [activeEmployeeId]: scheduleDraft,
+        },
+      };
+    });
     setEditingShift(null);
   }
 
   function publishSchedule() {
     if (mode !== "manager") return;
-    setUnpublishedShiftIds([]);
+    const publishedAt = new Date().toISOString();
+    const publishId = Date.now();
+    setState((current) => {
+      const scheduleDraft = current.scheduleDraftsByManager?.[activeEmployeeId];
+      if (!scheduleDraft) return current;
+      const publishedShifts = applyScheduleDraft(current.shifts, scheduleDraft);
+      const publisherName = current.employees.find((employee) => employee.id === activeEmployeeId)?.name ?? "A manager";
+      const scheduleUpdates = [
+        ...(current.scheduleUpdates ?? []).slice(-200),
+        ...current.employees
+          .map((employee) => ({
+            id: `${publishId}-${employee.id}`,
+            employeeId: employee.id,
+            title: "New schedule published",
+            detail: `${publisherName} published a new schedule for the team.`,
+            at: publishedAt,
+          })),
+      ];
+      const remainingScheduleDrafts = { ...(current.scheduleDraftsByManager ?? {}) };
+      delete remainingScheduleDrafts[activeEmployeeId];
+
+      return {
+        ...current,
+        shifts: publishedShifts,
+        scheduleUpdates,
+        scheduleHasBeenPublished: true,
+        pendingScheduleUpdateEmployeeIds: [],
+        scheduleDraftsByManager: remainingScheduleDrafts,
+      };
+    });
+    setCreatedShiftTimes({});
+    setEditedShiftTimes({});
+    setLastEditedShiftId(null);
   }
 
   function requestTimeException(action: TimeExceptionAction) {
@@ -1832,10 +2548,13 @@ export default function Home() {
           </div>
           <input
             value={pin}
-            onChange={(event) => setPin(event.target.value)}
+            onChange={(event) => setPin(event.target.value.replace(/\D/g, "").slice(0, 4))}
             placeholder="PIN"
             aria-label="Access PIN"
             inputMode="numeric"
+            maxLength={4}
+            pattern="[0-9]{4}"
+            required
           />
           <button type="submit">Enter</button>
           {authMessage ? <p role="alert">{authMessage}</p> : null}
@@ -1979,15 +2698,21 @@ export default function Home() {
                     <path d="M12 9v4l3 2M9 2h6M12 2v3M18 7l2-2" />
                   </svg>
                 </button>
-                <div className="message-menu" ref={messageMenuRef}>
+                <div
+                  className={reviewingPtoRequest && isMessagesOpen ? "message-menu pto-review-message-overlay" : "message-menu"}
+                  ref={messageMenuRef}
+                >
                   <button
                     type="button"
                     className="header-icon-button"
                     onClick={() => {
                       if (!isMessagesOpen) {
                         setSelectedConversationId(null);
-                        setSelectedConversationIds([]);
+                        setConversationMenuId(null);
+                        setViewingConversationInfoId(null);
                         setIsCreatingConversation(false);
+                        setPtoMessageEmployeeId(null);
+                        setIsPtoMessageContext(false);
                         setMessageError("");
                       }
                       setIsMessagesOpen((open) => !open);
@@ -1996,21 +2721,67 @@ export default function Home() {
                     }}
                     aria-expanded={isMessagesOpen}
                     aria-haspopup="dialog"
-                    aria-label="Messages"
+                    aria-label={unreadConversationCount > 0
+                      ? `${unreadConversationCount} unread conversations`
+                      : "Messages"}
                     title="Messages"
                   >
                     <svg viewBox="0 0 24 24" aria-hidden="true">
                       <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" />
                     </svg>
                     {unreadConversationCount > 0 ? (
-                      <span className="notification-badge" aria-label={`${unreadConversationCount} unread conversations`}>
-                        {unreadConversationCount > 9 ? "9+" : unreadConversationCount}
-                      </span>
+                      <span className="notification-badge" aria-hidden="true">{unreadConversationCount}</span>
                     ) : null}
                   </button>
                   {isMessagesOpen ? (
-                    <div className="message-dropdown" role="dialog" aria-label="Messages">
-                      {isCreatingConversation ? (
+                    <div
+                      className="message-dropdown"
+                      role="dialog"
+                      aria-label="Messages"
+                      style={reviewingPtoRequest && ptoMessageOverlayPosition
+                        ? {
+                            top: ptoMessageOverlayPosition.top,
+                            left: ptoMessageOverlayPosition.left,
+                            right: "auto",
+                            height: ptoMessageOverlayPosition.height,
+                            visibility: "visible",
+                          }
+                        : undefined}
+                    >
+                      <button
+                        type="button"
+                        className="message-dropdown-close"
+                        onClick={() => {
+                          setIsMessagesOpen(false);
+                          setPtoMessageEmployeeId(null);
+                          setIsPtoMessageContext(false);
+                        }}
+                        aria-label="Dismiss messages"
+                        title="Close"
+                      >
+                        <span aria-hidden="true">&times;</span>
+                      </button>
+                      {isCreatingConversation && ptoMessageEmployeeId !== null ? (
+                        <div className="conversation-view pto-draft-conversation">
+                          <div className="message-popout-heading">
+                            <strong>{employeeById(state.employees, ptoMessageEmployeeId)?.name ?? "Employee"}</strong>
+                          </div>
+                          <div className="conversation-messages" ref={conversationMessagesRef} />
+                          <form className="message-reply-form" onSubmit={createTeamConversation}>
+                            <textarea
+                              ref={messageComposerRef}
+                              value={newConversationMessage}
+                              onChange={(event) => setNewConversationMessage(event.target.value)}
+                              placeholder="Write a message"
+                              aria-label="New message text"
+                              rows={2}
+                              required
+                            />
+                            <button type="submit" disabled={!newConversationMessage.trim()}>Send</button>
+                            {messageError ? <p className="message-error">{messageError}</p> : null}
+                          </form>
+                        </div>
+                      ) : isCreatingConversation ? (
                         <form className="new-conversation-form" onSubmit={createTeamConversation}>
                           <div className="message-popout-heading">
                             <button
@@ -2030,6 +2801,7 @@ export default function Home() {
                             <legend>Add team members</legend>
                             {activeEmployees
                               .filter((employee) => employee.id !== activeEmployeeId)
+                              .sort((firstEmployee, secondEmployee) => firstEmployee.name.localeCompare(secondEmployee.name))
                               .map((employee) => (
                                 <label key={employee.id}>
                                   <input
@@ -2053,17 +2825,54 @@ export default function Home() {
                           {messageError ? <p className="message-error">{messageError}</p> : null}
                           <button type="submit" className="start-chat-button">Start chat</button>
                         </form>
-                      ) : selectedConversation ? (
-                        <div className="conversation-view">
+                      ) : viewingConversationInfo ? (
+                        <div className="conversation-info-view">
                           <div className="message-popout-heading">
                             <button
                               type="button"
                               className="message-back-button"
-                              onClick={() => setSelectedConversationId(null)}
+                              onClick={() => setViewingConversationInfoId(null)}
                               aria-label="Back to messages"
                             >
                               ←
                             </button>
+                            <strong>View info</strong>
+                          </div>
+                          <div className="conversation-info-summary">
+                            <span className="message-member-avatar" aria-hidden="true">
+                              {conversationInitials(viewingConversationInfo, state.employees, activeEmployeeId)}
+                            </span>
+                            <strong>{conversationTitle(viewingConversationInfo, state.employees, activeEmployeeId)}</strong>
+                            <small>{viewingConversationInfo.participantIds.length} participants</small>
+                          </div>
+                          <div className="conversation-participant-list">
+                            {viewingConversationInfo.participantIds.map((employeeId) => {
+                              const employee = employeeById(state.employees, employeeId);
+                              return employee ? (
+                                <div className="conversation-participant" key={employee.id}>
+                                  <span className="message-member-avatar" aria-hidden="true">{employeeInitials(employee.name)}</span>
+                                  <span>
+                                    <strong>{employee.name}</strong>
+                                    <small>{employee.role}</small>
+                                  </span>
+                                </div>
+                              ) : null;
+                            })}
+                          </div>
+                        </div>
+                      ) : selectedConversation ? (
+                        <div className="conversation-view">
+                          <div className="message-popout-heading">
+                            {!isPtoMessageContext ? (
+                              <button
+                                type="button"
+                                className="message-back-button"
+                                onClick={() => setSelectedConversationId(null)}
+                                aria-label="Back to messages"
+                              >
+                                ←
+                              </button>
+                            ) : null}
                             {editingConversationNameId === selectedConversation.id ? (
                               <form className="conversation-name-form" onSubmit={saveConversationName}>
                                 <input
@@ -2098,7 +2907,7 @@ export default function Home() {
                               </>
                             )}
                           </div>
-                          <div className="conversation-messages">
+                          <div className="conversation-messages" ref={conversationMessagesRef}>
                             {selectedConversation.messages.map((message, messageIndex) => {
                               const previousMessage = selectedConversation.messages[messageIndex - 1];
                               const startsNewDay = !previousMessage || !messagesShareCalendarDay(previousMessage.sentAt, message.sentAt);
@@ -2114,7 +2923,7 @@ export default function Home() {
                                     <p>{message.body}</p>
                                     <div className="team-message-meta">
                                       <time dateTime={message.sentAt}>{formatMessageTime(message.sentAt)}</time>
-                                      {message.senderEmployeeId === activeEmployeeId ? (
+                                      {message.senderEmployeeId === activeEmployeeId && message.id === latestOwnMessageId ? (
                                         <span className="message-delivery-status">
                                           {messageDeliveryStatus(message, selectedConversation)}
                                         </span>
@@ -2126,11 +2935,13 @@ export default function Home() {
                             })}
                           </div>
                           <form className="message-reply-form" onSubmit={sendTeamMessage}>
-                            <input
+                            <textarea
+                              ref={messageComposerRef}
                               value={messageDraft}
                               onChange={(event) => setMessageDraft(event.target.value)}
                               placeholder="Write a message"
                               aria-label="Reply message"
+                              rows={2}
                             />
                             <button type="submit" disabled={!messageDraft.trim()}>Send</button>
                           </form>
@@ -2139,22 +2950,6 @@ export default function Home() {
                         <>
                           <div className="message-list-heading">
                             <strong className="notification-title">Messages</strong>
-                            {selectedConversationIds.length > 0 ? (
-                              <button
-                                type="button"
-                                className="delete-conversations-button"
-                                onClick={deleteSelectedConversations}
-                                aria-label={`Delete ${selectedConversationIds.length} selected ${selectedConversationIds.length === 1 ? "conversation" : "conversations"}`}
-                                title="Delete selected conversations"
-                              >
-                                <svg viewBox="0 0 24 24" aria-hidden="true">
-                                  <path d="M4 7h16" />
-                                  <path d="M9 7V4h6v3" />
-                                  <path d="m7 7 1 13h8l1-13" />
-                                  <path d="M10 11v5M14 11v5" />
-                                </svg>
-                              </button>
-                            ) : null}
                           </div>
                           <div className="notification-tabs" role="tablist" aria-label="Message filters">
                             <button
@@ -2173,45 +2968,99 @@ export default function Home() {
                               role="tab"
                               aria-selected={messageFilter === "unread"}
                             >
-                              Unread
+                              Unread ({unreadMessageCount})
                             </button>
                           </div>
-                          <div className="message-conversation-list">
+                          <div className="message-conversation-list" onScroll={() => setConversationMenuId(null)}>
                             {visibleConversations.length > 0 ? visibleConversations.map((conversation) => {
                               const lastMessage = conversation.messages.at(-1);
-                              const isSelected = selectedConversationIds.includes(conversation.id);
+                              const isPinned = conversation.pinnedByEmployeeIds?.includes(activeEmployeeId) ?? false;
+                              const isMuted = conversation.mutedByEmployeeIds?.includes(activeEmployeeId) ?? false;
+                              const conversationUnreadCount = conversationUnreadMessageCount(conversation, activeEmployeeId);
                               return (
-                                <div className={isSelected ? "message-conversation-row selected" : "message-conversation-row"} key={conversation.id}>
-                                  <button
-                                    type="button"
-                                    className="message-avatar-select"
-                                    onClick={() => toggleConversationSelection(conversation.id)}
-                                    aria-label={`${isSelected ? "Deselect" : "Select"} conversation with ${conversationTitle(conversation, state.employees, activeEmployeeId)}`}
-                                    aria-pressed={isSelected}
-                                  >
-                                    <span className="message-member-avatar" aria-hidden="true">
-                                      {conversationInitials(conversation, state.employees, activeEmployeeId)}
-                                    </span>
-                                  </button>
+                                <div className="message-conversation-row" key={conversation.id}>
+                                  <span className="message-member-avatar" aria-hidden="true">
+                                    {conversationInitials(conversation, state.employees, activeEmployeeId)}
+                                  </span>
                                   <button type="button" className="conversation-open-button" onClick={() => openConversation(conversation.id)}>
                                     <span className="conversation-preview">
-                                      <strong>{conversationTitle(conversation, state.employees, activeEmployeeId)}</strong>
+                                      <strong>
+                                        {conversationTitle(conversation, state.employees, activeEmployeeId)}
+                                        {isPinned ? <span className="conversation-state-label">Pinned</span> : null}
+                                        {isMuted ? <span className="conversation-state-label">Muted</span> : null}
+                                      </strong>
                                       <small>{lastMessage?.body ?? "No messages yet"}</small>
                                     </span>
-                                    {conversationHasUnreadMessages(conversation, activeEmployeeId) ? (
-                                      <span className="unread-dot" aria-label="Unread" />
+                                    {conversationUnreadCount > 0 ? (
+                                      <span
+                                        className="conversation-unread-count"
+                                        aria-label={`${conversationUnreadCount} unread ${conversationUnreadCount === 1 ? "message" : "messages"}`}
+                                      >
+                                        {conversationUnreadCount}
+                                      </span>
                                     ) : null}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="conversation-options-button"
+                                    onClick={(event) => {
+                                      if (conversationMenuId === conversation.id) {
+                                        setConversationMenuId(null);
+                                        return;
+                                      }
+                                      const dropdown = event.currentTarget.closest(".message-dropdown");
+                                      const buttonBounds = event.currentTarget.getBoundingClientRect();
+                                      const dropdownBounds = dropdown?.getBoundingClientRect();
+                                      setConversationMenuTop(dropdownBounds ? buttonBounds.bottom - dropdownBounds.top + 4 : 54);
+                                      setConversationMenuId(conversation.id);
+                                    }}
+                                    aria-label={`Conversation options for ${conversationTitle(conversation, state.employees, activeEmployeeId)}`}
+                                    aria-expanded={conversationMenuId === conversation.id}
+                                    aria-haspopup="menu"
+                                  >
+                                    <span aria-hidden="true">⋮</span>
                                   </button>
                                 </div>
                               );
                             }) : <p className="notification-empty">No {messageFilter === "unread" ? "unread " : ""}messages.</p>}
                           </div>
+                          {conversationWithOpenMenu ? (
+                            <div
+                              className="conversation-options-popout"
+                              role="menu"
+                              style={{ top: conversationMenuTop }}
+                            >
+                              <button
+                                type="button"
+                                role="menuitem"
+                                onClick={() => {
+                                  setViewingConversationInfoId(conversationWithOpenMenu.id);
+                                  setConversationMenuId(null);
+                                }}
+                              >
+                                View info
+                              </button>
+                              <button type="button" role="menuitem" onClick={() => toggleConversationPinned(conversationWithOpenMenu.id)}>
+                                {conversationWithOpenMenu.pinnedByEmployeeIds?.includes(activeEmployeeId) ? "Unpin Conversation" : "Pin Conversation"}
+                              </button>
+                              <button type="button" role="menuitem" onClick={() => toggleConversationMuted(conversationWithOpenMenu.id)}>
+                                {conversationWithOpenMenu.mutedByEmployeeIds?.includes(activeEmployeeId) ? "Unmute Conversation" : "Mute Conversation"}
+                              </button>
+                              <button type="button" role="menuitem" className="danger" onClick={() => deleteConversation(conversationWithOpenMenu.id)}>
+                                Delete Conversation
+                              </button>
+                            </div>
+                          ) : null}
                           <button
                             type="button"
                             className="new-message-button"
                             onClick={() => {
                               setIsCreatingConversation(true);
+                              setPtoMessageEmployeeId(null);
+                              setIsPtoMessageContext(false);
                               setSelectedConversationId(null);
+                              setNewConversationMemberIds([]);
+                              setNewConversationMessage("");
                               setMessageError("");
                             }}
                           >
@@ -2227,75 +3076,84 @@ export default function Home() {
                     type="button"
                     className="notification-button"
                     onClick={() => {
-                      setIsNotificationsOpen((open) => !open);
+                      const nextOpen = !isNotificationsOpen;
+                      setIsNotificationsOpen(nextOpen);
                       setIsAccountMenuOpen(false);
                       setIsMessagesOpen(false);
+                      if (nextOpen) markHeaderNotificationsOpened();
                     }}
                     aria-expanded={isNotificationsOpen}
                     aria-haspopup="dialog"
-                    aria-label={mode === "manager" ? "Notifications" : "Schedule updates"}
-                    title={mode === "manager" ? "Notifications" : "Schedule updates"}
+                    aria-label="Notifications"
+                    title="Notifications"
                   >
                     <svg viewBox="0 0 24 24" aria-hidden="true">
                       <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" />
                     </svg>
-                    {pendingNotificationCount > 0 ? (
-                      <span className="notification-badge" aria-label={`${pendingNotificationCount} pending requests`}>
-                        {pendingNotificationCount > 9 ? "9+" : pendingNotificationCount}
+                    {unreadNotificationCount > 0 ? (
+                      <span className="notification-badge" aria-label={`${unreadNotificationCount} unread notifications`}>
+                        {unreadNotificationCount > 9 ? "9+" : unreadNotificationCount}
                       </span>
                     ) : null}
                   </button>
                   {isNotificationsOpen ? (
-                    <div className="notification-dropdown" role="dialog" aria-label={mode === "manager" ? "Notifications" : "Schedule updates"}>
-                      <strong className="notification-title">{mode === "manager" ? "Notifications" : "Schedule updates"}</strong>
-                      {mode === "manager" ? (
-                        <>
-                          <div className="notification-tabs" role="tablist" aria-label="Notification categories">
-                            <button
-                              type="button"
-                              className={activeNotificationTab === "team_requests" ? "active" : ""}
-                              onClick={() => setActiveNotificationTab("team_requests")}
-                              role="tab"
-                              aria-selected={activeNotificationTab === "team_requests"}
-                            >
-                              Team requests
-                            </button>
-                            <button
-                              type="button"
-                              className={activeNotificationTab === "alerts" ? "active" : ""}
-                              onClick={() => setActiveNotificationTab("alerts")}
-                              role="tab"
-                              aria-selected={activeNotificationTab === "alerts"}
-                            >
-                              Alerts
-                            </button>
-                          </div>
-                          <div className="notification-list">
-                            {activeNotificationTab === "team_requests" ? (
-                              notificationRequests.length > 0 ? notificationRequests.map((request) => {
-                                const employee = employeeById(state.employees, request.employeeId);
-                                return (
-                                  <div className="notification-item" key={request.id}>
-                                    <strong>{employee?.name ?? "Employee"}</strong>
-                                    <span>{formatShortDate(request.startDate)} · {capitalize(request.status)}</span>
-                                  </div>
-                                );
-                              }) : <p className="notification-empty">No team requests.</p>
+                    <div className="notification-dropdown" role="dialog" aria-label="Notifications">
+                      <div className="notification-header">
+                        <strong className="notification-title">Notifications</strong>
+                        {headerNotifications.length > 0 ? (
+                          <button type="button" className="notification-clear" onClick={clearAllHeaderNotifications}>
+                            Clear all
+                          </button>
+                        ) : null}
+                      </div>
+                      <div className="notification-list">
+                        {headerNotifications.length > 0 ? headerNotifications.map((notification) => (
+                          <div className="notification-item" key={notification.id}>
+                            {notification.kind === "request" && notification.requestId ? (
+                              <button
+                                type="button"
+                                className="notification-message-item notification-request-item"
+                                onClick={() => openTimeOffRequestFromNotification(notification.requestId!)}
+                              >
+                                <strong>{notification.title}</strong>
+                                <span>
+                                  {notification.requestDate && notification.requestStatus ? (
+                                    <>
+                                      {notification.requestDate} · <span className={`notification-request-status ${notification.requestStatus}`}>{capitalize(notification.requestStatus)}</span>
+                                    </>
+                                  ) : notification.detail}
+                                </span>
+                                <small>{formatOperationalAlertTime(notification.at)}</small>
+                              </button>
+                            ) : notification.kind === "alert" && notification.eventTargetId ? (
+                              <button
+                                type="button"
+                                className="notification-message-item notification-alert-item"
+                                onClick={() => openEventFromNotification(notification.eventTargetId!)}
+                              >
+                                <strong>{notification.title}</strong>
+                                <span>{notification.detail}</span>
+                                <small>{formatOperationalAlertTime(notification.at)}</small>
+                              </button>
                             ) : (
-                              <p className="notification-empty">No new alerts.</p>
+                              <div className="notification-copy">
+                                <strong>{notification.title}</strong>
+                                <span>{notification.detail}</span>
+                                <small>{formatOperationalAlertTime(notification.at)}</small>
+                              </div>
                             )}
+                            <button
+                              type="button"
+                              className="notification-dismiss"
+                              onClick={() => dismissHeaderNotification(notification.id)}
+                              aria-label={`Delete ${notification.title} notification`}
+                              title="Delete notification"
+                            >
+                              ×
+                            </button>
                           </div>
-                        </>
-                      ) : (
-                        <div className="notification-list">
-                          {employeeScheduleNotifications.length > 0 ? employeeScheduleNotifications.map((shift) => (
-                            <div className="notification-item" key={shift.id}>
-                              <strong>{shift.role || "Scheduled shift"}</strong>
-                              <span>{formatShortDate(shift.date)} · {formatTimeRange(shift)}</span>
-                            </div>
-                          )) : <p className="notification-empty">No schedule updates.</p>}
-                        </div>
-                      )}
+                        )) : <p className="notification-empty">No new notifications.</p>}
+                      </div>
                     </div>
                   ) : null}
                 </div>
@@ -2465,6 +3323,9 @@ export default function Home() {
                             Break {formatClockTime(activeBreak.at)} - {formatClockTime(activeBreakEndTime.toISOString())}
                           </span>
                         </div>
+                      ) : null}
+                      {activeIsClockedIn && myShift?.notes ? (
+                        <p className="active-shift-note"><strong>Shift note:</strong> {myShift.notes}</p>
                       ) : null}
                     </div>
                     <div className="clock-actions">
@@ -2756,24 +3617,26 @@ export default function Home() {
                             />
                           </label>
                           <label>
-                            <span>Last name</span>
+                            <span>Last name <b aria-hidden="true">*</b></span>
                             <input
                               value={employeeForm.lastName}
                               onChange={(event) => setEmployeeForm((form) => ({ ...form, lastName: event.target.value }))}
                               autoComplete="family-name"
+                              required
                             />
                           </label>
                           <label>
-                            <span>Email</span>
+                            <span>Email <b aria-hidden="true">*</b></span>
                             <input
                               type="email"
                               value={employeeForm.email}
                               onChange={(event) => setEmployeeForm((form) => ({ ...form, email: event.target.value }))}
                               autoComplete="email"
+                              required
                             />
                           </label>
                           <label>
-                            <span>Mobile phone number</span>
+                            <span>Mobile phone number <b aria-hidden="true">*</b></span>
                             <input
                               type="tel"
                               value={employeeForm.phone}
@@ -2781,6 +3644,7 @@ export default function Home() {
                               placeholder="(___) ___-____"
                               autoComplete="tel"
                               maxLength={14}
+                              required
                             />
                           </label>
                         </div>
@@ -2801,19 +3665,58 @@ export default function Home() {
                               ))}
                             </select>
                           </label>
-                          <label>
-                            <span>Role <b aria-hidden="true">*</b></span>
-                            <select
-                              value={employeeForm.role}
-                              onChange={(event) => setEmployeeForm((form) => ({ ...form, role: event.target.value }))}
-                              required
-                            >
-                              <option value="">Select</option>
-                              {availableRoles.map((role) => (
-                                <option value={role} key={role}>{role}</option>
-                              ))}
-                            </select>
-                          </label>
+                          <div className="team-member-field team-member-role-field">
+                            <div className="team-member-field-heading">
+                              <label htmlFor="new-team-member-role">Role <b aria-hidden="true">*</b></label>
+                              <button
+                                type="button"
+                                className="team-member-add-role-button"
+                                onClick={() => {
+                                  setIsAddingEmployeeRole(true);
+                                  window.requestAnimationFrame(() => employeeRoleInputRef.current?.focus());
+                                }}
+                                aria-label="Add a new role"
+                                aria-expanded={isAddingEmployeeRole}
+                                aria-controls="new-team-member-role"
+                                title="Add role"
+                              >+</button>
+                            </div>
+                            {isAddingEmployeeRole ? (
+                              <input
+                                id="new-team-member-role"
+                                ref={employeeRoleInputRef}
+                                value={newEmployeeRole}
+                                onChange={(event) => setNewEmployeeRole(event.target.value)}
+                                onBlur={() => {
+                                  setNewEmployeeRole("");
+                                  setIsAddingEmployeeRole(false);
+                                }}
+                                onKeyDown={(event) => {
+                                  if (event.key === "Enter") {
+                                    event.preventDefault();
+                                    addRoleFromEmployeeForm();
+                                  } else if (event.key === "Escape") {
+                                    setNewEmployeeRole("");
+                                    setIsAddingEmployeeRole(false);
+                                  }
+                                }}
+                                placeholder="Enter role name"
+                                aria-label="New role name"
+                              />
+                            ) : (
+                              <select
+                                id="new-team-member-role"
+                                value={employeeForm.role}
+                                onChange={(event) => setEmployeeForm((form) => ({ ...form, role: event.target.value }))}
+                                required
+                              >
+                                <option value="">Select</option>
+                                {availableRoles.map((role) => (
+                                  <option value={role} key={role}>{role}</option>
+                                ))}
+                              </select>
+                            )}
+                          </div>
                           <label>
                             <span>Wage</span>
                             <input
@@ -2827,21 +3730,56 @@ export default function Home() {
                           <label>
                             <span>Employee PIN <b aria-hidden="true">*</b></span>
                             <input
+                              type="password"
                               value={employeeForm.pin}
                               onChange={(event) => setEmployeeForm((form) => ({
                                 ...form,
-                                pin: event.target.value.replace(/\D/g, ""),
+                                pin: event.target.value.replace(/\D/g, "").slice(0, 4),
                               }))}
                               inputMode="numeric"
-                              pattern="[0-9]*"
-                              placeholder="PIN"
+                              pattern="[0-9]{4}"
+                              minLength={4}
+                              maxLength={4}
+                              placeholder="****"
                               required
                             />
                           </label>
                         </div>
-                        <div className="team-member-access-level">
-                          <span>Access level</span>
-                          <strong>Employee</strong>
+                        <div className="team-member-setting-fields">
+                          <fieldset className="team-member-option-group team-member-access-level">
+                            <legend>Access level</legend>
+                            <div className="team-member-pill-options team-member-access-options">
+                              {(["Admin", "Manager", "Employee"] as const).map((accessLevel) => (
+                                <label key={accessLevel}>
+                                  <input
+                                    type="radio"
+                                    name="new-team-member-access-level"
+                                    value={accessLevel}
+                                    checked={employeeForm.accessLevel === accessLevel}
+                                    onChange={() => setEmployeeForm((form) => ({ ...form, accessLevel }))}
+                                  />
+                                  <span>{accessLevel}</span>
+                                </label>
+                              ))}
+                            </div>
+                          </fieldset>
+                          <fieldset className="team-member-option-group team-member-status">
+                            <legend>Status</legend>
+                            <div className="team-member-pill-options team-member-status-options">
+                              {([true, false] as const).map((isActive) => (
+                                <label className={isActive ? "active" : "inactive"} key={String(isActive)}>
+                                  <input
+                                    type="radio"
+                                    name="new-team-member-status"
+                                    value={isActive ? "active" : "inactive"}
+                                    checked={employeeForm.active === isActive}
+                                    onChange={() => setEmployeeForm((form) => ({ ...form, active: isActive }))}
+                                  />
+                                  <span>{isActive ? "Active" : "Inactive"}</span>
+                                </label>
+                              ))}
+                            </div>
+                          </fieldset>
                         </div>
                       </section>
                     </div>
@@ -2865,7 +3803,7 @@ export default function Home() {
                     <span role="columnheader">Status</span>
                     <span role="columnheader" aria-label="Actions" />
                   </div>
-                  {activeEmployees.map((employee) => {
+                  {state.employees.map((employee) => {
                     const isEditing = editingEmployeeId === employee.id;
                     return (
                       <article
@@ -2886,12 +3824,15 @@ export default function Home() {
                             ) : <strong>{employee.name}</strong>}
                             {isEditing ? (
                               <input
+                                type="password"
                                 value={employee.pin}
                                 onChange={(event) => updateEmployeePin(employee.id, event.target.value)}
                                 aria-label={`PIN for ${employee.name}`}
                                 inputMode="numeric"
-                                pattern="[0-9]*"
-                                placeholder="PIN"
+                                pattern="[0-9]{4}"
+                                minLength={4}
+                                maxLength={4}
+                                placeholder="****"
                               />
                             ) : <small>PIN: {employee.pin}</small>}
                           </div>
@@ -2922,7 +3863,7 @@ export default function Home() {
                         </div>
                         <div role="cell">
                           {employee.id === 1 ? (
-                            <span>Manager</span>
+                            <span>Admin</span>
                           ) : isEditing ? (
                             <select
                               value={employee.accessLevel}
@@ -2930,6 +3871,8 @@ export default function Home() {
                               aria-label={`Access level for ${employee.name}`}
                             >
                               <option value="">Select</option>
+                              <option value="Admin">Admin</option>
+                              <option value="Manager">Manager</option>
                               <option value="Employee">Employee</option>
                             </select>
                           ) : employee.accessLevel}
@@ -2980,9 +3923,21 @@ export default function Home() {
                             />
                           ) : employee.wage}
                         </div>
-                        <span role="cell" className={employee.active ? "roster-status active" : "roster-status"}>
-                          {employee.active ? "Active" : "Terminated"}
-                        </span>
+                        <div
+                          role="cell"
+                          className={isEditing ? "roster-status-editor" : employee.active ? "roster-status active" : "roster-status"}
+                        >
+                          {isEditing ? (
+                            <select
+                              value={employee.active ? "active" : "inactive"}
+                              onChange={(event) => updateEmployeeStatus(employee.id, event.target.value === "active")}
+                              aria-label={`Status for ${employee.name}`}
+                            >
+                              <option value="active">Active</option>
+                              <option value="inactive">Inactive</option>
+                            </select>
+                          ) : employee.active ? "Active" : "Inactive"}
+                        </div>
                         <div className="roster-actions" role="cell">
                           <button
                             type="button"
@@ -2996,7 +3951,7 @@ export default function Home() {
                             </svg>
                           </button>
                         </div>
-                        {employee.id !== 1 ? (
+                        {activeUserIsAdmin && employee.id !== activeEmployeeId ? (
                           <button
                             type="button"
                             className="roster-row-remove"
@@ -3017,18 +3972,27 @@ export default function Home() {
             <section className="panel feature-panel shift-planner-panel">
               <div className="shift-planner-topbar">
                 <button type="button" className="shift-today-button" onClick={() => setScheduleDate(today)}>Today</button>
-                <label className="shift-date-control">
-                  <input type="date" value={scheduleDate} onChange={(event) => setScheduleDate(event.target.value)} aria-label="Schedule date" />
-                  <strong>{employeeScheduleTab === "day" ? formatLongDate(scheduleDate) : employeeScheduleTab === "month" ? formatMonthYear(scheduleDate) : `${formatShortDate(scheduleWeekDays[0].date)} – ${formatShortDate(scheduleWeekDays[6].date)}`}</strong>
-                </label>
-                <button type="button" className="shift-arrow-button" onClick={() => moveScheduleDate(-1)} aria-label={`Previous ${employeeScheduleTab}`}>‹</button>
-                <button type="button" className="shift-arrow-button" onClick={() => moveScheduleDate(1)} aria-label={`Next ${employeeScheduleTab}`}>›</button>
+                <div className="shift-date-navigation">
+                  <button type="button" className="shift-arrow-button" onClick={() => moveScheduleDate(-1)} aria-label={`Previous ${employeeScheduleTab}`}>
+                    <span aria-hidden="true">‹</span>
+                  </button>
+                  <label className="shift-date-control">
+                    <input type="date" value={scheduleDate} onChange={(event) => setScheduleDate(event.target.value)} aria-label="Schedule date" />
+                    <strong>{employeeScheduleTab === "day" ? formatLongDate(scheduleDate) : employeeScheduleTab === "month" ? formatMonthYear(scheduleDate) : `${formatShortDate(scheduleWeekDays[0].date)} – ${formatShortDate(scheduleWeekDays[6].date)}`}</strong>
+                  </label>
+                  <button type="button" className="shift-arrow-button" onClick={() => moveScheduleDate(1)} aria-label={`Next ${employeeScheduleTab}`}>
+                    <span aria-hidden="true">›</span>
+                  </button>
+                </div>
                 <div className="shift-planner-actions">
-                  <select className="shift-view-select" value={employeeScheduleTab} onChange={(event) => setEmployeeScheduleTab(event.target.value as EmployeeScheduleTab)} aria-label="Schedule view">
-                    <option value="week">Week</option>
-                    <option value="month">Month</option>
-                    <option value="day">Day</option>
-                  </select>
+                  <div className="shift-view-control">
+                    <select className="shift-view-select" value={employeeScheduleTab} onChange={(event) => setEmployeeScheduleTab(event.target.value as EmployeeScheduleTab)} aria-label="Schedule view">
+                      <option value="week">Week</option>
+                      <option value="month">Month</option>
+                      <option value="day">Day</option>
+                    </select>
+                    <span aria-hidden="true">▾</span>
+                  </div>
                   <div className="shift-employee-filter" ref={employeeFilterRef}>
                     <button
                       type="button"
@@ -3072,123 +4036,18 @@ export default function Home() {
                       </div>
                     ) : null}
                   </div>
-                  {mode === "manager" && unpublishedShiftCount > 0 ? (
-                    <button type="button" className="shift-publish-button pending" onClick={publishSchedule}>
-                      ↑ Publish ({unpublishedShiftCount})
+                  {mode === "manager" ? (
+                    <button
+                      type="button"
+                      className={`shift-publish-button${unpublishedShiftCount > 0 ? " pending" : ""}`}
+                      onClick={publishSchedule}
+                      disabled={unpublishedShiftCount === 0}
+                    >
+                      {unpublishedShiftCount > 0 ? `↑ Publish (${unpublishedShiftCount})` : "↑ Publish"}
                     </button>
                   ) : null}
                 </div>
               </div>
-              {mode === "manager" && (
-                <details className="shift-editor-drawer">
-                  <summary>Add shift</summary>
-                  <form className="quick-form shift-form" onSubmit={saveShift}>
-                  <select
-                    value={shiftForm.employeeId}
-                    onChange={(event) => {
-                      const employeeId = Number(event.target.value);
-                      const employee = employeeById(shiftEmployees, employeeId);
-                      setShiftForm((form) => ({ ...form, employeeId, role: employee?.role ?? form.role }));
-                    }}
-                    aria-label="Shift employee"
-                    disabled={shiftEmployees.length === 0}
-                  >
-                    <option value={0} disabled>Select Employee</option>
-                    {shiftEmployees.map((employee) => (
-                      <option key={employee.id} value={employee.id}>{employee.name}</option>
-                    ))}
-                  </select>
-                  <TimeInput
-                    value={shiftForm.start}
-                    onChange={(start) => setShiftForm((form) => ({ ...form, start }))}
-                    ariaLabel="Shift start"
-                    placeholder="Start time"
-                  />
-                  <TimeInput
-                    value={shiftForm.end}
-                    onChange={(end) => setShiftForm((form) => ({ ...form, end }))}
-                    ariaLabel="Shift end"
-                    placeholder="End time"
-                  />
-                  <select
-                    value={shiftForm.role}
-                    onChange={(event) => setShiftForm((form) => ({ ...form, role: event.target.value }))}
-                    aria-label="Shift role"
-                  >
-                    <option value="">Select role</option>
-                    {availableRoles.map((role) => (
-                      <option value={role} key={role}>{role}</option>
-                    ))}
-                  </select>
-                  <fieldset className="copy-calendar" disabled={Boolean(shiftForm.id)}>
-                    <legend>{copyRange === "week" ? "Week" : "Month"}</legend>
-                    <div className="copy-calendar-toolbar">
-                      <button
-                        type="button"
-                        onClick={() => moveCopyRange(-1)}
-                        aria-label={`Previous ${copyRange}`}
-                      >
-                        <span aria-hidden="true">&lt;</span>
-                      </button>
-                      <strong>
-                        {copyRange === "week" ? `Week of ${formatShortDate(shiftForm.date)}` : formatMonthYear(shiftForm.date)}
-                      </strong>
-                      <button
-                        type="button"
-                        onClick={() => moveCopyRange(1)}
-                        aria-label={`Next ${copyRange}`}
-                      >
-                        <span aria-hidden="true">&gt;</span>
-                      </button>
-                    </div>
-                    <div className="copy-range-tabs" role="tablist" aria-label="Copy shift range">
-                      {(["week", "month"] as CopyRange[]).map((range) => (
-                        <button
-                          type="button"
-                          key={range}
-                          className={copyRange === range ? "active" : ""}
-                          onClick={() => {
-                            setCopyRange(range);
-                            setRepeatDates([]);
-                          }}
-                          role="tab"
-                          aria-selected={copyRange === range}
-                        >
-                          {capitalize(range)}
-                        </button>
-                      ))}
-                    </div>
-                    <div className="copy-calendar-weekdays" aria-hidden="true">
-                      {calendarWeekdayLabels.map((label) => (
-                        <span key={label}>{label}</span>
-                      ))}
-                    </div>
-                    <div className="copy-calendar-grid">
-                      {copyCalendarDays.map((day, index) =>
-                        day ? (
-                          <label
-                            key={day.date}
-                            className={repeatDates.includes(day.date) ? "active" : ""}
-                            title={formatLongDate(day.date)}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={repeatDates.includes(day.date)}
-                              onChange={() => toggleRepeatDate(day.date)}
-                            />
-                            <span>{day.day}</span>
-                          </label>
-                        ) : (
-                          <span key={`blank-${index}`} aria-hidden="true" />
-                        ),
-                      )}
-                    </div>
-                  </fieldset>
-                  <button type="submit" disabled={shiftEmployees.length === 0}>Save</button>
-                  {createShiftError ? <p className="shift-error-message" role="alert">{createShiftError}</p> : null}
-                  </form>
-                </details>
-              )}
               {(mode === "employee" || mode === "manager") && (
                 <div className="employee-schedule">
                   <div className="employee-schedule-tabs" role="tablist" aria-label="Schedule view">
@@ -3271,7 +4130,7 @@ export default function Home() {
                                 <div className="schedule-track">
                                   {employeeShifts.map((shift) => (
                                     <div
-                                      className={`${mode === "employee" && shift.employeeId === activeEmployeeId ? "schedule-bar mine" : "schedule-bar"}${mode === "manager" ? " editable" : ""}`}
+                                      className={`${mode === "employee" && shift.employeeId === activeEmployeeId ? "schedule-bar mine" : "schedule-bar"}${mode === "manager" ? " editable" : ""}${draftShiftIds.has(shift.id) ? " draft" : ""}`}
                                       key={shift.id}
                                       style={scheduleBarStyle(shift)}
                                       title={`${employee.name}: ${formatTimeRange(shift)} ${shift.role}`}
@@ -3293,6 +4152,17 @@ export default function Home() {
                                     <div className="schedule-bar time-off" style={{ "--shift-left": "0%", "--shift-width": "100%" } as CSSProperties}>
                                       <strong>Time off</strong><span>{timeOff.startTime && timeOff.endTime ? `${formatTime12(timeOff.startTime)}–${formatTime12(timeOff.endTime)}` : "All day"}</span>
                                     </div>
+                                  ) : null}
+                                  {mode === "manager" && employeeShifts.length === 0 && !timeOff ? (
+                                    <button
+                                      type="button"
+                                      className="shift-cell-add schedule-track-add"
+                                      onClick={() => openShiftCreator(employee, scheduleDate)}
+                                      aria-label={`Add shift for ${employee.name} on ${formatLongDate(scheduleDate)}`}
+                                      title="Add shift"
+                                    >
+                                      <span aria-hidden="true" />
+                                    </button>
                                   ) : null}
                                 </div>
                               </div>
@@ -3330,12 +4200,14 @@ export default function Home() {
                                 const dayShifts = day.shifts.filter((shift) => shift.employeeId === employee.id);
                                 const timeOff = (state.ptoRequests ?? []).find((request) => request.employeeId === employee.id && request.status === "approved" && request.startDate <= day.date && request.endDate >= day.date);
 
+                                const hasCellContent = dayShifts.length > 0 || Boolean(timeOff);
+
                                 return (
-                                  <div className="shift-week-cell" role="cell" key={day.date}>
+                                  <div className={`shift-week-cell${hasCellContent ? " has-content" : " empty"}`} role="cell" key={day.date}>
                                     {dayShifts.map((shift) => (
                                       <button
                                         type="button"
-                                        className={`shift-week-card${mode === "employee" && shift.employeeId === activeEmployeeId ? " mine" : ""}${mode === "manager" ? " editable" : ""}`}
+                                        className={`shift-week-card${mode === "employee" && shift.employeeId === activeEmployeeId ? " mine" : ""}${mode === "manager" ? " editable" : ""}${draftShiftIds.has(shift.id) ? " draft" : ""}`}
                                         key={shift.id}
                                         onClick={() => openShiftEditor(shift)}
                                       >
@@ -3343,8 +4215,19 @@ export default function Home() {
                                         <span>{shift.role || "Shift"}</span>
                                       </button>
                                     ))}
-                                    {dayShifts.length === 0 && timeOff ? (
+                                    {timeOff ? (
                                       <div className="shift-time-off"><strong>⊘ Time off</strong><span>▣ {timeOff.startTime && timeOff.endTime ? `${formatTime12(timeOff.startTime)}–${formatTime12(timeOff.endTime)}` : "All day"}</span></div>
+                                    ) : null}
+                                    {mode === "manager" && dayShifts.length === 0 && !timeOff ? (
+                                      <button
+                                        type="button"
+                                        className="shift-cell-add"
+                                        onClick={() => openShiftCreator(employee, day.date)}
+                                        aria-label={`Add shift for ${employee.name} on ${formatLongDate(day.date)}`}
+                                        title="Add shift"
+                                      >
+                                        <span aria-hidden="true" />
+                                      </button>
                                     ) : null}
                                   </div>
                                 );
@@ -3359,16 +4242,25 @@ export default function Home() {
                         {scheduleMonthDays.map((day) => {
                           const visibleDayShifts = day.shifts.filter((shift) => visibleEmployeeIds === null || visibleEmployeeIds.includes(shift.employeeId));
                           const timeOffRequests = (state.ptoRequests ?? []).filter((request) => request.status === "approved" && request.startDate <= day.date && request.endDate >= day.date && (visibleEmployeeIds === null || visibleEmployeeIds.includes(request.employeeId)));
+                          const hasDayContent = visibleDayShifts.length > 0 || timeOffRequests.length > 0;
 
                           return (
-                            <div className={`${day.date === today ? "shift-month-day today" : "shift-month-day"}${day.inMonth ? "" : " outside"}`} key={day.date}>
+                            <div
+                              className={`${day.date === today ? "shift-month-day today" : "shift-month-day"}${day.inMonth ? "" : " outside"}${hasDayContent ? " has-content" : " empty"}${mode === "manager" ? " can-add-shift" : ""}`}
+                              key={day.date}
+                              onClick={(event) => {
+                                if (mode === "manager" && event.target === event.currentTarget) {
+                                  openMonthShiftCreator(day.date);
+                                }
+                              }}
+                            >
                               <button type="button" className="shift-month-date" onClick={() => { setScheduleDate(day.date); setEmployeeScheduleTab("day"); }}>
                                 {day.day === "1" ? `${parseLocalDate(day.date).toLocaleDateString("en-US", { month: "short" })} 1` : day.day}
                               </button>
                               {visibleDayShifts.map((shift) => {
                                 const employee = employeeById(state.employees, shift.employeeId);
                                 return (
-                                  <button type="button" className={`shift-month-card${mode === "employee" && shift.employeeId === activeEmployeeId ? " mine" : ""}`} key={shift.id} onClick={() => openShiftEditor(shift)}>
+                                  <button type="button" className={`shift-month-card${mode === "employee" && shift.employeeId === activeEmployeeId ? " mine" : ""}${draftShiftIds.has(shift.id) ? " draft" : ""}`} key={shift.id} onClick={() => openShiftEditor(shift)}>
                                     <strong>{formatCompactTimeRange(shift)}</strong>
                                     <span>{employee?.name ?? "Open shift"} {shift.role ? `(${shift.role})` : ""}</span>
                                   </button>
@@ -3380,6 +4272,17 @@ export default function Home() {
                                   <span>{employeeById(state.employees, request.employeeId)?.name ?? "Team member"}</span>
                                 </div>
                               ))}
+                              {mode === "manager" ? (
+                                <button
+                                  type="button"
+                                  className="shift-cell-add shift-month-add"
+                                  onClick={() => openMonthShiftCreator(day.date)}
+                                  aria-label={`Add shift on ${formatLongDate(day.date)}`}
+                                  title="Add shift"
+                                >
+                                  <span aria-hidden="true" />
+                                </button>
+                              ) : null}
                             </div>
                           );
                         })}
@@ -3393,8 +4296,8 @@ export default function Home() {
 
           {activeView === "clockins" && mode === "manager" && (
             <section className="panel feature-panel">
-              <PanelHeading eyebrow="History" title="Employee clock-ins" />
-              <div className="clock-table" role="table" aria-label="Clock-in history">
+              <PanelHeading eyebrow="History" title="Employee events" />
+              <div className="clock-table" role="table" aria-label="Employee event history">
                 <div role="row" className="table-head">
                   <span>Employee</span>
                   <span>Role</span>
@@ -3402,32 +4305,53 @@ export default function Home() {
                   <span>Time</span>
                   <span>Explanation</span>
                 </div>
-                {state.clockEvents.map((event) => {
-                  const employee = employeeById(state.employees, event.employeeId);
-                  const explanation = eventExplanationDisplay(event, state.shifts, state.clockEvents);
+                {displayedEventHistoryItems.map((item) => {
+                  if (item.kind === "no-show") {
+                    const employee = employeeById(state.employees, item.alert.employeeId);
+                    return (
+                      <div
+                        role="row"
+                        className={`no-show-event-row${highlightedEventTargetId === item.alert.eventTargetId ? " notification-target-highlight" : ""}`}
+                        data-event-target-id={item.alert.eventTargetId}
+                        key={`no-show-${item.alert.id}`}
+                      >
+                        <span>{employee?.name ?? "Unknown"}</span>
+                        <span>{employee?.role ?? "Unassigned"}</span>
+                        <span>No-show</span>
+                        <span>{formatDateTime(item.alert.at)}</span>
+                        <span className="event-explanation"><span>No-show</span></span>
+                      </div>
+                    );
+                  }
+
+                  const employee = employeeById(state.employees, item.event.employeeId);
+                  const explanation = item.event.explanation?.trim() || "n/a";
                   return (
-                    <div role="row" key={event.id}>
+                    <div
+                      role="row"
+                      className={highlightedEventTargetId === `clock-${item.event.id}` ? "notification-target-highlight" : undefined}
+                      data-event-target-id={`clock-${item.event.id}`}
+                      key={`clock-${item.event.id}`}
+                    >
                       <span>{employee?.name ?? "Unknown"}</span>
                       <span>{employee?.role ?? "Unassigned"}</span>
-                      <span>{clockEventLabel(event)}</span>
-                      <span>{formatDateTime(event.at)}</span>
-                      <span className={explanation.isException ? "event-explanation exception" : "event-explanation"}>
-                        {explanation.isException ? (
-                          <button
-                            type="button"
-                            className="event-explanation-panel"
-                            onClick={() => setSelectedEventExplanation(explanation)}
-                            aria-label={`View details for ${explanation.keyword}`}
-                          >
-                            <strong>{explanation.keyword}</strong>
-                          </button>
-                        ) : (
-                          <span>{explanation.text}</span>
-                        )}
-                      </span>
+                      <span>{clockEventLabel(item.event, state.shifts)}</span>
+                      <span>{formatDateTime(item.event.at)}</span>
+                      <span className="event-explanation"><span>{explanation}</span></span>
                     </div>
                   );
                 })}
+                {eventHistoryItems.length > 10 ? (
+                  <button
+                    type="button"
+                    className="pto-requests-expand-button events-expand-button"
+                    onClick={() => setAreEventsExpanded((current) => !current)}
+                    aria-expanded={areEventsExpanded}
+                    aria-label={areEventsExpanded ? "Show fewer employee events" : "Show more employee events"}
+                  >
+                    <span>{areEventsExpanded ? "Less" : "More"}</span>
+                  </button>
+                ) : null}
               </div>
             </section>
           )}
@@ -3533,9 +4457,7 @@ export default function Home() {
                   <div className="pto-request-section pto-current-requests-heading">
                     <h3>Requests ({pendingPtoRequests.length})</h3>
                     <div className="pto-request-heading-actions">
-                      {mode === "employee" ? (
-                        <button type="button" className="pto-new-request-button" onClick={openPtoRequest}>Request time off</button>
-                      ) : null}
+                      <button type="button" className="pto-new-request-button" onClick={openPtoRequest}>Request time off</button>
                       <button type="button" className="pto-history-link" onClick={() => setIsViewingPtoHistory(true)}>View history</button>
                     </div>
                   </div>
@@ -3544,23 +4466,33 @@ export default function Home() {
                       <span role="columnheader">Name</span>
                       <span role="columnheader">Category</span>
                       <span role="columnheader">Dates</span>
+                      <span role="columnheader">Status</span>
                       <span role="columnheader">Total hours</span>
+                      <span role="columnheader" aria-label="Request actions" />
                     </div>
                     {pendingPtoRequests.map((request) => {
                       const employee = employeeById(state.employees, request.employeeId);
                       const totalHours = ptoHoursForDateRange(request.startDate, request.endDate);
                       return (
-                        <article className="pto-current-request-row" role="row" key={request.id}>
+                        <article
+                          className={`pto-current-request-row${highlightedPtoRequestId === request.id ? " notification-target-highlight" : ""}`}
+                          data-pto-request-id={request.id}
+                          role="row"
+                          key={request.id}
+                        >
                           <span role="cell">{employee?.name ?? "Employee"}</span>
                           <span role="cell">{request.compensation === "unpaid" ? "Unpaid Time Off" : "Paid Time Off"}</span>
                           <span role="cell">{formatTimeOffRequestDate(request.startDate)}{request.endDate !== request.startDate ? ` – ${formatTimeOffRequestDate(request.endDate)}` : ""}</span>
+                          <strong className="pto-current-request-status" role="cell">Pending</strong>
                           <div className="pto-current-request-hours" role="cell">
                             <span>{formatPtoHours(totalHours)}</span>
-                            {mode === "employee" ? (
+                          </div>
+                          <div className="pto-current-request-actions" role="cell">
+                            {request.employeeId === activeEmployeeId ? (
                               <button type="button" onClick={() => cancelPtoRequest(request.id)}>Cancel</button>
                             ) : null}
                           </div>
-                          {mode === "manager" ? (
+                          {mode === "manager" && request.employeeId !== activeEmployeeId ? (
                             <button
                               type="button"
                               className="pto-current-request-review"
@@ -3619,7 +4551,6 @@ export default function Home() {
                           aria-label="Filter request history by status"
                         >
                           <option value="all">All</option>
-                          <option value="pending">To Review</option>
                           <option value="approved">Approved</option>
                           <option value="denied">Denied</option>
                           <option value="cancelled">Cancelled</option>
@@ -3691,7 +4622,11 @@ export default function Home() {
                         ? employeeById(state.employees, request.decidedByEmployeeId)
                         : null;
                       return (
-                        <article className="pto-request-card" key={request.id}>
+                        <article
+                          className={`pto-request-card${highlightedPtoRequestId === request.id ? " notification-target-highlight" : ""}`}
+                          data-pto-request-id={request.id}
+                          key={request.id}
+                        >
                           <div className="pto-request-employee">
                             <span className="schedule-avatar" aria-hidden="true">{employeeInitials(employee?.name ?? "Employee")}</span>
                             <strong>{employee?.name ?? "Employee"}</strong>
@@ -3704,7 +4639,7 @@ export default function Home() {
                           <div className="pto-request-decision">
                             <strong className={`pto-request-status ${request.status}`}>{capitalize(request.status)}</strong>
                             {request.decidedAt ? (
-                              <span>by {decidedBy?.name ?? "Manager"} on<br />{formatNumericDate(request.decidedAt)}</span>
+                              <span>by {decidedBy?.name ?? "Manager"} on<br />{formatNumericDate(request.decidedAt)} at {formatClockTime(request.decidedAt)}</span>
                             ) : null}
                           </div>
                           {mode === "manager" ? (
@@ -3775,22 +4710,15 @@ export default function Home() {
               )}
               <div className="pto-balance-section">
                 <div className="panel-heading pto-heading">
-                  <div>
-                    <p className="eyebrow">Paid time off</p>
-                  </div>
+                  <p className="eyebrow">Paid time off</p>
                   {mode === "manager" ? (
-                    <div className="pto-policy-heading-actions">
-                      <button type="button" className="pto-add-policy-button" onClick={openPtoPolicy}>Add policy</button>
-                      {(state.ptoPolicies ?? []).length > 0 ? (
-                        <button
-                          type="button"
-                          className="pto-add-policy-button"
-                          onClick={() => setIsViewingPtoPolicies(true)}
-                        >
-                          View policies
-                        </button>
-                      ) : null}
-                    </div>
+                    <button
+                      type="button"
+                      className="pto-policies-button"
+                      onClick={() => setIsViewingPtoPolicies(true)}
+                    >
+                      Policies
+                    </button>
                   ) : null}
                 </div>
                 <div className="pto-list" role="table" aria-label="Employee year-to-date PTO">
@@ -3812,10 +4740,10 @@ export default function Home() {
                           <span>{employee.role}</span>
                         </div>
                       </div>
-                      <strong role="cell">{formatWorkedHours(hoursWorked)}</strong>
-                      <strong role="cell" className="pto-earned">{ptoHours} hrs</strong>
-                      <strong role="cell">{formatPtoHours(ptoUsed)}</strong>
-                      <strong role="cell" className="pto-left">{formatPtoHours(ptoHours - ptoUsed)}</strong>
+                      <strong role="cell">{formatPtoChartHours(hoursWorked)}</strong>
+                      <strong role="cell" className="pto-earned">{formatPtoChartHours(ptoHours)}</strong>
+                      <strong role="cell">{formatPtoChartHours(ptoUsed)}</strong>
+                      <strong role="cell" className="pto-left">{formatPtoChartHours(ptoHours - ptoUsed)}</strong>
                     </div>
                   ))}
                 </div>
@@ -3854,8 +4782,12 @@ export default function Home() {
         ))}
       </nav>
 
-      {mode === "manager" && employeePendingDeletion ? (
-        <div className="modal-backdrop" role="presentation">
+      {mode === "manager" && activeUserIsAdmin && employeePendingDeletion && employeePendingDeletion.id !== activeEmployeeId ? (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onClick={(event) => dismissModalFromBackdrop(event, () => setEmployeePendingDeletion(null))}
+        >
           <div className="employee-delete-modal" role="dialog" aria-modal="true" aria-labelledby="employee-delete-title">
             <div className="modal-heading">
               <div>
@@ -3880,7 +4812,6 @@ export default function Home() {
           <div className="pto-policy-modal" role="dialog" aria-modal="true" aria-labelledby="pto-policy-title">
             <div className="modal-heading">
               <div>
-                <p className="eyebrow">Paid time off</p>
                 <h2 id="pto-policy-title">
                   {ptoPolicyStep === "details"
                     ? editingPtoPolicyId === null ? "Add PTO policy" : "Edit PTO policy"
@@ -3894,36 +4825,41 @@ export default function Home() {
 
             {ptoPolicyStep === "details" ? (
               <div className="pto-policy-details">
-                <label className="pto-policy-name-field">
-                  <span>Name this policy</span>
-                  <input
-                    value={ptoPolicyForm.name}
-                    onChange={(event) => setPtoPolicyForm((form) => form ? { ...form, name: event.target.value } : form)}
-                    autoFocus
-                  />
-                </label>
+                <div className="pto-policy-primary-fields">
+                  <div className="pto-policy-name-field">
+                    <div className="pto-policy-name-heading">
+                      <label htmlFor="pto-policy-name">Name</label>
+                    </div>
+                    <input
+                      id="pto-policy-name"
+                      value={ptoPolicyForm.name}
+                      onChange={(event) => setPtoPolicyForm((form) => form ? { ...form, name: event.target.value } : form)}
+                      autoFocus
+                    />
+                  </div>
 
-                <fieldset className="pto-policy-methods">
-                  <legend>Accrual method</legend>
-                  <label>
-                    <input
-                      type="radio"
-                      name="pto-policy-method"
-                      checked={ptoPolicyForm.method === "fixed"}
-                      onChange={() => setPtoPolicyForm((form) => form ? { ...form, method: "fixed" } : form)}
-                    />
-                    <span>Fixed <small>(example: 120 hours per year)</small></span>
-                  </label>
-                  <label>
-                    <input
-                      type="radio"
-                      name="pto-policy-method"
-                      checked={ptoPolicyForm.method === "rate"}
-                      onChange={() => setPtoPolicyForm((form) => form ? { ...form, method: "rate" } : form)}
-                    />
-                    <span>Rate <small>(example: 1 hour per 30 worked)</small></span>
-                  </label>
-                </fieldset>
+                  <fieldset className="pto-policy-methods">
+                    <legend>Accrual method</legend>
+                    <label>
+                      <input
+                        type="radio"
+                        name="pto-policy-method"
+                        checked={ptoPolicyForm.method === "fixed"}
+                        onChange={() => setPtoPolicyForm((form) => form ? { ...form, method: "fixed" } : form)}
+                      />
+                      <span>Fixed <small>(example: 120 hours per year)</small></span>
+                    </label>
+                    <label>
+                      <input
+                        type="radio"
+                        name="pto-policy-method"
+                        checked={ptoPolicyForm.method === "rate"}
+                        onChange={() => setPtoPolicyForm((form) => form ? { ...form, method: "rate" } : form)}
+                      />
+                      <span>Rate <small>(example: 1 hour per 30 worked)</small></span>
+                    </label>
+                  </fieldset>
+                </div>
 
                 {ptoPolicyForm.method === "fixed" ? (
                   <label className="pto-policy-fixed-rate">
@@ -3985,7 +4921,7 @@ export default function Home() {
                       <span className="schedule-avatar" aria-hidden="true">{employeeInitials(employee.name)}</span>
                       <span>
                         <strong>{employee.name}</strong>
-                        <small>{employee.accessLevel === "Manager" ? "Manager" : employee.role || "Employee"}</small>
+                        <small>{isManagerEmployee(employee) ? employee.accessLevel : employee.role || "Employee"}</small>
                       </span>
                     </label>
                   ))}
@@ -4011,7 +4947,7 @@ export default function Home() {
                           <span className="schedule-avatar" aria-hidden="true">{employeeInitials(employee.name)}</span>
                           <span>
                             <strong>{employee.name}</strong>
-                            <small>{employee.accessLevel === "Manager" ? "Manager" : employee.role || "Employee"}</small>
+                            <small>{isManagerEmployee(employee) ? employee.accessLevel : employee.role || "Employee"}</small>
                           </span>
                         </div>
                         <label>
@@ -4066,7 +5002,7 @@ export default function Home() {
                     setPtoPolicyStep("details");
                     setPtoPolicyError("");
                   } else {
-                    closePtoPolicyEditor();
+                    cancelPtoPolicyEditor();
                   }
                 }}
               >
@@ -4083,37 +5019,69 @@ export default function Home() {
         </div>
       ) : null}
 
-      {mode === "manager" && isViewingPtoPolicies && (state.ptoPolicies ?? []).length > 0 ? (
-        <div className="modal-backdrop" role="presentation">
+      {mode === "manager" && isViewingPtoPolicies ? (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onClick={(event) => dismissModalFromBackdrop(event, () => setIsViewingPtoPolicies(false))}
+        >
           <div className="pto-policy-modal pto-saved-policies-modal" role="dialog" aria-modal="true" aria-labelledby="saved-pto-policies-title">
             <div className="modal-heading">
-              <div>
-                <p className="eyebrow">Paid time off</p>
-                <h2 id="saved-pto-policies-title">Saved policies</h2>
+              <div className="pto-policies-heading-content">
+                <h2 id="saved-pto-policies-title">Policies</h2>
+                <button
+                  type="button"
+                  className="pto-policy-add-link"
+                  onClick={() => {
+                    setIsViewingPtoPolicies(false);
+                    openPtoPolicy();
+                  }}
+                >
+                  + Add Policy
+                </button>
               </div>
-              <button type="button" onClick={() => setIsViewingPtoPolicies(false)} aria-label="Close saved PTO policies">
+              <button type="button" onClick={() => setIsViewingPtoPolicies(false)} aria-label="Close PTO policies">
                 <span aria-hidden="true">&times;</span>
               </button>
             </div>
-            <div className="pto-saved-policy-list">
+            <div className={(state.ptoPolicies ?? []).length > 2 ? "pto-saved-policy-list is-scrollable" : "pto-saved-policy-list"}>
+              {(state.ptoPolicies ?? []).length === 0 ? (
+                <p className="pto-saved-policy-empty">No saved policies.</p>
+              ) : null}
               {(state.ptoPolicies ?? []).map((policy) => {
                 const assignedEmployees = policy.employeeIds
                   .map((employeeId) => employeeById(state.employees, employeeId)?.name)
                   .filter((name): name is string => Boolean(name));
                 return (
                   <article className="pto-saved-policy-card" key={policy.id}>
-                    <button
-                      type="button"
-                      className="pto-policy-edit-button"
-                      onClick={() => editPtoPolicy(policy)}
-                      aria-label={`Edit ${policy.name} policy`}
-                      title="Edit policy"
-                    >
-                      <svg viewBox="0 0 24 24" aria-hidden="true">
-                        <path d="M4 20h4l11-11-4-4L4 16v4Z" />
-                        <path d="m13.8 6.2 4 4" />
-                      </svg>
-                    </button>
+                    <div className="pto-policy-card-actions">
+                      <button
+                        type="button"
+                        className="pto-policy-edit-button"
+                        onClick={() => editPtoPolicy(policy)}
+                        aria-label={`Edit ${policy.name} policy`}
+                        title="Edit policy"
+                      >
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="M4 20h4l11-11-4-4L4 16v4Z" />
+                          <path d="m13.8 6.2 4 4" />
+                        </svg>
+                      </button>
+                      <button
+                        type="button"
+                        className="pto-policy-delete-button"
+                        onClick={() => deletePtoPolicy(policy)}
+                        aria-label={`Delete ${policy.name} policy`}
+                        title="Delete policy"
+                      >
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="M4 7h16" />
+                          <path d="M9 7V4h6v3" />
+                          <path d="m7 7 1 13h8l1-13" />
+                          <path d="M10 11v5M14 11v5" />
+                        </svg>
+                      </button>
+                    </div>
                     <div>
                       <h3>{policy.name}</h3>
                       <p>
@@ -4135,8 +5103,18 @@ export default function Home() {
       ) : null}
 
       {mode === "manager" && reviewingPtoRequest ? (
-        <div className="modal-backdrop" role="presentation">
-          <div className="pto-review-modal" role="dialog" aria-modal="true" aria-labelledby="pto-review-title">
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onClick={(event) => dismissModalFromBackdrop(event, () => setReviewingPtoRequestId(null))}
+        >
+          <div
+            className="pto-review-modal"
+            ref={ptoReviewModalRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="pto-review-title"
+          >
             <div className="modal-heading">
               <div>
                 <p className="eyebrow">Time off request</p>
@@ -4162,25 +5140,35 @@ export default function Home() {
             </dl>
             <div className="pto-review-explanation">
               <strong>Explanation</strong>
-              <p>{reviewingPtoRequest.explanation}</p>
+              <p>{reviewingPtoRequest.explanation || "No explanation provided."}</p>
             </div>
-            <button type="button" className="pto-message-employee-action" onClick={messagePtoRequestEmployee}>
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" />
-              </svg>
-              Message employee
-            </button>
-            <p className="pto-review-prompt">Approve or deny this time off request?</p>
-            {ptoReviewError ? <p className="shift-error-message" role="alert">{ptoReviewError}</p> : null}
-            <div className="pto-review-actions">
-              <button type="button" className="approve-action" onClick={() => decidePtoRequest("approved")}>Approve</button>
-              <button type="button" className="deny-action" onClick={() => decidePtoRequest("denied")}>Deny</button>
-            </div>
+            {reviewingOwnPtoRequest ? (
+              <p className="pto-review-prompt">
+                {reviewingPtoRequest.status === "pending"
+                  ? "Your request is pending approval."
+                  : `This request is ${reviewingPtoRequest.status}.`}
+              </p>
+            ) : (
+              <>
+                <button type="button" className="pto-message-employee-action" onClick={messagePtoRequestEmployee}>
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" />
+                  </svg>
+                  Message employee
+                </button>
+                <p className="pto-review-prompt">Approve or deny this time off request?</p>
+                {ptoReviewError ? <p className="shift-error-message" role="alert">{ptoReviewError}</p> : null}
+                <div className="pto-review-actions">
+                  <button type="button" className="approve-action" onClick={() => decidePtoRequest("approved")}>Approve</button>
+                  <button type="button" className="deny-action" onClick={() => decidePtoRequest("denied")}>Deny</button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       ) : null}
 
-      {mode === "employee" && ptoRequestForm ? (
+      {ptoRequestForm ? (
         <div className="modal-backdrop" role="presentation">
           <form className="pto-request-modal" onSubmit={submitPtoRequest} role="dialog" aria-modal="true" aria-labelledby="pto-request-title">
             <div className="modal-heading">
@@ -4235,7 +5223,10 @@ export default function Home() {
                 />
               </label>
             </div>
-            <p className="pto-full-shift-note">Each selected weekday counts as one full 8-hour day.</p>
+            <p className="pto-full-shift-note">Each selected day, including weekends, counts as one full 8-hour day.</p>
+            {activeEmployee?.accessLevel === "Admin" ? (
+              <p className="pto-admin-auto-approval-note">Admin time off is approved automatically.</p>
+            ) : null}
             <fieldset className="pto-reason-options">
               <legend>Reason</legend>
               <label>
@@ -4256,13 +5247,12 @@ export default function Home() {
               </label>
             </fieldset>
             <label className="pto-explanation-field">
-              <span>Explanation</span>
+              <span>Explanation (optional)</span>
               <textarea
                 value={ptoRequestForm.explanation}
                 onChange={(event) => setPtoRequestForm((form) => form ? { ...form, explanation: event.target.value } : form)}
                 placeholder="Explain your time off request"
                 maxLength={timeExceptionExplanationLimit}
-                required
               />
               <small>{ptoRequestForm.explanation.length}/{timeExceptionExplanationLimit}</small>
             </label>
@@ -4287,7 +5277,7 @@ export default function Home() {
             {ptoRequestError ? <p className="shift-error-message" role="alert">{ptoRequestError}</p> : null}
             <div className="hours-edit-actions">
               <button type="button" onClick={() => setPtoRequestForm(null)}>Cancel</button>
-              <button type="submit">Submit request</button>
+              <button type="submit">{activeEmployee?.accessLevel === "Admin" ? "Add time off" : "Submit request"}</button>
             </div>
           </form>
         </div>
@@ -4354,6 +5344,126 @@ export default function Home() {
         </div>
       ) : null}
 
+      {mode === "manager" && isAddingShift ? (
+        <div className="modal-backdrop" role="presentation">
+          <form className="shift-create-modal" onSubmit={saveShift} role="dialog" aria-modal="true" aria-labelledby="shift-create-title">
+            <div className="modal-heading">
+              <div>
+                <p className="eyebrow">Add shift</p>
+                <h2 id="shift-create-title">{employeeById(state.employees, shiftForm.employeeId)?.name ?? "New shift"}</h2>
+              </div>
+              <button type="button" onClick={() => setIsAddingShift(false)} aria-label="Close add shift">
+                <span aria-hidden="true">&times;</span>
+              </button>
+            </div>
+            {employeeScheduleTab === "month" ? (
+              <label className="shift-edit-field">
+                <span>Employee</span>
+                <select
+                  value={shiftForm.employeeId || ""}
+                  onChange={(event) => {
+                    const employeeId = Number(event.target.value);
+                    const employee = employeeById(shiftEmployees, employeeId);
+                    setShiftForm((form) => ({
+                      ...form,
+                      employeeId,
+                      role: employee?.role ?? "",
+                    }));
+                  }}
+                  aria-label="Shift employee"
+                  required
+                >
+                  <option value="" disabled>Select employee</option>
+                  {orderedShiftEmployees.map((employee) => (
+                    <option value={employee.id} key={employee.id}>{employee.name}</option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+            <label className="shift-edit-field">
+              <span>Date</span>
+              <input
+                type="date"
+                value={shiftForm.date}
+                onChange={(event) => {
+                  const date = event.target.value;
+                  setShiftForm((form) => ({ ...form, date }));
+                  if (date) setCreateShiftWeekdays([weekdayForDate(date)]);
+                }}
+                aria-label="Shift date"
+                required
+              />
+            </label>
+            <label className="shift-edit-field">
+              <span>Clock-in time</span>
+              <TimeInput
+                value={shiftForm.start}
+                onChange={(start) => setShiftForm((form) => ({ ...form, start }))}
+                ariaLabel="Shift start"
+                placeholder="Start time"
+                suggestBefore={shiftForm.end}
+                required
+              />
+            </label>
+            <label className="shift-edit-field">
+              <span>Clock-out time</span>
+              <TimeInput
+                value={shiftForm.end}
+                onChange={(end) => setShiftForm((form) => ({ ...form, end }))}
+                ariaLabel="Shift end"
+                placeholder="End time"
+                suggestAfter={shiftForm.start}
+                required
+              />
+            </label>
+            <label className="shift-edit-field">
+              <span>Role</span>
+              <select
+                value={shiftForm.role}
+                onChange={(event) => setShiftForm((form) => ({ ...form, role: event.target.value }))}
+                aria-label="Shift role"
+                required
+              >
+                <option value="">Select role</option>
+                {availableRoles.map((role) => (
+                  <option value={role} key={role}>{role}</option>
+                ))}
+              </select>
+            </label>
+            <fieldset className="shift-apply-days">
+              <legend>Apply to:</legend>
+              <div>
+                {shiftWeekdayOptions.map((option) => (
+                  <button
+                    type="button"
+                    className={createShiftWeekdays.includes(option.value) ? "active" : ""}
+                    onClick={() => toggleCreateShiftWeekday(option.value)}
+                    aria-pressed={createShiftWeekdays.includes(option.value)}
+                    key={option.value}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </fieldset>
+            <label className="shift-notes-field">
+              <span>Shift notes:</span>
+              <textarea
+                value={shiftForm.notes}
+                onChange={(event) => setShiftForm((form) => ({ ...form, notes: event.target.value }))}
+                placeholder="Leave a note for your employee, and they’ll see it when they clock in."
+                maxLength={500}
+              />
+            </label>
+            {createShiftError ? <p className="shift-error-message" role="alert">{createShiftError}</p> : null}
+            <div className="hours-edit-actions">
+              <button type="button" onClick={() => setIsAddingShift(false)}>Cancel</button>
+              <button type="submit">Add shift</button>
+            </div>
+          </form>
+        </div>
+      ) : null}
+
       {mode === "manager" && editingShift ? (
         <div className="modal-backdrop" role="presentation">
           <form className="shift-edit-modal" onSubmit={saveEditedShift} role="dialog" aria-modal="true" aria-labelledby="shift-edit-title">
@@ -4366,86 +5476,122 @@ export default function Home() {
                 <span aria-hidden="true">&times;</span>
               </button>
             </div>
-            <select
-              value={editingShift.employeeId}
-              onChange={(event) => {
-                const employeeId = Number(event.target.value);
-                const employee = employeeById(shiftEmployees, employeeId);
-                setEditingShift((shift) => shift ? { ...shift, employeeId, role: employee?.role ?? shift.role } : shift);
-              }}
-              aria-label="Edit shift employee"
-            >
-              {shiftEmployees.map((employee) => (
-                <option key={employee.id} value={employee.id}>{employee.name}</option>
-              ))}
-            </select>
-            <input
-              type="date"
-              value={editingShift.date}
-              onChange={(event) => setEditingShift((shift) => shift ? { ...shift, date: event.target.value } : shift)}
-              aria-label="Edit shift date"
-            />
-            <TimeInput
-              value={editingShift.start}
-              onChange={(start) => setEditingShift((shift) => shift ? { ...shift, start } : shift)}
-              ariaLabel="Edit shift start"
-              placeholder="Start time"
-              selectOnFocus
-            />
-            <TimeInput
-              value={editingShift.end}
-              onChange={(end) => setEditingShift((shift) => shift ? { ...shift, end } : shift)}
-              ariaLabel="Edit shift end"
-              placeholder="End time"
-              selectOnFocus
-            />
-            <select
-              value={editingShift.role}
-              onChange={(event) => setEditingShift((shift) => shift ? { ...shift, role: event.target.value } : shift)}
-              aria-label="Edit shift role"
-            >
-              <option value="">Select role</option>
-              {availableRoles.map((role) => (
-                <option value={role} key={role}>{role}</option>
-              ))}
-            </select>
+            <label className="shift-edit-field">
+              <span>Date</span>
+              <input
+                type="date"
+                value={editingShift.date}
+                onChange={(event) => {
+                  const date = event.target.value;
+                  setEditingShift((shift) => shift ? { ...shift, date } : shift);
+                  if (date) setEditingShiftWeekdays([weekdayForDate(date)]);
+                }}
+                aria-label="Edit shift date"
+                disabled={editingShiftHasStarted}
+              />
+            </label>
+            <label className="shift-edit-field">
+              <span className="shift-edit-label-row">
+                <span>Clock-in time</span>
+                {editingShiftClockIn || editingShiftHasStarted ? (
+                  <span className="shift-edit-actual-time">
+                    {editingShiftIsNoShow ? "No-show" : `Clocked in: ${editingShiftClockIn ? formatClockTime(editingShiftClockIn.at) : "Not recorded"}`}
+                  </span>
+                ) : null}
+              </span>
+              <TimeInput
+                value={editingShift.start}
+                onChange={(start) => setEditingShift((shift) => shift ? { ...shift, start } : shift)}
+                ariaLabel="Edit shift start"
+                placeholder="Start time"
+                selectOnFocus
+                disabled={editingShiftHasStarted}
+                suggestBefore={editingShift.end}
+              />
+            </label>
+            <label className="shift-edit-field">
+              <span className="shift-edit-label-row">
+                <span>Clock-out time</span>
+                {(editingShiftClockOut || editingShiftHasEnded) && !editingShiftIsNoShow ? (
+                  <span className="shift-edit-actual-time">Clocked out: {editingShiftClockOut ? formatClockTime(editingShiftClockOut.at) : "Not recorded"}</span>
+                ) : null}
+              </span>
+              <TimeInput
+                value={editingShift.end}
+                onChange={(end) => setEditingShift((shift) => shift ? { ...shift, end } : shift)}
+                ariaLabel="Edit shift end"
+                placeholder="End time"
+                selectOnFocus
+                disabled={editingShiftHasEnded}
+                suggestAfter={editingShift.start}
+              />
+            </label>
+            <label className="shift-edit-field">
+              <span>Role</span>
+              <select
+                value={editingShift.role}
+                onChange={(event) => setEditingShift((shift) => shift ? { ...shift, role: event.target.value } : shift)}
+                aria-label="Edit shift role"
+                disabled={editingShiftHasStarted}
+              >
+                <option value="">Select role</option>
+                {availableRoles.map((role) => (
+                  <option value={role} key={role}>{role}</option>
+                ))}
+              </select>
+            </label>
+            <fieldset className="shift-apply-days" disabled={editingShiftHasStarted}>
+              <legend>Apply to:</legend>
+              <div>
+                {shiftWeekdayOptions.map((option) => {
+                  const isAnchorDay = option.value === weekdayForDate(editingShift.date);
+                  return (
+                    <button
+                      type="button"
+                      className={editingShiftWeekdays.includes(option.value) ? "active" : ""}
+                      onClick={() => toggleEditingShiftWeekday(option.value)}
+                      aria-pressed={editingShiftWeekdays.includes(option.value)}
+                      disabled={editingShiftHasStarted || isAnchorDay}
+                      key={option.value}
+                    >
+                      {option.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </fieldset>
+            <label className="shift-notes-field">
+              <span>Shift notes:</span>
+              <textarea
+                value={editingShift.notes ?? ""}
+                onChange={(event) => setEditingShift((shift) => shift ? { ...shift, notes: event.target.value } : shift)}
+                placeholder="Leave a note for your employee, and they’ll see it when they clock in."
+                maxLength={500}
+                disabled={editingShiftHasStarted}
+              />
+            </label>
+            {editingShiftHasEnded ? (
+              <p className="shift-time-lock-note">This shift has ended. Its scheduled times are locked.</p>
+            ) : editingShiftHasStarted ? (
+              <p className="shift-time-lock-note">This shift is in progress. Only its clock-out time can be changed.</p>
+            ) : null}
             {editShiftError ? <p className="shift-error-message" role="alert">{editShiftError}</p> : null}
             <div className="modal-actions">
-              <button type="button" className="delete-action" onClick={deleteEditingShift}>Delete</button>
-              <button type="button" onClick={() => setEditingShift(null)}>Cancel</button>
-              <button type="submit">Save changes</button>
+              {activeUserIsAdmin ? (
+                <button type="button" className="delete-action" onClick={deleteEditingShift}>Delete</button>
+              ) : null}
+              <button
+                type="button"
+                className={`secondary-action${editingShiftHasEnded ? " align-right" : ""}`}
+                onClick={() => setEditingShift(null)}
+              >
+                Cancel
+              </button>
+              {!editingShiftHasEnded ? (
+                <button type="submit" className="primary-action">Save changes</button>
+              ) : null}
             </div>
           </form>
-        </div>
-      ) : null}
-
-      {selectedEventExplanation ? (
-        <div className="modal-backdrop" role="presentation">
-          <div className="event-detail-modal" role="dialog" aria-modal="true" aria-labelledby="event-detail-title">
-            <div className="modal-heading">
-              <div>
-                <p className="eyebrow">Event details</p>
-                <h2 id="event-detail-title">{selectedEventExplanation.keyword}</h2>
-              </div>
-              <button type="button" onClick={() => setSelectedEventExplanation(null)} aria-label="Close event details">
-                &times;
-              </button>
-            </div>
-            <dl className="event-detail-list">
-              <div>
-                <dt>Scheduled</dt>
-                <dd>{selectedEventExplanation.scheduledTime}</dd>
-              </div>
-              <div>
-                <dt>Actual</dt>
-                <dd>{selectedEventExplanation.actualTime}</dd>
-              </div>
-            </dl>
-            <div className="event-detail-explanation">
-              <p className="eyebrow">Explanation</p>
-              <p>{selectedEventExplanation.text}</p>
-            </div>
-          </div>
         </div>
       ) : null}
 
@@ -4516,7 +5662,169 @@ function normalizeEmployeeName(name: string) {
 }
 
 function isManagerEmployee(employee: Employee) {
-  return employee.pin === managerPin;
+  return employee.accessLevel === "Admin" || employee.accessLevel === "Manager";
+}
+
+function hasClockInForShift(shift: Shift, events: ClockEvent[], shifts: Shift[]) {
+  return events.some((event) => (
+    event.type === "in" && shiftForClockEvent(event, shifts)?.id === shift.id
+  ));
+}
+
+function noShowAlertsFor(
+  employees: Employee[],
+  shifts: Shift[],
+  events: ClockEvent[],
+  currentTime: number,
+  lookbackStart = Number.NEGATIVE_INFINITY,
+): OperationalAlert[] {
+  return shifts.flatMap((shift) => {
+    const employee = employees.find((entry) => entry.id === shift.employeeId);
+    if (!employee?.active) return [];
+
+    const scheduledStart = shiftStartDateTime(shift);
+    const alertTime = scheduledStart.getTime() + missedClockInGraceMs;
+    if (alertTime > currentTime || alertTime < lookbackStart) return [];
+    if (hasClockInForShift(shift, events, shifts)) return [];
+
+    return [{
+      id: `no-show-${shift.id}`,
+      employeeId: shift.employeeId,
+      title: "No-show",
+      detail: `${employee.name} did not clock in for the scheduled ${formatClockTime(scheduledStart.toISOString())} shift.`,
+      at: new Date(alertTime).toISOString(),
+      severity: "danger" as const,
+      eventTargetId: `no-show-${shift.id}`,
+    }];
+  }).sort((first, second) => second.at.localeCompare(first.at));
+}
+
+function operationalAlertsFor(
+  employees: Employee[],
+  shifts: Shift[],
+  events: ClockEvent[],
+  currentTime: number,
+): OperationalAlert[] {
+  const alerts: OperationalAlert[] = [];
+  const lookbackStart = currentTime - operationalAlertLookbackMs;
+  const employeeNames = new Map(employees.map((employee) => [employee.id, employee.name]));
+  const eventsAscending = [...events].sort((first, second) => first.at.localeCompare(second.at));
+
+  eventsAscending.forEach((event) => {
+    const eventTime = new Date(event.at).getTime();
+    if (eventTime < lookbackStart || eventTime > currentTime) return;
+
+    const employeeName = employeeNames.get(event.employeeId) ?? "Employee";
+    if (event.type === "in" || event.type === "out") {
+      const shift = shiftForClockEvent(event, shifts);
+      const action = event.type === "in" ? "clock-in" : "clock-out";
+      const actionPastTense = event.type === "in" ? "clocked in" : "clocked out";
+
+      if (!shift) {
+        alerts.push({
+          id: `unscheduled-${event.id}`,
+          employeeId: event.employeeId,
+          title: `Unscheduled ${action}`,
+          detail: `${employeeName} ${actionPastTense} at ${formatClockTime(event.at)} without a scheduled shift.`,
+          at: event.at,
+          severity: "danger",
+          eventTargetId: `clock-${event.id}`,
+        });
+        return;
+      }
+
+      const scheduledTime = event.type === "in" ? shiftStartDateTime(shift) : shiftEndDateTime(shift);
+      if (isWithinScheduledMinute(eventTime, scheduledTime.getTime())) return;
+
+      const timing = eventTime < scheduledTime.getTime() ? "Early" : "Late";
+      alerts.push({
+        id: `${timing.toLocaleLowerCase()}-${action}-${event.id}`,
+        employeeId: event.employeeId,
+        title: `${timing} ${action}`,
+        detail: `${employeeName} ${actionPastTense} ${timing.toLocaleLowerCase()} at ${formatClockTime(event.at)}; scheduled for ${formatClockTime(scheduledTime.toISOString())}.`,
+        at: event.at,
+        severity: timing === "Late" ? "danger" : "warning",
+        eventTargetId: `clock-${event.id}`,
+      });
+      return;
+    }
+
+    if (event.type === "break_end") {
+      const breakStart = matchingBreakStartEvent(event, eventsAscending);
+      const scheduledEnd = breakStart ? breakEndTime(breakStart) : undefined;
+      if (!scheduledEnd || eventTime < scheduledEnd.getTime() + 60000) return;
+
+      alerts.push({
+        id: `late-break-return-${event.id}`,
+        employeeId: event.employeeId,
+        title: "Late return from break",
+        detail: `${employeeName} returned at ${formatClockTime(event.at)}; expected by ${formatClockTime(scheduledEnd.toISOString())}.`,
+        at: event.at,
+        severity: "danger",
+        eventTargetId: `clock-${event.id}`,
+      });
+    }
+  });
+
+  const openWorkSessions = new Map<number, { clockIn: ClockEvent; tookBreak: boolean }>();
+  eventsAscending.forEach((event) => {
+    if (event.type === "in") {
+      openWorkSessions.set(event.employeeId, { clockIn: event, tookBreak: false });
+      return;
+    }
+
+    const session = openWorkSessions.get(event.employeeId);
+    if (!session) return;
+    if (event.type === "break") {
+      session.tookBreak = true;
+      return;
+    }
+    if (event.type !== "out") return;
+
+    const clockOutTime = new Date(event.at).getTime();
+    const clockInTime = new Date(session.clockIn.at).getTime();
+    if (!session.tookBreak && clockOutTime - clockInTime >= missedBreakThresholdMs && clockOutTime >= lookbackStart) {
+      const employeeName = employeeNames.get(event.employeeId) ?? "Employee";
+      alerts.push({
+        id: `missed-break-${session.clockIn.id}-${event.id}`,
+        employeeId: event.employeeId,
+        title: "Missed break",
+        detail: `${employeeName} worked at least five continuous hours without recording a break.`,
+        at: event.at,
+        severity: "danger",
+        eventTargetId: `clock-${event.id}`,
+      });
+    }
+    openWorkSessions.delete(event.employeeId);
+  });
+
+  openWorkSessions.forEach((session, employeeId) => {
+    const clockInTime = new Date(session.clockIn.at).getTime();
+    const alertTime = clockInTime + missedBreakThresholdMs;
+    if (session.tookBreak || alertTime > currentTime || alertTime < lookbackStart) return;
+
+    alerts.push({
+      id: `missed-break-open-${session.clockIn.id}`,
+      employeeId,
+      title: "Missed break",
+      detail: `${employeeNames.get(employeeId) ?? "Employee"} has worked at least five continuous hours without recording a break.`,
+      at: new Date(alertTime).toISOString(),
+      severity: "danger",
+      eventTargetId: `clock-${session.clockIn.id}`,
+    });
+  });
+
+  alerts.push(...noShowAlertsFor(employees, shifts, eventsAscending, currentTime, lookbackStart));
+
+  return alerts
+    .filter((alert, index, allAlerts) => allAlerts.findIndex((entry) => entry.id === alert.id) === index)
+    .sort((first, second) => second.at.localeCompare(first.at))
+    .slice(0, 25);
+}
+
+function formatOperationalAlertTime(at: string) {
+  const date = new Date(at);
+  return `${date.toLocaleDateString(undefined, { month: "short", day: "numeric" })} · ${formatClockTime(at)}`;
 }
 
 function lastWorkClockEvent(events: ClockEvent[], employeeId: number) {
@@ -4550,63 +5858,23 @@ function breakEndTime(event: ClockEvent) {
   return new Date(new Date(event.at).getTime() + durationMs);
 }
 
-function clockEventLabel(event: ClockEvent) {
-  if (event.type === "in") return "Clock in";
-  if (event.type === "out") return "Clock out";
+function clockEventLabel(event: ClockEvent, shifts: Shift[]) {
+  if (event.type === "in" || event.type === "out") {
+    const action = event.type === "in" ? "Clock in" : "Clock out";
+    const pastAction = event.type === "in" ? "Clocked in" : "Clocked out";
+    const shift = shiftForClockEvent(event, shifts);
+    if (!shift) return `Unscheduled ${action.toLocaleLowerCase()}`;
+
+    const scheduledTime = event.type === "in"
+      ? shiftStartDateTime(shift).getTime()
+      : shiftEndDateTime(shift).getTime();
+    const eventTime = new Date(event.at).getTime();
+    if (isWithinScheduledMinute(eventTime, scheduledTime)) return action;
+
+    return `${pastAction} ${eventTime < scheduledTime ? "early" : "late"}`;
+  }
   if (event.type === "break_end") return `${breakDurationLabel(event)} break ended`;
   return `${breakDurationLabel(event)} break started`;
-}
-
-function eventExplanationDisplay(event: ClockEvent, shifts: Shift[], events: ClockEvent[]) {
-  const text = event.explanation?.trim();
-  if (!text) {
-    return {
-      actualTime: "",
-      isException: false,
-      keyword: "",
-      scheduledTime: "",
-      text: "n/a",
-    };
-  }
-
-  return {
-    actualTime: formatClockTime(event.at),
-    isException: true,
-    keyword: eventExceptionKeyword(event, shifts),
-    scheduledTime: scheduledEventTimeLabel(event, shifts, events),
-    text,
-  };
-}
-
-function scheduledEventTimeLabel(event: ClockEvent, shifts: Shift[], events: ClockEvent[]) {
-  if (event.type === "break_end") {
-    const breakStart = matchingBreakStartEvent(event, events);
-    const breakEnd = breakStart ? breakEndTime(breakStart) : undefined;
-    return breakEnd ? formatClockTime(breakEnd.toISOString()) : "n/a";
-  }
-
-  const shift = shiftForClockEvent(event, shifts);
-  if (!shift) return "n/a";
-
-  const scheduledTime = event.type === "in" ? shiftStartDateTime(shift) : shiftEndDateTime(shift);
-  return formatClockTime(scheduledTime.toISOString());
-}
-
-function eventExceptionKeyword(event: ClockEvent, shifts: Shift[]) {
-  if (event.type === "break_end") return "returned from break late";
-  if (event.type === "break") return "started break exception";
-
-  const shift = shiftForClockEvent(event, shifts);
-  if (!shift) return "no scheduled shift";
-
-  const eventTime = new Date(event.at).getTime();
-  const scheduledTime = event.type === "in"
-    ? shiftStartDateTime(shift).getTime()
-    : shiftEndDateTime(shift).getTime();
-  const timing = timingStatus(eventTime, scheduledTime);
-
-  if (event.type === "in") return `clocked in ${timing}`;
-  return `clocked out ${timing}`;
 }
 
 function shiftForClockEvent(event: ClockEvent, shifts: Shift[]) {
@@ -4707,6 +5975,103 @@ function nextId(items: { id: number }[]) {
   return items.reduce((max, item) => Math.max(max, item.id), 0) + 1;
 }
 
+function applyScheduleDraft(publishedShifts: Shift[], draft?: ScheduleDraft) {
+  if (!draft) return publishedShifts;
+
+  const deletedShiftIds = new Set(draft.deletedShiftIds);
+  const upsertedShifts = new Map(draft.upsertedShifts.map((shift) => [shift.id, shift]));
+  const publishedShiftIds = new Set(publishedShifts.map((shift) => shift.id));
+
+  return [
+    ...publishedShifts
+      .filter((shift) => !deletedShiftIds.has(shift.id))
+      .map((shift) => upsertedShifts.get(shift.id) ?? shift),
+    ...draft.upsertedShifts.filter((shift) => !publishedShiftIds.has(shift.id)),
+  ];
+}
+
+function mergeScheduleDraft(
+  publishedShifts: Shift[],
+  draft: ScheduleDraft | undefined,
+  upsertedShifts: Shift[],
+  deletedShiftIds: number[],
+  affectedEmployeeIds: number[],
+): ScheduleDraft {
+  const nextUpsertedShifts = new Map((draft?.upsertedShifts ?? []).map((shift) => [shift.id, shift]));
+  const nextDeletedShiftIds = new Set(draft?.deletedShiftIds ?? []);
+  const publishedShiftIds = new Set(publishedShifts.map((shift) => shift.id));
+
+  deletedShiftIds.forEach((shiftId) => {
+    nextUpsertedShifts.delete(shiftId);
+    if (publishedShiftIds.has(shiftId)) nextDeletedShiftIds.add(shiftId);
+    else nextDeletedShiftIds.delete(shiftId);
+  });
+  upsertedShifts.forEach((shift) => {
+    nextUpsertedShifts.set(shift.id, shift);
+    nextDeletedShiftIds.delete(shift.id);
+  });
+
+  return {
+    upsertedShifts: Array.from(nextUpsertedShifts.values()),
+    deletedShiftIds: Array.from(nextDeletedShiftIds),
+    affectedEmployeeIds: Array.from(new Set([
+      ...(draft?.affectedEmployeeIds ?? []),
+      ...affectedEmployeeIds,
+    ])),
+  };
+}
+
+function nextScheduleShiftId(state: StaffState) {
+  return nextId([
+    ...state.shifts,
+    ...Object.values(state.scheduleDraftsByManager ?? {}).flatMap((draft) => draft.upsertedShifts),
+  ]);
+}
+
+function readOpenedNotificationIds(): Record<number, string[]> {
+  if (typeof window === "undefined") return {};
+
+  const stored = window.localStorage.getItem(openedNotificationsStorageKey);
+  if (!stored) return {};
+
+  try {
+    const parsed = JSON.parse(stored) as Record<string, unknown>;
+    return Object.fromEntries(
+      Object.entries(parsed).map(([employeeId, notificationIds]) => [
+        Number(employeeId),
+        Array.isArray(notificationIds)
+          ? notificationIds.filter((notificationId): notificationId is string => typeof notificationId === "string")
+          : [],
+      ]),
+    );
+  } catch {
+    window.localStorage.removeItem(openedNotificationsStorageKey);
+    return {};
+  }
+}
+
+function readDismissedNotificationIds(): Record<number, string[]> {
+  if (typeof window === "undefined") return {};
+
+  const stored = window.localStorage.getItem(dismissedNotificationsStorageKey);
+  if (!stored) return {};
+
+  try {
+    const parsed = JSON.parse(stored) as Record<string, unknown>;
+    return Object.fromEntries(
+      Object.entries(parsed).map(([employeeId, notificationIds]) => [
+        Number(employeeId),
+        Array.isArray(notificationIds)
+          ? notificationIds.filter((notificationId): notificationId is string => typeof notificationId === "string")
+          : [],
+      ]),
+    );
+  } catch {
+    window.localStorage.removeItem(dismissedNotificationsStorageKey);
+    return {};
+  }
+}
+
 function readStoredBasicInfo(): BasicInfo {
   if (typeof window === "undefined") return defaultBasicInfo;
 
@@ -4784,9 +6149,9 @@ function readStoredState() {
   const stored = window.localStorage.getItem(storageKey);
   if (!stored) return starterState;
 
-  try {
-    const parsed = JSON.parse(stored) as StaffState;
-    const employees = parsed.employees
+  function normalizeStoredState(rawState: string) {
+    const parsed = JSON.parse(rawState) as StaffState;
+    const employees = (Array.isArray(parsed.employees) ? parsed.employees : [])
       .map((employee) => {
         const normalizedEmployee = employee.id === 1 && employee.pin === managerPin
           ? { ...employee, name: "Serge Vakulchik" }
@@ -4797,8 +6162,10 @@ function readStoredState() {
           email: clearRosterPlaceholder(normalizedEmployee.email),
           phone: savedPhone ? formatPhoneNumberInput(savedPhone) : "",
           accessLevel: normalizedEmployee.id === 1
-            ? "Manager"
-            : normalizedEmployee.accessLevel === "Employee" ? "Employee" : "",
+            ? "Admin"
+            : (["Admin", "Manager", "Employee"] as AccessLevel[]).includes(normalizedEmployee.accessLevel)
+              ? normalizedEmployee.accessLevel
+              : "",
           location: clearRosterPlaceholder(normalizedEmployee.location),
           role: clearRosterPlaceholder(normalizedEmployee.role),
           wage: formatWageInput(clearRosterPlaceholder(normalizedEmployee.wage)),
@@ -4825,7 +6192,7 @@ function readStoredState() {
           .map((employee) => employee.role.trim())
           .filter(Boolean),
       )),
-      managerIds: employees.filter((employee) => employee.accessLevel === "Manager").map((employee) => employee.id),
+      managerIds: employees.filter((employee) => isManagerEmployee(employee)).map((employee) => employee.id),
     };
     const departments = [
       unassignedDepartment ?? fallbackDepartment,
@@ -4860,13 +6227,54 @@ function readStoredState() {
             { startDate: currentYearStart, balance: 0 },
           ])),
         }];
+    const hasStoredDraftModel = parsed.scheduleDraftsByManager !== undefined;
+    const storedUnpublishedShiftIds = new Set(hasStoredDraftModel ? [] : readStoredUnpublishedShiftIds());
+    const savedShifts = Array.isArray(parsed.shifts) ? parsed.shifts : [];
+    const publishedShifts = savedShifts
+      .filter((shift) => employeeIds.has(shift.employeeId))
+      .filter((shift) => !storedUnpublishedShiftIds.has(shift.id));
+    const draftEntries = parsed.scheduleDraftsByManager && typeof parsed.scheduleDraftsByManager === "object"
+      ? Object.entries(parsed.scheduleDraftsByManager)
+      : [];
+    const savedScheduleDrafts = Object.fromEntries(
+      draftEntries
+        .filter(([managerId]) => {
+          const manager = employees.find((employee) => employee.id === Number(managerId));
+          return Boolean(manager && isManagerEmployee(manager));
+        })
+        .map(([managerId, savedDraft]) => {
+          const draft = savedDraft && typeof savedDraft === "object" ? savedDraft : {} as Partial<ScheduleDraft>;
+          return [managerId, {
+            upsertedShifts: (Array.isArray(draft.upsertedShifts) ? draft.upsertedShifts : [])
+              .filter((shift) => employeeIds.has(shift.employeeId)),
+            deletedShiftIds: (Array.isArray(draft.deletedShiftIds) ? draft.deletedShiftIds : [])
+              .filter((shiftId) => Number.isInteger(shiftId)),
+            affectedEmployeeIds: (Array.isArray(draft.affectedEmployeeIds) ? draft.affectedEmployeeIds : [])
+              .filter((employeeId) => employeeIds.has(employeeId)),
+          }];
+        }),
+    );
+    const scheduleDraftsByManager: Record<number, ScheduleDraft> = hasStoredDraftModel
+      ? savedScheduleDrafts
+      : storedUnpublishedShiftIds.size > 0
+        ? {
+            1: {
+              upsertedShifts: savedShifts.filter((shift) => storedUnpublishedShiftIds.has(shift.id) && employeeIds.has(shift.employeeId)),
+              deletedShiftIds: [],
+              affectedEmployeeIds: (parsed.pendingScheduleUpdateEmployeeIds ?? []).filter((employeeId) => employeeIds.has(employeeId)),
+            },
+          }
+        : {};
+    const scheduleHasBeenPublished = parsed.scheduleHasBeenPublished
+      ?? publishedShifts.length > 0;
 
     return {
       ...parsed,
       employees,
       departments,
-      shifts: parsed.shifts.filter((shift) => employeeIds.has(shift.employeeId)),
-      clockEvents: parsed.clockEvents.filter((event) => employeeIds.has(event.employeeId)),
+      shifts: publishedShifts,
+      clockEvents: (Array.isArray(parsed.clockEvents) ? parsed.clockEvents : [])
+        .filter((event) => employeeIds.has(event.employeeId)),
       hoursAdjustments: (parsed.hoursAdjustments ?? []).filter((adjustment) => employeeIds.has(adjustment.employeeId)),
       ptoRequests: (parsed.ptoRequests ?? [])
         .filter((request) => employeeIds.has(request.employeeId))
@@ -4875,6 +6283,11 @@ function readStoredState() {
           compensation: request.compensation === "unpaid" ? "unpaid" : "paid",
         })),
       ptoPolicies,
+      scheduleUpdates: (parsed.scheduleUpdates ?? []).filter((notification) => employeeIds.has(notification.employeeId)),
+      scheduleHasBeenPublished,
+      pendingScheduleUpdateEmployeeIds: (parsed.pendingScheduleUpdateEmployeeIds ?? [])
+        .filter((employeeId) => employeeIds.has(employeeId)),
+      scheduleDraftsByManager,
       conversations: (parsed.conversations ?? [])
         .map((conversation) => {
           const participantIds = conversation.participantIds.filter((employeeId) => employeeIds.has(employeeId));
@@ -4893,9 +6306,34 @@ function readStoredState() {
         })
         .filter((conversation) => conversation.participantIds.length > 0),
     };
+  }
+
+  try {
+    return normalizeStoredState(stored);
   } catch {
-    window.localStorage.removeItem(storageKey);
+    const backupState = window.localStorage.getItem(stateBackupStorageKey);
+    if (backupState && backupState !== stored) {
+      try {
+        return normalizeStoredState(backupState);
+      } catch {
+        // Keep both raw records intact so they can still be recovered manually.
+      }
+    }
     return starterState;
+  }
+}
+
+function isRecoverableStaffRecord(rawState: string) {
+  try {
+    const parsed = JSON.parse(rawState) as Partial<StaffState>;
+    return (
+      Array.isArray(parsed.employees)
+      && parsed.employees.length > 0
+      && Array.isArray(parsed.shifts)
+      && Array.isArray(parsed.clockEvents)
+    );
+  } catch {
+    return false;
   }
 }
 
@@ -5058,30 +6496,6 @@ function dateRangeForCalendarTab(date: Date, tab: CalendarTab) {
   return { start, end };
 }
 
-function repeatDatesForRange(date: string, dates: string[], range: CopyRange) {
-  if (dates.length === 0) return [date];
-
-  const { start, end } = dateRangeForCalendarTab(parseLocalDate(date), range);
-  const selectedDates = dates.filter((entry) => {
-    const selectedDate = parseLocalDate(entry);
-    return selectedDate >= start && selectedDate <= end;
-  });
-
-  return selectedDates.length > 0 ? selectedDates : [date];
-}
-
-function shiftDateByRange(date: string, range: CopyRange, direction: -1 | 1) {
-  const selectedDate = parseLocalDate(date);
-
-  if (range === "week") {
-    selectedDate.setDate(selectedDate.getDate() + direction * 7);
-  } else {
-    selectedDate.setMonth(selectedDate.getMonth() + direction);
-  }
-
-  return toDateInputValue(selectedDate);
-}
-
 function formatPtoHistoryMonth(date: string) {
   const month = new Intl.DateTimeFormat("en-US", { month: "short" }).format(new Date(`${date}T12:00:00`));
   return `${month}, ${date.slice(0, 4)}`;
@@ -5089,7 +6503,6 @@ function formatPtoHistoryMonth(date: string) {
 
 function ptoHistoryStatusLabel(status: PtoHistoryStatusFilter) {
   if (status === "all") return "All";
-  if (status === "pending") return "To Review";
   return capitalize(status);
 }
 
@@ -5138,21 +6551,6 @@ function mondayWeekCalendarDays(date: string) {
   });
 }
 
-function mondayMonthCalendarDays(date: string) {
-  const selectedDate = parseLocalDate(date);
-  const firstDay = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1);
-  const lastDay = new Date(selectedDate.getFullYear(), selectedDate.getMonth() + 1, 0);
-  const days: ({ date: string; day: string } | null)[] = [];
-
-  for (let index = 0; index < (firstDay.getDay() + 6) % 7; index += 1) days.push(null);
-  for (let day = 1; day <= lastDay.getDate(); day += 1) {
-    const calendarDate = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), day);
-    days.push({ date: toDateInputValue(calendarDate), day: day.toString() });
-  }
-
-  return days;
-}
-
 function scheduleMonthCalendarDays(date: string) {
   const selectedDate = parseLocalDate(date);
   const monthStart = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1);
@@ -5186,6 +6584,24 @@ function toDateInputValue(date: Date) {
 
 function parseLocalDate(date: string) {
   return new Date(`${date}T12:00:00`);
+}
+
+function weekdayForDate(date: string) {
+  return parseLocalDate(date).getDay();
+}
+
+function shiftDatesForWeekdays(anchorDate: string, weekdays: number[]) {
+  const anchor = parseLocalDate(anchorDate);
+  const monday = new Date(anchor);
+  monday.setDate(anchor.getDate() - ((anchor.getDay() + 6) % 7));
+
+  return shiftWeekdayOptions
+    .filter((option) => weekdays.includes(option.value))
+    .map((option) => {
+      const date = new Date(monday);
+      date.setDate(monday.getDate() + ((option.value + 6) % 7));
+      return toDateInputValue(date);
+    });
 }
 
 function startOfDay(date: Date) {
@@ -5296,6 +6712,76 @@ function parseTypedTime(value: string) {
   return `${hour.toString().padStart(2, "0")}:${minute.toString().padStart(2, "0")}`;
 }
 
+function timeDraftHourLength(digits: string) {
+  if (digits.length < 2) return 1;
+  const possibleTwoDigitHour = Number(digits.slice(0, 2));
+  return possibleTwoDigitHour >= 10 && possibleTwoDigitHour <= 12 ? 2 : 1;
+}
+
+function formatTimeDraftInput(value: string, previousValue = "") {
+  const normalized = value.toLowerCase().replace(/\s+/g, "");
+  const periodMatch = normalized.match(/([ap](?:m)?)$/);
+  const period = periodMatch?.[1] ?? "";
+  const timeText = period ? normalized.slice(0, -period.length) : normalized;
+  const digits = timeText.replace(/\D/g, "").slice(0, 4);
+  if (!digits) return "";
+
+  const hourLength = timeDraftHourLength(digits);
+  const hour = digits.slice(0, hourLength);
+  const minuteDigits = digits.slice(hourLength, hourLength + 2);
+  if (minuteDigits.length > 0 && Number(minuteDigits[0]) > 5) return previousValue;
+  if (minuteDigits.length === 2 && Number(minuteDigits) > 59) return previousValue;
+  if (period) return `${hour}:${minuteDigits.padEnd(2, "0")}${period}`;
+  return minuteDigits ? `${hour}:${minuteDigits}` : hour;
+}
+
+function suggestedTimeForDraft(value: string, suggestAfter?: string) {
+  const normalized = value.trim().toLowerCase().replace(/\s+/g, "");
+  const match = normalized.match(/^(\d{1,2})(?::(\d{0,2}))?([ap](?:m)?)?$/);
+  if (!match) return null;
+
+  const typedHour = Number(match[1]);
+  const minuteText = match[2] ?? "";
+  const minute = Number(minuteText.padEnd(2, "0"));
+  const explicitPeriod = match[3]?.startsWith("a") ? "am" : match[3]?.startsWith("p") ? "pm" : "";
+  if (!Number.isInteger(typedHour) || typedHour < 0 || typedHour > 23 || minute > 59) return null;
+  if (explicitPeriod && (typedHour < 1 || typedHour > 12)) return null;
+
+  let hour = typedHour;
+  if (explicitPeriod) {
+    if (explicitPeriod === "am") hour = typedHour === 12 ? 0 : typedHour;
+    if (explicitPeriod === "pm") hour = typedHour === 12 ? 12 : typedHour + 12;
+  } else if (typedHour >= 1 && typedHour <= 12) {
+    const morningHour = typedHour === 12 ? 0 : typedHour;
+    const afternoonHour = typedHour === 12 ? 12 : typedHour + 12;
+    const startMinutes = suggestAfter ? timeToMinutes(suggestAfter) : null;
+
+    if (startMinutes !== null) {
+      hour = [morningHour, afternoonHour]
+        .filter((candidate) => candidate * 60 + minute > startMinutes)
+        .sort((first, second) => first - second)[0]
+        ?? afternoonHour;
+    } else {
+      hour = typedHour >= 1 && typedHour <= 4 ? afternoonHour : morningHour;
+    }
+  }
+
+  const time = `${hour.toString().padStart(2, "0")}:${minute.toString().padStart(2, "0")}`;
+  const displayHour = hour % 12 || 12;
+  const period = hour >= 12 ? "pm" : "am";
+  return { time, label: `${displayHour}:${minute.toString().padStart(2, "0")}${period}` };
+}
+
+function isTimeDraftBefore(value: string, before?: string) {
+  if (!value.trim() || !before) return true;
+
+  const candidate = suggestedTimeForDraft(value)?.time ?? parseTypedTime(value);
+  const candidateMinutes = candidate ? timeToMinutes(candidate) : null;
+  const beforeMinutes = timeToMinutes(before);
+
+  return candidateMinutes === null || beforeMinutes === null || candidateMinutes < beforeMinutes;
+}
+
 function formatScheduledHours(shift: Shift) {
   const startMinutes = timeToMinutes(shift.start);
   const endMinutes = timeToMinutes(shift.end);
@@ -5349,6 +6835,15 @@ function employeeInitials(name: string) {
     .join("");
 }
 
+function employeeHasApprovedTimeOffOnDate(requests: PtoRequest[], employeeId: number, date: string) {
+  return requests.some((request) => (
+    request.employeeId === employeeId
+    && request.status === "approved"
+    && request.startDate <= date
+    && request.endDate >= date
+  ));
+}
+
 function weeklyShiftCount(days: { shifts: Shift[] }[]) {
   return days.reduce((count, day) => count + day.shifts.length, 0);
 }
@@ -5393,9 +6888,13 @@ function conversationLastSentAt(conversation: TeamConversation) {
 }
 
 function conversationHasUnreadMessages(conversation: TeamConversation, employeeId: number) {
-  return conversation.messages.some(
+  return conversationUnreadMessageCount(conversation, employeeId) > 0;
+}
+
+function conversationUnreadMessageCount(conversation: TeamConversation, employeeId: number) {
+  return conversation.messages.filter(
     (message) => message.senderEmployeeId !== employeeId && !message.readByEmployeeIds.includes(employeeId),
-  );
+  ).length;
 }
 
 function messageDeliveryStatus(message: TeamMessage, conversation: TeamConversation) {
@@ -5561,7 +7060,8 @@ function ptoHoursEarnedForPolicy(hoursWorked: number, policy: PtoPolicy | undefi
   if (policy.method === "fixed") return startingBalance + policy.fixedHours;
   if (policy.earnedHours <= 0 || policy.workedHours <= 0) return startingBalance;
 
-  return startingBalance + Math.floor((hoursWorked / policy.workedHours) * policy.earnedHours);
+  const accruedHours = (Math.max(0, hoursWorked) / policy.workedHours) * policy.earnedHours;
+  return Math.round((startingBalance + accruedHours) * 100) / 100;
 }
 
 function ptoHoursUsedThisYear(requests: PtoRequest[], employeeId: number, year: number) {
@@ -5590,14 +7090,14 @@ function ptoHoursUsedThisYear(requests: PtoRequest[], employeeId: number, year: 
 function ptoHoursForDateRange(startDate: string, endDate: string) {
   const current = parseLocalDate(startDate);
   const end = parseLocalDate(endDate);
-  let weekdays = 0;
+  let calendarDays = 0;
 
   while (current <= end) {
-    if (current.getDay() !== 0 && current.getDay() !== 6) weekdays += 1;
+    calendarDays += 1;
     current.setDate(current.getDate() + 1);
   }
 
-  return weekdays * 8;
+  return calendarDays * 8;
 }
 
 function formatWorkedHours(hours: number) {
@@ -5614,6 +7114,10 @@ function formatPtoHours(hours: number) {
   return Number.isInteger(absoluteHours)
     ? `${sign}${absoluteHours} hrs`
     : `${sign}${formatWorkedHours(absoluteHours)}`;
+}
+
+function formatPtoChartHours(hours: number) {
+  return `${Math.trunc(hours)} hrs`;
 }
 
 function roundHoursToMinutes(hours: number, minutes: HoursRounding) {
@@ -5737,17 +7241,27 @@ function TimeInput({
   ariaLabel,
   placeholder,
   selectOnFocus = false,
+  disabled = false,
+  suggestAfter,
+  suggestBefore,
+  required = false,
 }: {
   value: string;
   onChange: (value: string) => void;
   ariaLabel: string;
   placeholder: string;
   selectOnFocus?: boolean;
+  disabled?: boolean;
+  suggestAfter?: string;
+  suggestBefore?: string;
+  required?: boolean;
 }) {
-  const [draft, setDraft] = useState(() => (value ? formatTime12(value) : ""));
+  const [draft, setDraft] = useState(() => (value ? formatTime12(value).replace(" ", "") : ""));
+  const [isFocused, setIsFocused] = useState(false);
+  const suggestion = isFocused && !disabled ? suggestedTimeForDraft(draft, suggestAfter) : null;
 
   useEffect(() => {
-    setDraft(value ? formatTime12(value) : "");
+    setDraft(value ? formatTime12(value).replace(" ", "") : "");
   }, [value]);
 
   function commitTime() {
@@ -5757,37 +7271,52 @@ function TimeInput({
       return;
     }
 
-    const parsed = parseTypedTime(draft);
-    if (!parsed) {
-      setDraft(value ? formatTime12(value) : "");
+    const parsed = suggestion?.time ?? parseTypedTime(draft);
+    if (!parsed || !isTimeDraftBefore(draft, suggestBefore)) {
+      setDraft(value ? formatTime12(value).replace(" ", "") : "");
       return;
     }
 
     onChange(parsed);
-    setDraft(formatTime12(parsed));
+    setDraft(formatTime12(parsed).replace(" ", ""));
   }
 
   return (
-    <input
-      type="text"
-      value={draft}
-      onChange={(event) => setDraft(event.target.value)}
-      onFocus={(event) => {
-        if (selectOnFocus) event.currentTarget.select();
-      }}
-      onClick={(event) => {
-        if (selectOnFocus) event.currentTarget.select();
-      }}
-      onBlur={commitTime}
-      onKeyDown={(event) => {
-        if (event.key === "Enter") {
+    <span className="time-input-shell">
+      {suggestion ? <span className="time-input-hint" aria-hidden="true">{suggestion.label}</span> : null}
+      <input
+        type="text"
+        value={draft}
+        onChange={(event) => {
+          const nextValue = event.target.value;
+          setDraft((currentDraft) => {
+            const formattedDraft = formatTimeDraftInput(nextValue, currentDraft);
+            return isTimeDraftBefore(formattedDraft, suggestBefore) ? formattedDraft : currentDraft;
+          });
+        }}
+        onFocus={(event) => {
+          setIsFocused(true);
+          if (selectOnFocus) event.currentTarget.select();
+        }}
+        onClick={(event) => {
+          if (selectOnFocus) event.currentTarget.select();
+        }}
+        onBlur={() => {
           commitTime();
-        }
-      }}
-      placeholder={placeholder}
-      aria-label={ariaLabel}
-      inputMode="text"
-    />
+          setIsFocused(false);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            commitTime();
+          }
+        }}
+        placeholder={placeholder}
+        aria-label={ariaLabel}
+        inputMode="text"
+        disabled={disabled}
+        required={required}
+      />
+    </span>
   );
 }
 
