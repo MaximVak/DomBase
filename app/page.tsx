@@ -191,6 +191,27 @@ type ScheduleDraft = {
   affectedEmployeeIds: number[];
 };
 
+type AvailabilityRequestSlot = {
+  day: string;
+  preference: "preferred" | "unavailable";
+  startHour: number;
+  endHour: number;
+  location: string;
+};
+
+type AvailabilityRequest = {
+  id: number;
+  employeeId: number;
+  effectiveDate: string;
+  status: "pending" | "approved" | "rejected";
+  slots: AvailabilityRequestSlot[];
+  submittedAt: string;
+  requestNote?: string;
+  decidedAt?: string;
+  decidedByEmployeeId?: number;
+  rejectionNote?: string;
+};
+
 type StaffState = {
   employees: Employee[];
   departments: Department[];
@@ -204,6 +225,7 @@ type StaffState = {
   scheduleHasBeenPublished: boolean;
   pendingScheduleUpdateEmployeeIds: number[];
   scheduleDraftsByManager: Record<number, ScheduleDraft>;
+  availabilityRequests: AvailabilityRequest[];
 };
 
 const managerPin = "0000";
@@ -318,6 +340,7 @@ const starterState: StaffState = {
   scheduleHasBeenPublished: false,
   pendingScheduleUpdateEmployeeIds: [],
   scheduleDraftsByManager: {},
+  availabilityRequests: [],
 };
 
 export default function Home() {
@@ -654,6 +677,9 @@ export default function Home() {
 
   const activeEmployee = state.employees.find((employee) => employee.id === activeEmployeeId);
   const activeUserIsAdmin = activeEmployee?.accessLevel === "Admin";
+  const activeAvailabilityRequest = [...(state.availabilityRequests ?? [])]
+    .filter((request) => request.employeeId === activeEmployeeId)
+    .sort((first, second) => second.id - first.id)[0];
   const activeScheduleDraft = mode === "manager"
     ? state.scheduleDraftsByManager?.[activeEmployeeId]
     : undefined;
@@ -2538,6 +2564,49 @@ export default function Home() {
     setShowBreakOptions(false);
   }
 
+  function submitAvailabilityRequest(
+    effectiveDate: string,
+    slots: AvailabilityRequestSlot[],
+    note: string,
+  ) {
+    setState((current) => ({
+      ...current,
+      availabilityRequests: [
+        ...(current.availabilityRequests ?? []),
+        {
+          id: nextId(current.availabilityRequests ?? []),
+          employeeId: activeEmployeeId,
+          effectiveDate,
+          status: "pending",
+          slots,
+          submittedAt: new Date().toISOString(),
+          requestNote: note.trim() || undefined,
+        },
+      ],
+    }));
+  }
+
+  function decideAvailabilityRequest(
+    requestId: number,
+    decision: "approved" | "rejected",
+    rejectionNote = "",
+  ) {
+    setState((current) => ({
+      ...current,
+      availabilityRequests: (current.availabilityRequests ?? []).map((request) => (
+        request.id === requestId
+          ? {
+              ...request,
+              status: decision,
+              decidedAt: new Date().toISOString(),
+              decidedByEmployeeId: activeEmployeeId,
+              rejectionNote: decision === "rejected" ? rejectionNote.trim() || undefined : undefined,
+            }
+          : request
+      )),
+    }));
+  }
+
   if (!isUnlocked) {
     return (
       <main className="login-screen min-h-screen bg-[#f2f7fc] text-[#12213a]">
@@ -2680,7 +2749,7 @@ export default function Home() {
         </aside>
 
         <section className="workspace" aria-live="polite">
-          <header className="topbar">
+          <header className={["my_availability", "team_availability"].includes(activeView) ? "topbar availability-hidden-topbar" : "topbar"}>
             <div>
               <p className="eyebrow">{formatLongDate(today)}</p>
               <h2>{activeViewLabel(activeView, mode)}</h2>
@@ -4752,17 +4821,25 @@ export default function Home() {
           )}
 
           {activeView === "my_availability" && !isPublicSchedule ? (
-            <section className="content-card">
-              <PanelHeading eyebrow="Schedule" title="My availability" />
-              <EmptyState text="Your availability has not been added yet." />
-            </section>
+            <AvailabilityBoard
+              effectiveDate={today}
+              employee={activeEmployee}
+              locations={availableLocations}
+              latestRequest={activeAvailabilityRequest}
+              onRequestApproval={submitAvailabilityRequest}
+            />
           ) : null}
 
           {activeView === "team_availability" && !isPublicSchedule ? (
-            <section className="content-card">
-              <PanelHeading eyebrow="Schedule" title="Team availability" />
-              <EmptyState text="No team availability has been added yet." />
-            </section>
+            <TeamAvailabilityBoard
+              employees={activeEmployees}
+              initialDate={today}
+              locations={availableLocations}
+              requests={state.availabilityRequests ?? []}
+              reviewerId={activeEmployeeId}
+              onApprove={(requestId) => decideAvailabilityRequest(requestId, "approved")}
+              onReject={(requestId, note) => decideAvailabilityRequest(requestId, "rejected", note)}
+            />
           ) : null}
         </section>
       </div>
@@ -6288,6 +6365,13 @@ function readStoredState() {
       pendingScheduleUpdateEmployeeIds: (parsed.pendingScheduleUpdateEmployeeIds ?? [])
         .filter((employeeId) => employeeIds.has(employeeId)),
       scheduleDraftsByManager,
+      availabilityRequests: (parsed.availabilityRequests ?? [])
+        .filter((request) => employeeIds.has(request.employeeId))
+        .map((request) => ({
+          ...request,
+          status: request.status === "approved" || request.status === "rejected" ? request.status : "pending",
+          slots: Array.isArray(request.slots) ? request.slots : [],
+        })),
       conversations: (parsed.conversations ?? [])
         .map((conversation) => {
           const participantIds = conversation.participantIds.filter((employeeId) => employeeIds.has(employeeId));
@@ -7317,6 +7401,770 @@ function TimeInput({
         required={required}
       />
     </span>
+  );
+}
+
+const availabilityDays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+const availabilityHours = Array.from({ length: 24 }, (_, hour) => ({
+  hour,
+  label: `${hour === 0 ? 12 : hour > 12 ? hour - 12 : hour}${hour < 12 ? "am" : "pm"}`,
+}));
+
+function formatAvailabilityHour(hour: number) {
+  const normalizedHour = ((hour % 24) + 24) % 24;
+  const displayHour = normalizedHour === 0 ? 12 : normalizedHour > 12 ? normalizedHour - 12 : normalizedHour;
+  return `${displayHour}:00${normalizedHour < 12 ? "am" : "pm"}`;
+}
+
+function AvailabilityBoard({
+  effectiveDate,
+  employee,
+  locations,
+  latestRequest,
+  onRequestApproval,
+}: {
+  effectiveDate: string;
+  employee?: Employee;
+  locations: string[];
+  latestRequest?: AvailabilityRequest;
+  onRequestApproval: (effectiveDate: string, slots: AvailabilityRequestSlot[], note: string) => void;
+}) {
+  const [version, setVersion] = useState<"current" | "draft" | "history">(latestRequest ? "draft" : "current");
+  const [status, setStatus] = useState<"approved" | "unsubmitted" | "pending" | "rejected">(latestRequest?.status ?? "approved");
+  const [availabilitySlots, setAvailabilitySlots] = useState<AvailabilityRequestSlot[]>(() => latestRequest?.slots ?? []);
+  const [scheduleEffectiveDate, setScheduleEffectiveDate] = useState(latestRequest?.effectiveDate ?? effectiveDate);
+  const [draftEffectiveDate, setDraftEffectiveDate] = useState<string | null>(latestRequest?.effectiveDate ?? null);
+  const [isVersionMenuOpen, setIsVersionMenuOpen] = useState(false);
+  const [isNewScheduleOpen, setIsNewScheduleOpen] = useState(false);
+  const [isClearConfirmationOpen, setIsClearConfirmationOpen] = useState(false);
+  const [isNotifyManagerOpen, setIsNotifyManagerOpen] = useState(false);
+  const [managerNote, setManagerNote] = useState("");
+  const [newScheduleDate, setNewScheduleDate] = useState(effectiveDate);
+  const [newScheduleCalendarMonth, setNewScheduleCalendarMonth] = useState(`${effectiveDate.slice(0, 7)}-01`);
+  const [isNewScheduleCalendarOpen, setIsNewScheduleCalendarOpen] = useState(false);
+  const [copyCurrentAvailability, setCopyCurrentAvailability] = useState(false);
+  const [editingDay, setEditingDay] = useState<string | null>(null);
+  const [availabilityPreference, setAvailabilityPreference] = useState<"preferred" | "unavailable">("preferred");
+  const [availabilityAllDay, setAvailabilityAllDay] = useState(false);
+  const [availabilityStartTime, setAvailabilityStartTime] = useState("9:00 am");
+  const [availabilityEndTime, setAvailabilityEndTime] = useState("6:00 pm");
+  const [availabilityLocation, setAvailabilityLocation] = useState("all");
+
+  function openAvailabilityEditor(day: string, slot?: AvailabilityRequestSlot) {
+    setEditingDay(day);
+    setAvailabilityPreference(slot?.preference ?? "preferred");
+    setAvailabilityAllDay(Boolean(slot && slot.startHour === 0 && slot.endHour === 24));
+    setAvailabilityStartTime(slot ? formatAvailabilityHour(slot.startHour) : "9:00 am");
+    setAvailabilityEndTime(slot ? formatAvailabilityHour(slot.endHour) : "6:00 pm");
+    setAvailabilityLocation(slot?.location === "All Locations" ? "all" : slot?.location ?? "all");
+  }
+
+  function saveDayAvailability() {
+    if (!editingDay) return;
+    const parsedStart = parseTypedTime(availabilityStartTime);
+    const parsedEnd = parseTypedTime(availabilityEndTime);
+    const startHour = availabilityAllDay ? 0 : parsedStart ? Number(parsedStart.slice(0, 2)) : 9;
+    const endHour = availabilityAllDay ? 24 : parsedEnd ? Number(parsedEnd.slice(0, 2)) : 18;
+    if (endHour <= startHour) return;
+
+    const nextSlot: AvailabilityRequestSlot = {
+      day: editingDay,
+      preference: availabilityPreference,
+      startHour,
+      endHour,
+      location: availabilityLocation === "all" ? "All Locations" : availabilityLocation,
+    };
+    setAvailabilitySlots((current) => [
+      ...current.filter((slot) => slot.day !== editingDay),
+      nextSlot,
+    ]);
+    setEditingDay(null);
+    setDraftEffectiveDate((current) => current ?? scheduleEffectiveDate);
+    setVersion("draft");
+    setStatus("unsubmitted");
+  }
+
+  function startNewAvailability() {
+    setNewScheduleDate(scheduleEffectiveDate);
+    setNewScheduleCalendarMonth(`${scheduleEffectiveDate.slice(0, 7)}-01`);
+    setIsNewScheduleCalendarOpen(false);
+    setCopyCurrentAvailability(false);
+    setIsNewScheduleOpen(true);
+  }
+
+  function moveNewScheduleCalendarMonth(offset: number) {
+    const currentMonth = parseLocalDate(newScheduleCalendarMonth);
+    currentMonth.setMonth(currentMonth.getMonth() + offset, 1);
+    setNewScheduleCalendarMonth(toDateInputValue(currentMonth));
+  }
+
+  function chooseNewScheduleDate(date: string) {
+    setNewScheduleDate(date);
+    setIsNewScheduleCalendarOpen(false);
+  }
+
+  function createNewAvailability() {
+    if (!newScheduleDate) return;
+    if (!copyCurrentAvailability) setAvailabilitySlots([]);
+    setScheduleEffectiveDate(newScheduleDate);
+    setDraftEffectiveDate(newScheduleDate);
+    setVersion("draft");
+    setStatus("unsubmitted");
+    setIsNewScheduleOpen(false);
+  }
+
+  function clearAvailability() {
+    setAvailabilitySlots([]);
+    setDraftEffectiveDate((current) => current ?? scheduleEffectiveDate);
+    setVersion("draft");
+    setStatus("unsubmitted");
+    setIsClearConfirmationOpen(false);
+  }
+
+  function selectAvailabilityVersion(nextVersion: "current" | "draft" | "history") {
+    setVersion(nextVersion);
+    setIsVersionMenuOpen(false);
+
+    if (nextVersion === "draft" && draftEffectiveDate) {
+      setScheduleEffectiveDate(draftEffectiveDate);
+      setStatus(latestRequest?.effectiveDate === draftEffectiveDate ? latestRequest.status : "unsubmitted");
+      return;
+    }
+
+    setScheduleEffectiveDate(effectiveDate);
+    setStatus("approved");
+  }
+
+  function notifyManager() {
+    onRequestApproval(scheduleEffectiveDate, availabilitySlots, managerNote);
+    setStatus("pending");
+    setIsNotifyManagerOpen(false);
+    setManagerNote("");
+  }
+
+  function dismissNotifyManager() {
+    setIsNotifyManagerOpen(false);
+    setManagerNote("");
+  }
+
+  const statusLabel = status === "approved"
+    ? "Approved"
+    : status === "pending"
+      ? "Pending approval"
+      : status === "rejected"
+        ? "Rejected"
+        : "Unsubmitted";
+  function formatAvailabilityDate(dateValue: string) {
+    if (!dateValue) return "Choose a date";
+    const parsedDate = new Date(`${dateValue}T12:00:00`);
+    if (Number.isNaN(parsedDate.getTime())) return "Choose a date";
+    return new Intl.DateTimeFormat("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    }).format(parsedDate);
+  }
+
+  const effectiveLabel = formatAvailabilityDate(scheduleEffectiveDate);
+  const newScheduleDateLabel = formatAvailabilityDate(newScheduleDate);
+  const currentEffectiveLabel = formatAvailabilityDate(effectiveDate);
+  const draftEffectiveLabel = draftEffectiveDate
+    ? formatAvailabilityDate(draftEffectiveDate)
+    : null;
+  const versionLabel = version === "current" ? "Current" : version === "draft" && draftEffectiveLabel ? draftEffectiveLabel : currentEffectiveLabel;
+  const approvalButtonLabel = status === "unsubmitted" || status === "rejected"
+    ? "Request approval"
+    : status === "pending"
+      ? "Approval requested"
+      : "Notify manager";
+  const calendarMonthDate = parseLocalDate(newScheduleCalendarMonth);
+  const calendarMonthYear = calendarMonthDate.getFullYear();
+  const calendarMonthIndex = calendarMonthDate.getMonth();
+  const calendarLeadingDays = (new Date(calendarMonthYear, calendarMonthIndex, 1).getDay() + 6) % 7;
+  const calendarDaysInMonth = new Date(calendarMonthYear, calendarMonthIndex + 1, 0).getDate();
+  const calendarCellCount = Math.ceil((calendarLeadingDays + calendarDaysInMonth) / 7) * 7;
+  const calendarDays = Array.from({ length: calendarCellCount }, (_, index) => {
+    const dayNumber = index - calendarLeadingDays + 1;
+    if (dayNumber < 1 || dayNumber > calendarDaysInMonth) return null;
+    return toDateInputValue(new Date(calendarMonthYear, calendarMonthIndex, dayNumber));
+  });
+  const calendarMonthLabel = new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric" }).format(calendarMonthDate);
+
+  return (
+    <section className="availability-section" aria-labelledby="availability-title">
+      <div className="availability-toolbar">
+        <h2 id="availability-title">My Availability</h2>
+        <div className="availability-actions">
+          <div className={isVersionMenuOpen ? "availability-version-select open" : "availability-version-select"}>
+            <button
+              type="button"
+              className="availability-version-trigger"
+              aria-haspopup="listbox"
+              aria-expanded={isVersionMenuOpen}
+              onClick={() => setIsVersionMenuOpen((current) => !current)}
+            >
+              <span>{versionLabel}</span>
+              <span className="availability-version-chevron" aria-hidden="true" />
+            </button>
+            {isVersionMenuOpen ? (
+              <div className="availability-version-menu" role="listbox" aria-label="Availability schedules">
+                <button type="button" role="option" aria-selected={version === "current"} onClick={() => selectAvailabilityVersion("current")}>
+                  <span>Current</span>
+                  {version === "current" ? <span className="availability-version-check" aria-hidden="true">✓</span> : null}
+                </button>
+                {draftEffectiveLabel ? (
+                  <button type="button" role="option" aria-selected={version === "draft"} onClick={() => selectAvailabilityVersion("draft")}>
+                    <span>{draftEffectiveLabel}</span>
+                    {version === "draft" ? <span className="availability-version-check" aria-hidden="true">✓</span> : null}
+                  </button>
+                ) : null}
+                <button type="button" role="option" aria-selected={version === "history"} onClick={() => selectAvailabilityVersion("history")}>
+                  <span>{currentEffectiveLabel}</span>
+                  {version === "history" ? <span className="availability-version-check" aria-hidden="true">✓</span> : null}
+                </button>
+              </div>
+            ) : null}
+          </div>
+          <button type="button" onClick={startNewAvailability}>New</button>
+          <button type="button" onClick={() => setIsClearConfirmationOpen(true)}>Clear</button>
+          <button
+            type="button"
+            className="availability-notify-button"
+            onClick={() => setIsNotifyManagerOpen(true)}
+            disabled={status === "pending" || status === "rejected"}
+          >
+            {approvalButtonLabel}
+          </button>
+        </div>
+      </div>
+
+      <div className="availability-card">
+        <div className="availability-summary">
+          <strong>Effective on {effectiveLabel}</strong>
+          <div className="availability-status">
+            <strong>Status:</strong>
+            <span className={`availability-status-pill ${status}`}>{statusLabel}</span>
+          </div>
+        </div>
+
+        <div className="availability-grid-scroller">
+          <div className="availability-grid" role="grid" aria-label="Weekly availability by hour">
+            <div className="availability-grid-corner" role="columnheader" />
+            {availabilityHours.map(({ hour, label }) => (
+              <div className="availability-hour" role="columnheader" key={hour}>{label}</div>
+            ))}
+            {availabilityDays.map((day) => (
+              <div className="availability-grid-row" role="row" key={day}>
+                <div className="availability-day" role="rowheader">
+                  <span>{day}</span>
+                  <button type="button" onClick={() => openAvailabilityEditor(day, availabilitySlots.find((slot) => slot.day === day))} aria-label={`Add availability for ${day}`}>
+                    <span aria-hidden="true">+</span>
+                  </button>
+                </div>
+                {availabilityHours.map(({ hour, label }) => {
+                  const slot = availabilitySlots.find((entry) => entry.day === day && hour >= entry.startHour && hour < entry.endHour);
+                  const isSelected = Boolean(slot);
+                  const isSlotStart = slot?.startHour === hour;
+                  return (
+                    <button
+                      type="button"
+                      className={`availability-cell${isSelected ? " selected" : ""}${isSlotStart ? " has-slot-start" : ""}`}
+                      role="gridcell"
+                      aria-label={`${day} at ${label}: ${isSelected ? "available" : "not available"}`}
+                      onClick={() => openAvailabilityEditor(day, slot)}
+                      key={hour}
+                    >
+                      {isSlotStart && slot ? (
+                        <span
+                          className={`availability-slot-block ${slot.preference}`}
+                          style={{ width: `${Math.max(1, slot.endHour - slot.startHour) * 61}px` }}
+                        >
+                          <strong>{slot.preference === "preferred" ? "Preferred" : "Unavailable"} {formatAvailabilityHour(slot.startHour)} - {formatAvailabilityHour(slot.endHour)}</strong>
+                          <span>{slot.location}</span>
+                        </span>
+                      ) : null}
+                      {hour === 0 && !availabilitySlots.some((entry) => entry.day === day) ? (
+                        <span className="availability-row-prompt" aria-hidden="true">
+                          <span>+</span> Add Availability
+                        </span>
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {editingDay ? (
+        <div className="availability-modal-backdrop" role="presentation">
+          <section className="team-availability-editor my-availability-editor" role="dialog" aria-modal="true" aria-labelledby="my-availability-editor-title">
+            <button type="button" className="availability-modal-close" onClick={() => setEditingDay(null)} aria-label="Close availability editor">
+              <span aria-hidden="true">×</span>
+            </button>
+            <div className="team-availability-editor-member">
+              <span className="team-availability-avatar" aria-hidden="true">{employeeInitials(employee?.name ?? "Team member")}</span>
+              <h2 id="my-availability-editor-title">{employee?.name ?? "Team member"}</h2>
+            </div>
+            <h3>{editingDay}</h3>
+
+            <div className="team-availability-editor-options">
+              <div className="team-availability-preference" role="group" aria-label="Availability type">
+                <button type="button" className={availabilityPreference === "preferred" ? "active" : ""} onClick={() => setAvailabilityPreference("preferred")}>Preferred</button>
+                <button type="button" className={availabilityPreference === "unavailable" ? "active" : ""} onClick={() => setAvailabilityPreference("unavailable")}>Unavailable</button>
+              </div>
+              <label className="team-availability-all-day">
+                <input type="checkbox" checked={availabilityAllDay} onChange={(event) => setAvailabilityAllDay(event.target.checked)} />
+                <span>All day</span>
+              </label>
+            </div>
+
+            <div className="team-availability-time-fields">
+              <label>
+                <span>Start time</span>
+                <input type="text" value={availabilityStartTime} onChange={(event) => setAvailabilityStartTime(event.target.value)} disabled={availabilityAllDay} />
+              </label>
+              <label>
+                <span>End time</span>
+                <input type="text" value={availabilityEndTime} onChange={(event) => setAvailabilityEndTime(event.target.value)} disabled={availabilityAllDay} />
+              </label>
+            </div>
+
+            <label className="team-availability-location-field">
+              <span>Apply to</span>
+              <select value={availabilityLocation} onChange={(event) => setAvailabilityLocation(event.target.value)}>
+                <option value="all">All Locations</option>
+                {locations.map((location) => <option value={location} key={location}>{location}</option>)}
+              </select>
+            </label>
+
+            <button type="button" className="team-availability-add-button" onClick={saveDayAvailability}>Add</button>
+          </section>
+        </div>
+      ) : null}
+
+      {isNewScheduleOpen ? (
+        <div className="availability-modal-backdrop" role="presentation">
+          <section className="availability-new-modal" role="dialog" aria-modal="true" aria-labelledby="new-availability-title">
+            <button type="button" className="availability-modal-close" onClick={() => setIsNewScheduleOpen(false)} aria-label="Close new availability schedule">
+              <span aria-hidden="true">×</span>
+            </button>
+            <h2 id="new-availability-title">Create a new availability schedule</h2>
+            <p>
+              Choose the effective start date for your new availability.<br />
+              We&apos;ll add a new availability schedule for you to enter when you can or can&apos;t work.
+            </p>
+            <div className="availability-new-fields">
+              <div className="availability-new-date-label">
+                <span>Effective start date</span>
+                <button
+                  type="button"
+                  className="availability-new-date-control"
+                  aria-haspopup="dialog"
+                  aria-expanded={isNewScheduleCalendarOpen}
+                  onClick={() => setIsNewScheduleCalendarOpen((current) => !current)}
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <rect x="3" y="5" width="18" height="16" rx="2" />
+                    <path d="M7 3v4M17 3v4M3 10h18" />
+                  </svg>
+                  <span>{newScheduleDateLabel}</span>
+                </button>
+                {isNewScheduleCalendarOpen ? (
+                  <div className="availability-new-calendar" role="dialog" aria-label="Choose effective start date">
+                    <div className="availability-new-calendar-header">
+                      <strong>{calendarMonthLabel}</strong>
+                      <div>
+                        <button type="button" onClick={() => moveNewScheduleCalendarMonth(-1)} aria-label="Previous month"><span aria-hidden="true">‹</span></button>
+                        <button type="button" onClick={() => moveNewScheduleCalendarMonth(1)} aria-label="Next month"><span aria-hidden="true">›</span></button>
+                      </div>
+                    </div>
+                    <div className="availability-new-calendar-weekdays" aria-hidden="true">
+                      {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day) => <span key={day}>{day}</span>)}
+                    </div>
+                    <div className="availability-new-calendar-days">
+                      {calendarDays.map((date, index) => date ? (
+                        <button
+                          type="button"
+                          className={`${date === newScheduleDate ? "selected" : ""}${date === effectiveDate ? " today" : ""}`.trim()}
+                          disabled={date < effectiveDate}
+                          onClick={() => chooseNewScheduleDate(date)}
+                          aria-label={formatLongDate(date)}
+                          aria-pressed={date === newScheduleDate}
+                          key={date}
+                        >
+                          {parseLocalDate(date).getDate()}
+                        </button>
+                      ) : <span aria-hidden="true" key={`empty-${index}`} />)}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+              <label className="availability-copy-current">
+                <input type="checkbox" checked={copyCurrentAvailability} onChange={(event) => setCopyCurrentAvailability(event.target.checked)} />
+                <span>Copy my current availability into my new schedule</span>
+              </label>
+            </div>
+            <div className="availability-new-actions">
+              <button type="button" onClick={() => setIsNewScheduleOpen(false)}>Cancel</button>
+              <button type="button" className="availability-create-button" onClick={createNewAvailability} disabled={!newScheduleDate}>Create new schedule</button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {isClearConfirmationOpen ? (
+        <div className="availability-modal-backdrop" role="presentation">
+          <section className="availability-clear-modal" role="alertdialog" aria-modal="true" aria-labelledby="clear-availability-title" aria-describedby="clear-availability-description">
+            <button type="button" className="availability-modal-close" onClick={() => setIsClearConfirmationOpen(false)} aria-label="Close clear availability confirmation">
+              <span aria-hidden="true">×</span>
+            </button>
+            <h2 id="clear-availability-title">Clear approved availability?</h2>
+            <p id="clear-availability-description">This will delete both your unavailability as well as preferred work hours.</p>
+            <div className="availability-clear-actions">
+              <button type="button" onClick={() => setIsClearConfirmationOpen(false)}>Cancel</button>
+              <button type="button" className="availability-confirm-clear-button" onClick={clearAvailability}>Clear availability</button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {isNotifyManagerOpen ? (
+        <div className="availability-modal-backdrop" role="presentation">
+          <section className="availability-notify-modal" role="dialog" aria-modal="true" aria-labelledby="notify-manager-title">
+            <button type="button" className="availability-modal-close" onClick={dismissNotifyManager} aria-label="Close notify manager dialog">
+              <span aria-hidden="true">×</span>
+            </button>
+            <h2 id="notify-manager-title">Notify your manager</h2>
+            <p>Let your manager know about the changes made to your availability.</p>
+            <label className="availability-manager-note">
+              <span>Note</span>
+              <textarea value={managerNote} onChange={(event) => setManagerNote(event.target.value)} maxLength={500} />
+            </label>
+            <div className="availability-notify-actions">
+              <button type="button" onClick={dismissNotifyManager}>Cancel</button>
+              <button type="button" className="availability-confirm-notify-button" onClick={notifyManager}>Notify manager</button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function TeamAvailabilityBoard({
+  employees,
+  initialDate,
+  locations,
+  requests,
+  reviewerId,
+  onApprove,
+  onReject,
+}: {
+  employees: Employee[];
+  initialDate: string;
+  locations: string[];
+  requests: AvailabilityRequest[];
+  reviewerId: number;
+  onApprove: (requestId: number) => void;
+  onReject: (requestId: number, note: string) => void;
+}) {
+  const [weekDate, setWeekDate] = useState(initialDate);
+  const [requestCells, setRequestCells] = useState<Record<string, AvailabilityRequestSlot>>({});
+  const [expandedEmployeeId, setExpandedEmployeeId] = useState<number | null>(null);
+  const [rejectingRequestId, setRejectingRequestId] = useState<number | null>(null);
+  const [rejectionNote, setRejectionNote] = useState("");
+  const [decisionToast, setDecisionToast] = useState("");
+  const [editingAvailability, setEditingAvailability] = useState<{ employeeId: number; date: string } | null>(null);
+  const [availabilityPreference, setAvailabilityPreference] = useState<"preferred" | "unavailable">("preferred");
+  const [availabilityAllDay, setAvailabilityAllDay] = useState(false);
+  const [availabilityStartTime, setAvailabilityStartTime] = useState("9:00 am");
+  const [availabilityEndTime, setAvailabilityEndTime] = useState("6:00 pm");
+  const [availabilityLocation, setAvailabilityLocation] = useState("all");
+  const weekDays = mondayWeekCalendarDays(weekDate);
+  const orderedEmployees = [...employees].sort((first, second) => first.name.localeCompare(second.name));
+  const editingEmployee = editingAvailability ? employees.find((employee) => employee.id === editingAvailability.employeeId) : undefined;
+  const editingAvailabilityKey = editingAvailability ? `${editingAvailability.employeeId}-${editingAvailability.date}` : null;
+  const existingEditingAvailability = editingAvailabilityKey ? requestCells[editingAvailabilityKey] : undefined;
+  const dateFormatter = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" });
+  const weekRangeLabel = `${dateFormatter.format(parseLocalDate(weekDays[0].date))} - ${dateFormatter.format(parseLocalDate(weekDays[6].date))}`;
+  const visibleRequests = requests.filter((request) => request.status !== "rejected");
+  const rejectingRequest = requests.find((request) => request.id === rejectingRequestId);
+  const reviewer = employees.find((employee) => employee.id === reviewerId);
+
+  function moveWeek(offset: number) {
+    const nextDate = parseLocalDate(weekDate);
+    nextDate.setDate(nextDate.getDate() + offset * 7);
+    setWeekDate(toDateInputValue(nextDate));
+  }
+
+  function openAvailabilityEditor(employeeId: number, date: string) {
+    const existingAvailability = requestCells[`${employeeId}-${date}`];
+    setEditingAvailability({ employeeId, date });
+    setAvailabilityPreference(existingAvailability?.preference ?? "preferred");
+    setAvailabilityAllDay(Boolean(existingAvailability && existingAvailability.startHour === 0 && existingAvailability.endHour === 24));
+    setAvailabilityStartTime(existingAvailability ? formatAvailabilityHour(existingAvailability.startHour) : "9:00 am");
+    setAvailabilityEndTime(existingAvailability ? formatAvailabilityHour(existingAvailability.endHour) : "6:00 pm");
+    setAvailabilityLocation(existingAvailability?.location === "All Locations" ? "all" : existingAvailability?.location ?? "all");
+  }
+
+  function addTeamAvailability() {
+    if (!editingAvailability) return;
+    const parsedStart = parseTypedTime(availabilityStartTime);
+    const parsedEnd = parseTypedTime(availabilityEndTime);
+    const startHour = availabilityAllDay ? 0 : parsedStart ? Number(parsedStart.slice(0, 2)) : 9;
+    const endHour = availabilityAllDay ? 24 : parsedEnd ? Number(parsedEnd.slice(0, 2)) : 18;
+    if (endHour <= startHour) return;
+    const key = `${editingAvailability.employeeId}-${editingAvailability.date}`;
+    setRequestCells((current) => ({
+      ...current,
+      [key]: {
+        day: new Intl.DateTimeFormat("en-US", { weekday: "long" }).format(parseLocalDate(editingAvailability.date)),
+        preference: availabilityPreference,
+        startHour,
+        endHour,
+        location: availabilityLocation === "all" ? "All Locations" : availabilityLocation,
+      },
+    }));
+    setEditingAvailability(null);
+  }
+
+  function deleteTeamAvailability() {
+    if (!editingAvailabilityKey) return;
+    setRequestCells((current) => {
+      const nextCells = { ...current };
+      delete nextCells[editingAvailabilityKey];
+      return nextCells;
+    });
+    setEditingAvailability(null);
+  }
+
+  function approveAvailabilityRequest(requestId: number) {
+    onApprove(requestId);
+    setDecisionToast("Availability approved");
+  }
+
+  function beginRejectAvailabilityRequest(requestId: number) {
+    setRejectingRequestId(requestId);
+    setRejectionNote("");
+  }
+
+  function rejectAvailabilityRequest() {
+    if (!rejectingRequestId) return;
+    onReject(rejectingRequestId, rejectionNote);
+    setRejectingRequestId(null);
+    setRejectionNote("");
+    setDecisionToast("Availability rejected");
+  }
+
+  return (
+    <section className="team-availability-section" aria-labelledby="team-availability-title">
+      <div className="team-availability-toolbar">
+        <h2 id="team-availability-title">Team Availability</h2>
+        <div className="team-availability-week-controls">
+          <button type="button" onClick={() => moveWeek(-1)} aria-label="Previous week"><span aria-hidden="true">‹</span></button>
+          <label className="team-availability-date-control">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="3" y="5" width="18" height="16" rx="2" />
+              <path d="M7 3v4M17 3v4M3 10h18" />
+            </svg>
+            <input type="date" value={weekDate} onChange={(event) => setWeekDate(event.target.value)} aria-label="Team availability week" />
+            <span>{weekRangeLabel}</span>
+          </label>
+          <button type="button" onClick={() => moveWeek(1)} aria-label="Next week"><span aria-hidden="true">›</span></button>
+        </div>
+      </div>
+
+      <div className="team-availability-card">
+        <div className="team-availability-scroller">
+          <div className="team-availability-grid" role="table" aria-label={`Team availability for ${weekRangeLabel}`}>
+            <div className="team-availability-corner" role="columnheader" />
+            {availabilityDays.map((day) => (
+              <div className="team-availability-day-heading" role="columnheader" key={day}>{day}</div>
+            ))}
+
+            {orderedEmployees.map((employee) => {
+              const employeeRequests = visibleRequests
+                .filter((request) => request.employeeId === employee.id)
+                .sort((first, second) => second.id - first.id);
+              const requestsAreExpanded = expandedEmployeeId === employee.id;
+
+              return (
+                <div className="team-availability-employee-group" key={employee.id}>
+                  <div className="team-availability-row" role="row">
+                    <div className="team-availability-member" role="rowheader">
+                      <span className="team-availability-avatar" aria-hidden="true">{employeeInitials(employee.name)}</span>
+                      <div>
+                        <strong>{employee.name}</strong>
+                        {employeeRequests[0]?.status === "approved" ? (
+                          <span className="team-availability-update-date">
+                            Will update on {new Intl.DateTimeFormat("en-US", { month: "2-digit", day: "2-digit", year: "numeric" }).format(parseLocalDate(employeeRequests[0].effectiveDate))}
+                          </span>
+                        ) : null}
+                        {employeeRequests.length > 0 ? (
+                          <button
+                            type="button"
+                            className="team-availability-requests"
+                            onClick={() => setExpandedEmployeeId((current) => current === employee.id ? null : employee.id)}
+                            aria-expanded={requestsAreExpanded}
+                          >
+                            <span aria-hidden="true">{requestsAreExpanded ? "▴" : "▾"}</span>
+                            {requestsAreExpanded ? "Hide Requests" : "View Requests"}
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                    {weekDays.map((day) => {
+                      const requestKey = `${employee.id}-${day.date}`;
+                      const cellAvailability = requestCells[requestKey];
+                      const isSelected = Boolean(cellAvailability);
+                      return (
+                        <div className={isSelected ? "team-availability-cell selected" : "team-availability-cell"} role="cell" key={day.date}>
+                          <button
+                            type="button"
+                            onClick={() => openAvailabilityEditor(employee.id, day.date)}
+                            aria-label={`${isSelected ? "Edit" : "Add"} availability request for ${employee.name} on ${formatLongDate(day.date)}`}
+                            aria-pressed={isSelected}
+                          >
+                            {cellAvailability ? (
+                              <span className={`team-availability-cell-card ${cellAvailability.preference}`}>
+                                <strong>{cellAvailability.preference === "preferred" ? "Preferred" : "Unavailable"}</strong>
+                                <span>{formatAvailabilityHour(cellAvailability.startHour)} - {formatAvailabilityHour(cellAvailability.endHour)}</span>
+                              </span>
+                            ) : (
+                              <span className="team-availability-cell-plus" aria-hidden="true">+</span>
+                            )}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {requestsAreExpanded ? employeeRequests.map((request) => (
+                    <div className={`team-availability-request-row ${request.status}`} role="row" key={request.id}>
+                      <div className="team-availability-request-summary" role="rowheader">
+                        <strong>{request.status === "pending" ? "Pending" : "Approved"}: Effective {dateFormatter.format(parseLocalDate(request.effectiveDate))}</strong>
+                        {request.status === "approved" ? (
+                          <span>Approved by {employeeById(employees, request.decidedByEmployeeId ?? reviewerId)?.name ?? reviewer?.name ?? "Manager"}</span>
+                        ) : null}
+                        {request.requestNote ? <span className="team-availability-request-note">{request.requestNote}</span> : null}
+                        {request.status === "pending" ? (
+                          <div className="team-availability-request-actions">
+                            <button type="button" onClick={() => beginRejectAvailabilityRequest(request.id)}>Reject</button>
+                            <button type="button" className="approve" onClick={() => approveAvailabilityRequest(request.id)}>Approve</button>
+                          </div>
+                        ) : null}
+                      </div>
+                      {availabilityDays.map((day) => {
+                        const slots = request.slots.filter((slot) => slot.day === day);
+                        return (
+                          <div className="team-availability-request-day" role="cell" key={day}>
+                            {slots.map((slot, slotIndex) => (
+                              <div className={`team-availability-request-slot ${slot.preference}`} key={`${day}-${slotIndex}`}>
+                                <strong>{slot.preference === "preferred" ? "Preferred" : "Unavailable"}</strong>
+                                <span>{formatAvailabilityHour(slot.startHour)} - {formatAvailabilityHour(slot.endHour)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )) : null}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {editingAvailability && editingEmployee ? (
+        <div className="availability-modal-backdrop" role="presentation">
+          <section className="team-availability-editor" role="dialog" aria-modal="true" aria-labelledby="team-availability-editor-title">
+            <button type="button" className="availability-modal-close" onClick={() => setEditingAvailability(null)} aria-label="Close availability editor">
+              <span aria-hidden="true">×</span>
+            </button>
+            <div className="team-availability-editor-member">
+              <span className="team-availability-avatar" aria-hidden="true">{employeeInitials(editingEmployee.name)}</span>
+              <h2 id="team-availability-editor-title">{editingEmployee.name}</h2>
+            </div>
+            <h3>{new Intl.DateTimeFormat("en-US", { weekday: "long" }).format(parseLocalDate(editingAvailability.date))}</h3>
+
+            <div className="team-availability-editor-options">
+              <div className="team-availability-preference" role="group" aria-label="Availability type">
+                <button type="button" className={availabilityPreference === "preferred" ? "active" : ""} onClick={() => setAvailabilityPreference("preferred")}>Preferred</button>
+                <button type="button" className={availabilityPreference === "unavailable" ? "active" : ""} onClick={() => setAvailabilityPreference("unavailable")}>Unavailable</button>
+              </div>
+              <label className="team-availability-all-day">
+                <input type="checkbox" checked={availabilityAllDay} onChange={(event) => setAvailabilityAllDay(event.target.checked)} />
+                <span>All day</span>
+              </label>
+            </div>
+
+            <div className="team-availability-time-fields">
+              <label>
+                <span>Start time</span>
+                <input type="text" value={availabilityStartTime} onChange={(event) => setAvailabilityStartTime(event.target.value)} disabled={availabilityAllDay} />
+              </label>
+              <label>
+                <span>End time</span>
+                <input type="text" value={availabilityEndTime} onChange={(event) => setAvailabilityEndTime(event.target.value)} disabled={availabilityAllDay} />
+              </label>
+            </div>
+
+            <label className="team-availability-location-field">
+              <span>Apply to</span>
+              <select value={availabilityLocation} onChange={(event) => setAvailabilityLocation(event.target.value)}>
+                <option value="all">All Locations</option>
+                {locations.map((location) => <option value={location} key={location}>{location}</option>)}
+              </select>
+            </label>
+
+            <div className="team-availability-editor-actions">
+              {existingEditingAvailability ? (
+                <button type="button" className="team-availability-delete-button" onClick={deleteTeamAvailability}>Delete</button>
+              ) : null}
+              <button type="button" className="team-availability-add-button" onClick={addTeamAvailability}>
+                {existingEditingAvailability ? "Save" : "Add"}
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {rejectingRequest ? (
+        <div className="availability-modal-backdrop" role="presentation">
+          <section className="team-availability-reject-modal" role="dialog" aria-modal="true" aria-labelledby="reject-availability-title">
+            <button
+              type="button"
+              className="availability-modal-close"
+              onClick={() => setRejectingRequestId(null)}
+              aria-label="Close reject availability dialog"
+            >
+              <span aria-hidden="true">×</span>
+            </button>
+            <h2 id="reject-availability-title">Reject Availability</h2>
+            <p>Add a note with any additional info and we&apos;ll let them know.</p>
+            <label>
+              <span>Note (Optional)</span>
+              <textarea value={rejectionNote} onChange={(event) => setRejectionNote(event.target.value)} maxLength={500} />
+            </label>
+            <div className="team-availability-reject-actions">
+              <button type="button" onClick={() => setRejectingRequestId(null)}>Cancel</button>
+              <button type="button" className="reject" onClick={rejectAvailabilityRequest}>Reject Availability</button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {decisionToast ? (
+        <div className="team-availability-toast" role="status">
+          <span aria-hidden="true">✓</span>
+          <span>{decisionToast}</span>
+          <button type="button" onClick={() => setDecisionToast("")} aria-label="Dismiss availability message">×</button>
+        </div>
+      ) : null}
+    </section>
   );
 }
 
