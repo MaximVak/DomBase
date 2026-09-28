@@ -3458,6 +3458,9 @@ export default function Home() {
                     const assignedManagers = department.managerIds
                       .map((managerId) => employeeById(availableManagers, managerId))
                       .filter((manager): manager is Employee => Boolean(manager));
+                    const unassignedManagers = availableManagers.filter(
+                      (manager) => !department.managerIds.includes(manager.id),
+                    );
                     return (
                       <div className="department-roles-row" role="row" key={department.id}>
                       <div className="department-name-cell" role="cell">
@@ -3526,7 +3529,17 @@ export default function Home() {
                       <div
                         className="department-manager-list"
                         role="cell"
-                        onClick={(event) => event.currentTarget.querySelector("select")?.focus()}
+                        onClick={(event) => {
+                          if (event.target instanceof Element && event.target.closest("button, select")) return;
+                          const managerSelect = event.currentTarget.querySelector("select");
+                          if (!managerSelect) return;
+                          managerSelect.focus();
+                          try {
+                            managerSelect.showPicker();
+                          } catch {
+                            // Focusing the native select is the fallback where showPicker is unavailable.
+                          }
+                        }}
                       >
                         {assignedManagers.map((manager) => (
                             <span key={manager.id}>
@@ -3538,7 +3551,7 @@ export default function Home() {
                               >×</button>
                             </span>
                         ))}
-                        {assignedManagers.length === 0 ? (
+                        {unassignedManagers.length > 0 ? (
                           <select
                             value=""
                             onChange={(event) => {
@@ -3547,8 +3560,8 @@ export default function Home() {
                             }}
                             aria-label={`Add manager to ${department.name}`}
                           >
-                            <option value="">Select manager</option>
-                            {availableManagers.map((manager) => (
+                            <option value="">{assignedManagers.length === 0 ? "Select manager" : ""}</option>
+                            {unassignedManagers.map((manager) => (
                               <option value={manager.id} key={manager.id}>{manager.name}</option>
                             ))}
                           </select>
@@ -5394,7 +5407,7 @@ export default function Home() {
                 required
               />
             </label>
-            <label className="shift-edit-field">
+            <div className="shift-edit-field">
               <span>Clock-in time</span>
               <TimeInput
                 value={shiftForm.start}
@@ -5404,8 +5417,8 @@ export default function Home() {
                 suggestBefore={shiftForm.end}
                 required
               />
-            </label>
-            <label className="shift-edit-field">
+            </div>
+            <div className="shift-edit-field">
               <span>Clock-out time</span>
               <TimeInput
                 value={shiftForm.end}
@@ -5415,7 +5428,7 @@ export default function Home() {
                 suggestAfter={shiftForm.start}
                 required
               />
-            </label>
+            </div>
             <label className="shift-edit-field">
               <span>Role</span>
               <select
@@ -5433,17 +5446,23 @@ export default function Home() {
             <fieldset className="shift-apply-days">
               <legend>Apply to:</legend>
               <div>
-                {shiftWeekdayOptions.map((option) => (
-                  <button
-                    type="button"
-                    className={createShiftWeekdays.includes(option.value) ? "active" : ""}
-                    onClick={() => toggleCreateShiftWeekday(option.value)}
-                    aria-pressed={createShiftWeekdays.includes(option.value)}
-                    key={option.value}
-                  >
-                    {option.label}
-                  </button>
-                ))}
+                {shiftWeekdayOptions.map((option) => {
+                  const dateLabel = applyToDateLabel(shiftForm.date, option.value);
+                  return (
+                    <span className="shift-apply-day-option" key={option.value}>
+                      <span>{dateLabel}</span>
+                      <button
+                        type="button"
+                        className={createShiftWeekdays.includes(option.value) ? "active" : ""}
+                        onClick={() => toggleCreateShiftWeekday(option.value)}
+                        aria-label={`${option.label}, ${dateLabel}`}
+                        aria-pressed={createShiftWeekdays.includes(option.value)}
+                      >
+                        {option.label}
+                      </button>
+                    </span>
+                  );
+                })}
               </div>
             </fieldset>
             <label className="shift-notes-field">
@@ -5490,7 +5509,7 @@ export default function Home() {
                 disabled={editingShiftHasStarted}
               />
             </label>
-            <label className="shift-edit-field">
+            <div className="shift-edit-field">
               <span className="shift-edit-label-row">
                 <span>Clock-in time</span>
                 {editingShiftClockIn || editingShiftHasStarted ? (
@@ -5508,8 +5527,8 @@ export default function Home() {
                 disabled={editingShiftHasStarted}
                 suggestBefore={editingShift.end}
               />
-            </label>
-            <label className="shift-edit-field">
+            </div>
+            <div className="shift-edit-field">
               <span className="shift-edit-label-row">
                 <span>Clock-out time</span>
                 {(editingShiftClockOut || editingShiftHasEnded) && !editingShiftIsNoShow ? (
@@ -5525,7 +5544,7 @@ export default function Home() {
                 disabled={editingShiftHasEnded}
                 suggestAfter={editingShift.start}
               />
-            </label>
+            </div>
             <label className="shift-edit-field">
               <span>Role</span>
               <select
@@ -5545,17 +5564,21 @@ export default function Home() {
               <div>
                 {shiftWeekdayOptions.map((option) => {
                   const isAnchorDay = option.value === weekdayForDate(editingShift.date);
+                  const dateLabel = applyToDateLabel(editingShift.date, option.value);
                   return (
-                    <button
-                      type="button"
-                      className={editingShiftWeekdays.includes(option.value) ? "active" : ""}
-                      onClick={() => toggleEditingShiftWeekday(option.value)}
-                      aria-pressed={editingShiftWeekdays.includes(option.value)}
-                      disabled={editingShiftHasStarted || isAnchorDay}
-                      key={option.value}
-                    >
-                      {option.label}
-                    </button>
+                    <span className="shift-apply-day-option" key={option.value}>
+                      <span>{dateLabel}</span>
+                      <button
+                        type="button"
+                        className={editingShiftWeekdays.includes(option.value) ? "active" : ""}
+                        onClick={() => toggleEditingShiftWeekday(option.value)}
+                        aria-label={`${option.label}, ${dateLabel}`}
+                        aria-pressed={editingShiftWeekdays.includes(option.value)}
+                        disabled={editingShiftHasStarted || isAnchorDay}
+                      >
+                        {option.label}
+                      </button>
+                    </span>
                   );
                 })}
               </div>
@@ -6590,6 +6613,13 @@ function weekdayForDate(date: string) {
   return parseLocalDate(date).getDay();
 }
 
+function applyToDateLabel(anchorDate: string, weekday: number) {
+  const date = shiftDatesForWeekdays(anchorDate, [weekday])[0];
+  if (!date) return "";
+  const localDate = parseLocalDate(date);
+  return `${localDate.getMonth() + 1}/${localDate.getDate()}`;
+}
+
 function shiftDatesForWeekdays(anchorDate: string, weekdays: number[]) {
   const anchor = parseLocalDate(anchorDate);
   const monday = new Date(anchor);
@@ -7235,6 +7265,10 @@ function Metric({ label, value }: { label: string; value: string }) {
   );
 }
 
+const timeWheelHours = Array.from({ length: 12 }, (_, index) => `${index + 1}`);
+const timeWheelMinutes = Array.from({ length: 60 }, (_, index) => index.toString().padStart(2, "0"));
+const timeWheelPeriods = ["AM", "PM"];
+
 function TimeInput({
   value,
   onChange,
@@ -7258,7 +7292,25 @@ function TimeInput({
 }) {
   const [draft, setDraft] = useState(() => (value ? formatTime12(value).replace(" ", "") : ""));
   const [isFocused, setIsFocused] = useState(false);
+  const [isPickerOpen, setIsPickerOpen] = useState(false);
+  const shellRef = useRef<HTMLSpanElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const suggestion = isFocused && !disabled ? suggestedTimeForDraft(draft, suggestAfter) : null;
+  const afterMinutes = suggestAfter ? timeToMinutes(suggestAfter) : null;
+  const beforeMinutes = suggestBefore ? timeToMinutes(suggestBefore) : null;
+  const selectedTime = suggestion?.time ?? parseTypedTime(draft) ?? value;
+  const defaultPickerMinutes = selectedTime
+    ? timeToMinutes(selectedTime)
+    : afterMinutes !== null
+      ? Math.min(afterMinutes + 8 * 60, 24 * 60 - 1)
+      : beforeMinutes !== null
+        ? Math.max(beforeMinutes - 8 * 60, 0)
+        : 8 * 60;
+  const wheelTotalMinutes = defaultPickerMinutes ?? 8 * 60;
+  const wheelHour24 = Math.floor(wheelTotalMinutes / 60) % 24;
+  const wheelHour = `${wheelHour24 % 12 || 12}`;
+  const wheelMinute = (wheelTotalMinutes % 60).toString().padStart(2, "0");
+  const wheelPeriod = wheelHour24 >= 12 ? "PM" : "AM";
 
   useEffect(() => {
     setDraft(value ? formatTime12(value).replace(" ", "") : "");
@@ -7281,10 +7333,20 @@ function TimeInput({
     setDraft(formatTime12(parsed).replace(" ", ""));
   }
 
+  function applyWheelTime(hour = wheelHour, minute = wheelMinute, period = wheelPeriod) {
+    const hour12 = Number(hour);
+    let hour24 = hour12 % 12;
+    if (period === "PM") hour24 += 12;
+    const time = `${hour24.toString().padStart(2, "0")}:${minute}`;
+    onChange(time);
+    setDraft(formatTime12(time).replace(" ", ""));
+  }
+
   return (
-    <span className="time-input-shell">
+    <span className="time-input-shell" ref={shellRef}>
       {suggestion ? <span className="time-input-hint" aria-hidden="true">{suggestion.label}</span> : null}
       <input
+        ref={inputRef}
         type="text"
         value={draft}
         onChange={(event) => {
@@ -7296,18 +7358,27 @@ function TimeInput({
         }}
         onFocus={(event) => {
           setIsFocused(true);
+          setIsPickerOpen(true);
           if (selectOnFocus) event.currentTarget.select();
         }}
         onClick={(event) => {
+          setIsPickerOpen(true);
           if (selectOnFocus) event.currentTarget.select();
         }}
-        onBlur={() => {
+        onBlur={(event) => {
           commitTime();
           setIsFocused(false);
+          if (!shellRef.current?.contains(event.relatedTarget as Node | null)) {
+            setIsPickerOpen(false);
+          }
         }}
         onKeyDown={(event) => {
           if (event.key === "Enter") {
             commitTime();
+            setIsPickerOpen(false);
+          }
+          if (event.key === "Escape") {
+            setIsPickerOpen(false);
           }
         }}
         placeholder={placeholder}
@@ -7316,6 +7387,117 @@ function TimeInput({
         disabled={disabled}
         required={required}
       />
+      {isPickerOpen && !disabled ? (
+        <span
+          className="time-wheel-picker"
+          role="group"
+          aria-label={`${ariaLabel} time picker`}
+        >
+          <TimeWheelColumn
+            label="Hour"
+            values={timeWheelHours}
+            value={wheelHour}
+            onChange={(hour) => applyWheelTime(hour)}
+          />
+          <TimeWheelColumn
+            label="Minute"
+            values={timeWheelMinutes}
+            value={wheelMinute}
+            onChange={(minute) => applyWheelTime(wheelHour, minute)}
+          />
+          <TimeWheelColumn
+            label="Period"
+            values={timeWheelPeriods}
+            value={wheelPeriod}
+            onChange={(period) => applyWheelTime(wheelHour, wheelMinute, period)}
+            loop={false}
+          />
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+function TimeWheelColumn({
+  label,
+  values,
+  value,
+  onChange,
+  loop = true,
+}: {
+  label: string;
+  values: string[];
+  value: string;
+  onChange: (value: string) => void;
+  loop?: boolean;
+}) {
+  const currentIndex = Math.max(values.indexOf(value), 0);
+  const wheelDeltaRef = useRef(0);
+  const wheelDirectionRef = useRef(0);
+  const lastWheelStepRef = useRef(0);
+
+  function valueAtOffset(offset: number) {
+    const nextIndex = loop
+      ? (currentIndex + offset + values.length) % values.length
+      : Math.max(0, Math.min(currentIndex + offset, values.length - 1));
+    return values[nextIndex];
+  }
+
+  function move(offset: number) {
+    const nextValue = valueAtOffset(offset);
+    if (nextValue !== value) onChange(nextValue);
+  }
+
+  const visibleValues = loop
+    ? [-1, 0, 1].map((offset) => ({ offset, value: valueAtOffset(offset) }))
+    : values.map((option, index) => ({ offset: index - currentIndex, value: option }));
+
+  return (
+    <span
+      className={`time-wheel-column${loop ? "" : " bounded"}`}
+      role="spinbutton"
+      aria-label={label}
+      aria-valuetext={value}
+      tabIndex={0}
+      onWheel={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const direction = Math.sign(event.deltaY);
+        if (direction === 0) return;
+        if (direction !== wheelDirectionRef.current) wheelDeltaRef.current = 0;
+        wheelDirectionRef.current = direction;
+        wheelDeltaRef.current += event.deltaY;
+
+        const now = Date.now();
+        if (Math.abs(wheelDeltaRef.current) < 60 || now - lastWheelStepRef.current < 140) return;
+        move(wheelDeltaRef.current > 0 ? 1 : -1);
+        wheelDeltaRef.current = 0;
+        lastWheelStepRef.current = now;
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "ArrowDown") {
+          event.preventDefault();
+          move(1);
+        }
+        if (event.key === "ArrowUp") {
+          event.preventDefault();
+          move(-1);
+        }
+      }}
+    >
+      <span className="time-wheel-label">{label}</span>
+      {visibleValues.map((option) => (
+        <button
+          type="button"
+          className={option.value === value ? "current" : ""}
+          aria-label={`${label} ${option.value}`}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => onChange(option.value)}
+          key={`${option.value}-${option.offset}`}
+        >
+          {option.value}
+        </button>
+      ))}
     </span>
   );
 }

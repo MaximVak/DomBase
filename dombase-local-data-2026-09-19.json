@@ -1,0 +1,3625 @@
+{
+  "format": "dombase-local-storage-backup",
+  "version": 1,
+  "exportedAt": "2026-09-20T03:38:10.467Z",
+  "sourceOrigin": "http://localhost:3000",
+  "storageKeys": [
+    "dombase-staff-state-v1",
+    "dombase-staff-state-backup-v1",
+    "dombase-unpublished-shifts-v1",
+    "dombase-basic-info-v1",
+    "dombase-opened-notifications-v1",
+    "dombase-dismissed-notifications-v1"
+  ],
+  "localStorage": {
+    "dombase-staff-state-v1": "{\"employees\":[{\"id\":1,\"name\":\"Serge Vakulchik\",\"role\":\"\",\"pin\":\"0000\",\"active\":true,\"email\":\"moldingmart@gmail.com\",\"phone\":\"(916) 236-7819\",\"accessLevel\":\"Admin\",\"location\":\"MOLDING MART\",\"wage\":\"\"},{\"id\":3,\"name\":\"Vitali R\",\"role\":\"IT\",\"pin\":\"5555\",\"active\":true,\"accessLevel\":\"\",\"email\":\"\",\"phone\":\"\",\"location\":\"\",\"wage\":\"\"},{\"id\":4,\"name\":\"Carlos P\",\"role\":\"Sales Associate\",\"pin\":\"6767\",\"active\":true,\"email\":\"\",\"phone\":\"\",\"accessLevel\":\"\",\"location\":\"\",\"wage\":\"\"},{\"id\":5,\"name\":\"Alex P\",\"role\":\"Sales Associate\",\"pin\":\"9999\",\"active\":true,\"email\":\"\",\"phone\":\"\",\"accessLevel\":\"\",\"location\":\"\",\"wage\":\"\"},{\"id\":6,\"name\":\"Geoff H\",\"role\":\"Sales Associate\",\"pin\":\"4545\",\"active\":true,\"email\":\"\",\"phone\":\"\",\"accessLevel\":\"\",\"location\":\"\",\"wage\":\"\"},{\"id\":7,\"name\":\"Ashot\",\"role\":\"Warehouse Associate\",\"pin\":\"9876\",\"active\":true,\"email\":\"\",\"phone\":\"\",\"accessLevel\":\"\",\"location\":\"\",\"wage\":\"\"},{\"id\":8,\"name\":\"Maxim Vakulchik\",\"role\":\"Warehouse Associate\",\"pin\":\"8755\",\"active\":true,\"email\":\"\",\"phone\":\"\",\"accessLevel\":\"Manager\",\"location\":\"\",\"wage\":\"\"}],\"shifts\":[{\"id\":1,\"employeeId\":3,\"date\":\"2026-08-08\",\"start\":\"08:00\",\"end\":\"14:45\",\"role\":\"IT\",\"station\":\"Floor\"},{\"id\":2,\"employeeId\":8,\"date\":\"2026-08-08\",\"start\":\"07:30\",\"end\":\"16:00\",\"role\":\"Warehouse Associate\",\"station\":\"Floor\"},{\"id\":3,\"employeeId\":3,\"date\":\"2026-08-18\",\"start\":\"07:00\",\"end\":\"16:00\",\"role\":\"IT\",\"station\":\"Floor\"},{\"id\":4,\"employeeId\":3,\"date\":\"2026-08-19\",\"start\":\"07:00\",\"end\":\"16:00\",\"role\":\"IT\",\"station\":\"Floor\"},{\"id\":5,\"employeeId\":3,\"date\":\"2026-08-20\",\"start\":\"12:33\",\"end\":\"16:00\",\"role\":\"IT\",\"station\":\"Floor\"},{\"id\":6,\"employeeId\":3,\"date\":\"2026-08-21\",\"start\":\"12:33\",\"end\":\"16:00\",\"role\":\"IT\",\"station\":\"Floor\"},{\"id\":7,\"employeeId\":8,\"date\":\"2026-08-20\",\"start\":\"08:00\",\"end\":\"16:00\",\"role\":\"Warehouse Associate\",\"station\":\"Floor\"},{\"id\":8,\"employeeId\":8,\"date\":\"2026-08-24\",\"start\":\"07:30\",\"end\":\"16:00\",\"role\":\"Warehouse Associate\",\"station\":\"Floor\"},{\"id\":9,\"employeeId\":5,\"date\":\"2026-08-18\",\"start\":\"06:00\",\"end\":\"16:00\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":10,\"employeeId\":5,\"date\":\"2026-09-15\",\"start\":\"07:30\",\"end\":\"16:00\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":11,\"employeeId\":5,\"date\":\"2026-09-14\",\"start\":\"07:30\",\"end\":\"16:00\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":12,\"employeeId\":5,\"date\":\"2026-09-16\",\"start\":\"07:30\",\"end\":\"16:00\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":13,\"employeeId\":5,\"date\":\"2026-09-17\",\"start\":\"07:30\",\"end\":\"16:00\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":14,\"employeeId\":5,\"date\":\"2026-09-19\",\"start\":\"09:00\",\"end\":\"14:00\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":15,\"employeeId\":4,\"date\":\"2026-09-14\",\"start\":\"10:00\",\"end\":\"16:45\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":16,\"employeeId\":6,\"date\":\"2026-09-01\",\"start\":\"07:00\",\"end\":\"15:30\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":17,\"employeeId\":6,\"date\":\"2026-09-02\",\"start\":\"07:00\",\"end\":\"15:30\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":18,\"employeeId\":6,\"date\":\"2026-09-03\",\"start\":\"07:00\",\"end\":\"15:30\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":19,\"employeeId\":6,\"date\":\"2026-09-08\",\"start\":\"07:00\",\"end\":\"15:30\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":20,\"employeeId\":6,\"date\":\"2026-09-09\",\"start\":\"07:00\",\"end\":\"15:30\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":21,\"employeeId\":6,\"date\":\"2026-09-10\",\"start\":\"07:00\",\"end\":\"15:30\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":22,\"employeeId\":6,\"date\":\"2026-09-15\",\"start\":\"07:00\",\"end\":\"15:30\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":23,\"employeeId\":6,\"date\":\"2026-09-16\",\"start\":\"07:00\",\"end\":\"15:30\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":24,\"employeeId\":6,\"date\":\"2026-09-17\",\"start\":\"07:00\",\"end\":\"15:30\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":25,\"employeeId\":6,\"date\":\"2026-09-04\",\"start\":\"07:00\",\"end\":\"14:00\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":26,\"employeeId\":6,\"date\":\"2026-09-11\",\"start\":\"07:00\",\"end\":\"14:00\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":27,\"employeeId\":6,\"date\":\"2026-09-18\",\"start\":\"07:00\",\"end\":\"14:00\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":28,\"employeeId\":6,\"date\":\"2026-09-12\",\"start\":\"09:00\",\"end\":\"14:00\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":29,\"employeeId\":5,\"date\":\"2026-09-01\",\"start\":\"07:30\",\"end\":\"16:00\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":30,\"employeeId\":5,\"date\":\"2026-09-02\",\"start\":\"07:30\",\"end\":\"16:00\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":31,\"employeeId\":5,\"date\":\"2026-09-08\",\"start\":\"07:30\",\"end\":\"16:00\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":32,\"employeeId\":5,\"date\":\"2026-09-09\",\"start\":\"07:30\",\"end\":\"16:00\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":33,\"employeeId\":4,\"date\":\"2026-09-01\",\"start\":\"08:15\",\"end\":\"16:45\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":34,\"employeeId\":4,\"date\":\"2026-09-02\",\"start\":\"08:15\",\"end\":\"16:45\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":35,\"employeeId\":4,\"date\":\"2026-09-08\",\"start\":\"08:15\",\"end\":\"16:45\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":36,\"employeeId\":4,\"date\":\"2026-09-09\",\"start\":\"08:15\",\"end\":\"16:45\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":37,\"employeeId\":4,\"date\":\"2026-09-15\",\"start\":\"08:15\",\"end\":\"16:45\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":38,\"employeeId\":4,\"date\":\"2026-09-16\",\"start\":\"08:15\",\"end\":\"16:45\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":39,\"employeeId\":8,\"date\":\"2026-09-04\",\"start\":\"07:30\",\"end\":\"16:00\",\"role\":\"Warehouse Associate\",\"station\":\"Floor\"},{\"id\":40,\"employeeId\":8,\"date\":\"2026-09-10\",\"start\":\"07:30\",\"end\":\"16:00\",\"role\":\"Warehouse Associate\",\"station\":\"Floor\"},{\"id\":41,\"employeeId\":8,\"date\":\"2026-09-11\",\"start\":\"07:30\",\"end\":\"16:00\",\"role\":\"Warehouse Associate\",\"station\":\"Floor\"},{\"id\":42,\"employeeId\":8,\"date\":\"2026-09-17\",\"start\":\"07:30\",\"end\":\"16:00\",\"role\":\"Warehouse Associate\",\"station\":\"Floor\"},{\"id\":43,\"employeeId\":8,\"date\":\"2026-09-18\",\"start\":\"07:30\",\"end\":\"16:00\",\"role\":\"Warehouse Associate\",\"station\":\"Floor\"},{\"id\":44,\"employeeId\":4,\"date\":\"2026-09-04\",\"start\":\"09:45\",\"end\":\"16:45\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":45,\"employeeId\":4,\"date\":\"2026-09-11\",\"start\":\"09:45\",\"end\":\"16:45\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":46,\"employeeId\":1,\"date\":\"2026-09-18\",\"start\":\"09:45\",\"end\":\"16:45\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":47,\"employeeId\":4,\"date\":\"2026-09-05\",\"start\":\"09:00\",\"end\":\"14:00\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":48,\"employeeId\":8,\"date\":\"2026-09-05\",\"start\":\"09:00\",\"end\":\"14:00\",\"role\":\"Warehouse Associate\",\"station\":\"Floor\"},{\"id\":49,\"employeeId\":8,\"date\":\"2026-09-12\",\"start\":\"09:00\",\"end\":\"14:00\",\"role\":\"Warehouse Associate\",\"station\":\"Floor\"},{\"id\":50,\"employeeId\":8,\"date\":\"2026-09-19\",\"start\":\"09:00\",\"end\":\"14:00\",\"role\":\"Warehouse Associate\",\"station\":\"Floor\"},{\"id\":51,\"employeeId\":6,\"date\":\"2026-09-14\",\"start\":\"07:00\",\"end\":\"15:30\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":52,\"employeeId\":5,\"date\":\"2026-09-03\",\"start\":\"08:15\",\"end\":\"16:45\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":53,\"employeeId\":5,\"date\":\"2026-09-10\",\"start\":\"08:15\",\"end\":\"16:45\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":54,\"employeeId\":4,\"date\":\"2026-09-07\",\"start\":\"09:00\",\"end\":\"13:00\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":55,\"employeeId\":1,\"date\":\"2026-09-07\",\"start\":\"09:00\",\"end\":\"13:00\",\"role\":\"\",\"station\":\"Floor\"},{\"id\":56,\"employeeId\":1,\"date\":\"2026-09-19\",\"start\":\"09:00\",\"end\":\"14:00\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":57,\"employeeId\":8,\"date\":\"2026-09-23\",\"start\":\"08:00\",\"end\":\"18:00\",\"role\":\"Warehouse Associate\",\"station\":\"Floor\"},{\"id\":58,\"employeeId\":3,\"date\":\"2026-09-19\",\"start\":\"18:40\",\"end\":\"19:00\",\"role\":\"IT\",\"station\":\"Floor\"},{\"id\":59,\"employeeId\":7,\"date\":\"2026-09-15\",\"start\":\"15:00\",\"end\":\"16:00\",\"role\":\"Warehouse Associate\",\"station\":\"Floor\",\"notes\":\"\"},{\"id\":60,\"employeeId\":7,\"date\":\"2026-09-16\",\"start\":\"05:00\",\"end\":\"06:00\",\"role\":\"Warehouse Associate\",\"station\":\"Floor\",\"notes\":\"\"},{\"id\":61,\"employeeId\":8,\"date\":\"2026-09-16\",\"start\":\"05:00\",\"end\":\"07:00\",\"role\":\"Warehouse Associate\",\"station\":\"Floor\",\"notes\":\"\"},{\"id\":62,\"employeeId\":3,\"date\":\"2026-09-16\",\"start\":\"06:00\",\"end\":\"07:00\",\"role\":\"IT\",\"station\":\"Floor\",\"notes\":\"\"},{\"id\":63,\"employeeId\":3,\"date\":\"2026-09-15\",\"start\":\"15:00\",\"end\":\"17:00\",\"role\":\"IT\",\"station\":\"Floor\",\"notes\":\"\"}],\"clockEvents\":[{\"id\":17,\"employeeId\":3,\"type\":\"out\",\"at\":\"2026-09-20T01:46:18.802Z\",\"explanation\":\"i forgo\"},{\"id\":16,\"employeeId\":3,\"type\":\"in\",\"at\":\"2026-09-20T01:37:05.598Z\",\"explanation\":\"oops\"},{\"id\":15,\"employeeId\":8,\"type\":\"in\",\"at\":\"2026-09-16T20:43:16.732Z\",\"explanation\":\"testing\"},{\"id\":14,\"employeeId\":7,\"type\":\"out\",\"at\":\"2026-08-18T21:04:07.375Z\",\"explanation\":\"ghjgj\"},{\"id\":13,\"employeeId\":7,\"type\":\"in\",\"at\":\"2026-08-18T19:44:50.100Z\",\"explanation\":\"its ok\"},{\"id\":12,\"employeeId\":3,\"type\":\"out\",\"at\":\"2026-08-18T19:33:27.461Z\",\"explanation\":\"ok\"},{\"id\":11,\"employeeId\":3,\"type\":\"in\",\"at\":\"2026-08-18T19:33:22.441Z\",\"explanation\":\"\"},{\"id\":10,\"employeeId\":3,\"type\":\"out\",\"at\":\"2026-08-18T19:32:27.327Z\",\"explanation\":\"i didnt know\"},{\"id\":9,\"employeeId\":3,\"type\":\"break_end\",\"durationSeconds\":5,\"at\":\"2026-08-18T19:32:05.347Z\",\"explanation\":\"\"},{\"id\":8,\"employeeId\":3,\"type\":\"break\",\"durationSeconds\":5,\"at\":\"2026-08-18T19:31:57.318Z\"},{\"id\":7,\"employeeId\":3,\"type\":\"in\",\"at\":\"2026-08-18T19:31:43.127Z\",\"explanation\":\"oops my time is off\"},{\"id\":6,\"employeeId\":3,\"type\":\"out\",\"at\":\"2026-08-08T22:05:07.022Z\"},{\"id\":5,\"employeeId\":8,\"type\":\"out\",\"at\":\"2026-08-08T22:04:53.340Z\"},{\"id\":4,\"employeeId\":8,\"type\":\"in\",\"at\":\"2026-08-08T22:04:52.860Z\"},{\"id\":3,\"employeeId\":8,\"type\":\"out\",\"at\":\"2026-08-08T22:04:49.776Z\"},{\"id\":2,\"employeeId\":8,\"type\":\"in\",\"at\":\"2026-08-08T22:04:32.505Z\"},{\"id\":1,\"employeeId\":3,\"type\":\"in\",\"at\":\"2026-08-08T22:04:23.635Z\"}],\"hoursAdjustments\":[{\"id\":1,\"employeeId\":5,\"date\":\"2026-08-18\",\"hours\":70},{\"id\":2,\"employeeId\":5,\"date\":\"2026-08-18\",\"hours\":70},{\"id\":3,\"employeeId\":5,\"date\":\"2026-08-18\",\"hours\":70},{\"id\":4,\"employeeId\":5,\"date\":\"2026-08-18\",\"hours\":70},{\"id\":5,\"employeeId\":5,\"date\":\"2026-08-18\",\"hours\":70},{\"id\":6,\"employeeId\":5,\"date\":\"2026-08-18\",\"hours\":70},{\"id\":7,\"employeeId\":5,\"date\":\"2026-08-18\",\"hours\":70},{\"id\":8,\"employeeId\":5,\"date\":\"2026-08-18\",\"hours\":-420},{\"id\":9,\"employeeId\":5,\"date\":\"2026-08-18\",\"hours\":20},{\"id\":10,\"employeeId\":5,\"date\":\"2026-08-18\",\"hours\":-10},{\"id\":11,\"employeeId\":7,\"date\":\"2026-08-18\",\"hours\":-0.02841944444444444},{\"id\":12,\"employeeId\":3,\"date\":\"2026-08-18\",\"hours\":5.005224722222223},{\"id\":13,\"employeeId\":3,\"date\":\"2026-08-18\",\"hours\":85},{\"id\":14,\"employeeId\":3,\"date\":\"2026-08-18\",\"hours\":630},{\"id\":15,\"employeeId\":3,\"date\":\"2026-08-18\",\"hours\":-720.0166666666667},{\"id\":16,\"employeeId\":5,\"date\":\"2026-08-18\",\"hours\":-80},{\"id\":17,\"employeeId\":7,\"date\":\"2026-08-18\",\"hours\":-1.2930458333333332},{\"id\":18,\"employeeId\":8,\"date\":\"2026-09-16\",\"hours\":90.00272527777777},{\"id\":19,\"employeeId\":8,\"date\":\"2026-09-16\",\"hours\":410.00250083333333},{\"id\":20,\"employeeId\":8,\"date\":\"2026-09-16\",\"hours\":500.0012977777778},{\"id\":21,\"employeeId\":4,\"date\":\"2026-09-17\",\"hours\":1000},{\"id\":22,\"employeeId\":4,\"date\":\"2026-09-17\",\"hours\":29}],\"ptoRequests\":[{\"id\":5,\"employeeId\":8,\"compensation\":\"paid\",\"startDate\":\"2026-09-17\",\"endDate\":\"2026-09-17\",\"reason\":\"vacation\",\"explanation\":\"i dont feel like working cuh\",\"status\":\"approved\",\"requestedAt\":\"2026-09-16T21:32:14.576Z\",\"decidedAt\":\"2026-09-16T22:06:08.503Z\",\"decidedByEmployeeId\":1},{\"id\":4,\"employeeId\":3,\"startDate\":\"2026-08-18\",\"endDate\":\"2026-08-20\",\"startTime\":\"09:00\",\"endTime\":\"15:00\",\"reason\":\"sick_emergency\",\"explanation\":\"fgdfgfdg\",\"status\":\"denied\",\"requestedAt\":\"2026-08-18T20:57:42.709Z\",\"compensation\":\"paid\",\"decidedAt\":\"2026-09-16T21:26:42.308Z\",\"decidedByEmployeeId\":1},{\"id\":3,\"employeeId\":3,\"startDate\":\"2026-08-18\",\"endDate\":\"2026-08-20\",\"reason\":\"sick_emergency\",\"explanation\":\"fdgfdg\",\"status\":\"cancelled\",\"requestedAt\":\"2026-08-18T20:53:15.579Z\",\"compensation\":\"paid\"},{\"id\":2,\"employeeId\":3,\"startDate\":\"2026-08-18\",\"endDate\":\"2026-08-18\",\"startTime\":\"09:00\",\"endTime\":\"12:00\",\"reason\":\"sick_emergency\",\"explanation\":\";fdgdf\",\"status\":\"cancelled\",\"requestedAt\":\"2026-08-18T20:51:00.426Z\",\"compensation\":\"paid\"},{\"id\":1,\"employeeId\":7,\"startDate\":\"2026-08-20\",\"endDate\":\"2026-08-22\",\"reason\":\"sick_emergency\",\"explanation\":\"yuh\",\"status\":\"denied\",\"requestedAt\":\"2026-08-18T20:33:20.479Z\",\"compensation\":\"paid\",\"decidedAt\":\"2026-09-16T21:29:59.762Z\",\"decidedByEmployeeId\":1},{\"id\":6,\"employeeId\":3,\"compensation\":\"unpaid\",\"startDate\":\"2026-09-24\",\"endDate\":\"2026-09-24\",\"reason\":\"sick_emergency\",\"explanation\":\"\",\"status\":\"denied\",\"requestedAt\":\"2026-09-20T01:49:29.992Z\",\"decidedAt\":\"2026-09-20T02:26:37.906Z\",\"decidedByEmployeeId\":1},{\"id\":7,\"employeeId\":3,\"compensation\":\"unpaid\",\"startDate\":\"2026-09-19\",\"endDate\":\"2026-09-19\",\"reason\":\"sick_emergency\",\"explanation\":\"\",\"status\":\"cancelled\",\"requestedAt\":\"2026-09-20T01:57:56.581Z\"},{\"id\":8,\"employeeId\":1,\"compensation\":\"unpaid\",\"startDate\":\"2026-09-19\",\"endDate\":\"2026-09-19\",\"reason\":\"sick_emergency\",\"explanation\":\"\",\"status\":\"approved\",\"requestedAt\":\"2026-09-20T02:04:55.620Z\",\"decidedAt\":\"2026-09-20T02:04:55.620Z\",\"decidedByEmployeeId\":1},{\"id\":9,\"employeeId\":8,\"compensation\":\"unpaid\",\"startDate\":\"2026-09-19\",\"endDate\":\"2026-09-19\",\"reason\":\"vacation\",\"explanation\":\"\",\"status\":\"denied\",\"requestedAt\":\"2026-09-20T02:05:59.329Z\",\"decidedAt\":\"2026-09-20T02:36:00.003Z\",\"decidedByEmployeeId\":1},{\"id\":10,\"employeeId\":8,\"compensation\":\"unpaid\",\"startDate\":\"2026-09-19\",\"endDate\":\"2026-09-19\",\"reason\":\"vacation\",\"explanation\":\"\",\"status\":\"approved\",\"requestedAt\":\"2026-09-20T02:29:48.054Z\",\"decidedAt\":\"2026-09-20T02:30:05.086Z\",\"decidedByEmployeeId\":1},{\"id\":11,\"employeeId\":3,\"compensation\":\"unpaid\",\"startDate\":\"2026-09-19\",\"endDate\":\"2026-09-19\",\"reason\":\"vacation\",\"explanation\":\"pl;z\",\"status\":\"pending\",\"requestedAt\":\"2026-09-20T02:36:15.972Z\"},{\"id\":12,\"employeeId\":8,\"compensation\":\"unpaid\",\"startDate\":\"2026-09-19\",\"endDate\":\"2026-09-19\",\"reason\":\"vacation\",\"explanation\":\"\",\"status\":\"pending\",\"requestedAt\":\"2026-09-20T03:03:18.940Z\"}],\"conversations\":[{\"id\":2,\"participantIds\":[1,8],\"messages\":[{\"id\":1,\"senderEmployeeId\":1,\"body\":\"Hi Maxim, I have a question about your time off request.\",\"sentAt\":\"2026-09-16T21:38:21.120Z\",\"readByEmployeeIds\":[1,8]},{\"id\":2,\"senderEmployeeId\":8,\"body\":\"yea?\",\"sentAt\":\"2026-09-16T21:38:32.295Z\",\"readByEmployeeIds\":[8,1]},{\"id\":3,\"senderEmployeeId\":1,\"body\":\"ok\",\"sentAt\":\"2026-09-16T21:42:08.739Z\",\"readByEmployeeIds\":[1,8]},{\"id\":4,\"senderEmployeeId\":1,\"body\":\"sounds good\",\"sentAt\":\"2026-09-20T02:22:49.037Z\",\"readByEmployeeIds\":[1,8]},{\"id\":5,\"senderEmployeeId\":1,\"body\":\"ok bro\",\"sentAt\":\"2026-09-20T02:22:50.289Z\",\"readByEmployeeIds\":[1,8]},{\"id\":6,\"senderEmployeeId\":1,\"body\":\"Hi Maxim, I have a question about your time off request. hjh j jhj hjjjjjjh\",\"sentAt\":\"2026-09-20T03:05:44.415Z\",\"readByEmployeeIds\":[1,8]},{\"id\":7,\"senderEmployeeId\":1,\"body\":\"jjh\",\"sentAt\":\"2026-09-20T03:05:45.740Z\",\"readByEmployeeIds\":[1,8]},{\"id\":8,\"senderEmployeeId\":1,\"body\":\"bro again>\",\"sentAt\":\"2026-09-20T03:07:23.850Z\",\"readByEmployeeIds\":[1,8]},{\"id\":9,\"senderEmployeeId\":1,\"body\":\"fdsf\",\"sentAt\":\"2026-09-20T03:11:59.085Z\",\"readByEmployeeIds\":[1,8]},{\"id\":10,\"senderEmployeeId\":8,\"body\":\"my bad cuh\",\"sentAt\":\"2026-09-20T03:14:58.613Z\",\"readByEmployeeIds\":[8,1]},{\"id\":11,\"senderEmployeeId\":8,\"body\":\"ia fes\\nfasdf sda\",\"sentAt\":\"2026-09-20T03:15:35.328Z\",\"readByEmployeeIds\":[8,1]},{\"id\":12,\"senderEmployeeId\":8,\"body\":\"asdfasdf\",\"sentAt\":\"2026-09-20T03:15:36.521Z\",\"readByEmployeeIds\":[8,1]},{\"id\":13,\"senderEmployeeId\":8,\"body\":\"brtu\",\"sentAt\":\"2026-09-20T03:17:49.344Z\",\"readByEmployeeIds\":[8,1]},{\"id\":14,\"senderEmployeeId\":1,\"body\":\"Hi Maxim, I have a question about your time off request.\",\"sentAt\":\"2026-09-20T03:21:05.085Z\",\"readByEmployeeIds\":[1,8]},{\"id\":15,\"senderEmployeeId\":1,\"body\":\"sdafasdfasdfsda\",\"sentAt\":\"2026-09-20T03:21:06.875Z\",\"readByEmployeeIds\":[1,8]},{\"id\":16,\"senderEmployeeId\":1,\"body\":\"sadfasdfa\",\"sentAt\":\"2026-09-20T03:21:07.434Z\",\"readByEmployeeIds\":[1,8]},{\"id\":17,\"senderEmployeeId\":1,\"body\":\"Hi Maxim, I have a question about your time off request.\",\"sentAt\":\"2026-09-20T03:21:08.925Z\",\"readByEmployeeIds\":[1,8]},{\"id\":18,\"senderEmployeeId\":8,\"body\":\"whwt???\",\"sentAt\":\"2026-09-20T03:21:17.897Z\",\"readByEmployeeIds\":[8,1]}],\"creatorEmployeeId\":1,\"pinnedByEmployeeIds\":[],\"mutedByEmployeeIds\":[]},{\"id\":3,\"participantIds\":[1,4,5,8],\"messages\":[{\"id\":1,\"senderEmployeeId\":1,\"body\":\"yo guys lockin\",\"sentAt\":\"2026-09-16T21:48:30.122Z\",\"readByEmployeeIds\":[1,8]}],\"name\":\"Team\",\"creatorEmployeeId\":1},{\"id\":4,\"creatorEmployeeId\":1,\"participantIds\":[1,3],\"messages\":[{\"id\":1,\"senderEmployeeId\":1,\"body\":\"Hi Vitali, I have a question about your time off request. Could you do it for next week instead?\",\"sentAt\":\"2026-09-20T03:04:33.996Z\",\"readByEmployeeIds\":[1,3]},{\"id\":2,\"senderEmployeeId\":1,\"body\":\"Hi Vitali, I have a question about your time off request.\",\"sentAt\":\"2026-09-20T03:05:08.668Z\",\"readByEmployeeIds\":[1,3]},{\"id\":3,\"senderEmployeeId\":1,\"body\":\"Hi Vitali, I have a question about your time off request. fdf f\",\"sentAt\":\"2026-09-20T03:05:12.296Z\",\"readByEmployeeIds\":[1,3]},{\"id\":4,\"senderEmployeeId\":1,\"body\":\"Hi Vitali, I have a question about your time off request. fdsaf dsf\",\"sentAt\":\"2026-09-20T03:05:24.362Z\",\"readByEmployeeIds\":[1,3]},{\"id\":5,\"senderEmployeeId\":1,\"body\":\"hj\",\"sentAt\":\"2026-09-20T03:05:30.737Z\",\"readByEmployeeIds\":[1,3]},{\"id\":6,\"senderEmployeeId\":1,\"body\":\"hjhj\",\"sentAt\":\"2026-09-20T03:05:32.637Z\",\"readByEmployeeIds\":[1,3]},{\"id\":7,\"senderEmployeeId\":1,\"body\":\"Hi Vitali, I have a question about your time off request.\",\"sentAt\":\"2026-09-20T03:05:35.309Z\",\"readByEmployeeIds\":[1,3]},{\"id\":8,\"senderEmployeeId\":1,\"body\":\"dsafadsf\",\"sentAt\":\"2026-09-20T03:16:14.821Z\",\"readByEmployeeIds\":[1,3]},{\"id\":9,\"senderEmployeeId\":3,\"body\":\"fdgdsfg\",\"sentAt\":\"2026-09-20T03:17:54.798Z\",\"readByEmployeeIds\":[3,1]},{\"id\":10,\"senderEmployeeId\":3,\"body\":\"fdggd\",\"sentAt\":\"2026-09-20T03:17:56.220Z\",\"readByEmployeeIds\":[3,1]},{\"id\":11,\"senderEmployeeId\":3,\"body\":\"dfgdf\",\"sentAt\":\"2026-09-20T03:17:56.530Z\",\"readByEmployeeIds\":[3,1]},{\"id\":12,\"senderEmployeeId\":3,\"body\":\"dfg\",\"sentAt\":\"2026-09-20T03:17:56.866Z\",\"readByEmployeeIds\":[3,1]},{\"id\":13,\"senderEmployeeId\":1,\"body\":\"Hi Vitali, I have a question about your time off request.\",\"sentAt\":\"2026-09-20T03:26:07.225Z\",\"readByEmployeeIds\":[1]}]},{\"id\":5,\"creatorEmployeeId\":3,\"participantIds\":[3,8],\"messages\":[{\"id\":1,\"senderEmployeeId\":3,\"body\":\"bruh c on\",\"sentAt\":\"2026-09-20T03:13:15.649Z\",\"readByEmployeeIds\":[3,8]},{\"id\":2,\"senderEmployeeId\":3,\"body\":\"dsfdsf\",\"sentAt\":\"2026-09-20T03:13:16.979Z\",\"readByEmployeeIds\":[3,8]}]}],\"departments\":[{\"id\":2,\"name\":\"Department not set\",\"roles\":[\"IT\",\"Sales Associate\",\"Warehouse Associate\",\"IT DEV\",\"breh\"],\"managerIds\":[1]}],\"ptoPolicies\":[{\"id\":2,\"name\":\"dsaf\",\"method\":\"rate\",\"fixedHours\":0,\"earnedHours\":1,\"workedHours\":30,\"employeeIds\":[3,5,6,7,8],\"startingBalances\":{\"3\":{\"startDate\":\"2026-09-16\",\"balance\":0},\"5\":{\"startDate\":\"2026-09-16\",\"balance\":0},\"6\":{\"startDate\":\"2026-09-16\",\"balance\":0},\"7\":{\"startDate\":\"2026-09-16\",\"balance\":0},\"8\":{\"startDate\":\"2026-09-16\",\"balance\":0}}},{\"id\":3,\"name\":\"car\",\"method\":\"rate\",\"fixedHours\":0,\"earnedHours\":1,\"workedHours\":20,\"employeeIds\":[4],\"startingBalances\":{\"4\":{\"startDate\":\"2026-09-17\",\"balance\":0}}}],\"pendingScheduleUpdateEmployeeIds\":[],\"scheduleUpdates\":[{\"id\":\"1789863081069-8\",\"employeeId\":8,\"title\":\"Schedule updated\",\"detail\":\"Your published schedule has been updated.\",\"at\":\"2026-09-20T00:11:21.068Z\"},{\"id\":\"1789868217560-3\",\"employeeId\":3,\"title\":\"Schedule updated\",\"detail\":\"Your published schedule has been updated.\",\"at\":\"2026-09-20T01:36:57.560Z\"},{\"id\":\"1789869906122-3\",\"employeeId\":3,\"title\":\"Schedule updated\",\"detail\":\"Your published schedule has been updated.\",\"at\":\"2026-09-20T02:05:06.121Z\"},{\"id\":\"1789872861949-7\",\"employeeId\":7,\"title\":\"Schedule updated\",\"detail\":\"Your published schedule has been updated.\",\"at\":\"2026-09-20T02:54:21.948Z\"},{\"id\":\"1789872875294-7\",\"employeeId\":7,\"title\":\"Schedule updated\",\"detail\":\"Your published schedule has been updated.\",\"at\":\"2026-09-20T02:54:35.294Z\"},{\"id\":\"1789873580180-8\",\"employeeId\":8,\"title\":\"Schedule updated\",\"detail\":\"Your published schedule has been updated.\",\"at\":\"2026-09-20T03:06:20.180Z\"},{\"id\":\"1789873815963-1\",\"employeeId\":1,\"title\":\"New schedule published\",\"detail\":\"A new schedule was published for the team.\",\"at\":\"2026-09-20T03:10:15.963Z\"},{\"id\":\"1789873815963-3\",\"employeeId\":3,\"title\":\"New schedule published\",\"detail\":\"A new schedule was published for the team.\",\"at\":\"2026-09-20T03:10:15.963Z\"},{\"id\":\"1789873815963-4\",\"employeeId\":4,\"title\":\"New schedule published\",\"detail\":\"A new schedule was published for the team.\",\"at\":\"2026-09-20T03:10:15.963Z\"},{\"id\":\"1789873815963-5\",\"employeeId\":5,\"title\":\"New schedule published\",\"detail\":\"A new schedule was published for the team.\",\"at\":\"2026-09-20T03:10:15.963Z\"},{\"id\":\"1789873815963-6\",\"employeeId\":6,\"title\":\"New schedule published\",\"detail\":\"A new schedule was published for the team.\",\"at\":\"2026-09-20T03:10:15.963Z\"},{\"id\":\"1789873815963-7\",\"employeeId\":7,\"title\":\"New schedule published\",\"detail\":\"A new schedule was published for the team.\",\"at\":\"2026-09-20T03:10:15.963Z\"},{\"id\":\"1789873815963-8\",\"employeeId\":8,\"title\":\"New schedule published\",\"detail\":\"A new schedule was published for the team.\",\"at\":\"2026-09-20T03:10:15.963Z\"},{\"id\":\"1789874023587-1\",\"employeeId\":1,\"title\":\"New schedule published\",\"detail\":\"Maxim Vakulchik published a new schedule for the team.\",\"at\":\"2026-09-20T03:13:43.587Z\"},{\"id\":\"1789874023587-3\",\"employeeId\":3,\"title\":\"New schedule published\",\"detail\":\"Maxim Vakulchik published a new schedule for the team.\",\"at\":\"2026-09-20T03:13:43.587Z\"},{\"id\":\"1789874023587-4\",\"employeeId\":4,\"title\":\"New schedule published\",\"detail\":\"Maxim Vakulchik published a new schedule for the team.\",\"at\":\"2026-09-20T03:13:43.587Z\"},{\"id\":\"1789874023587-5\",\"employeeId\":5,\"title\":\"New schedule published\",\"detail\":\"Maxim Vakulchik published a new schedule for the team.\",\"at\":\"2026-09-20T03:13:43.587Z\"},{\"id\":\"1789874023587-6\",\"employeeId\":6,\"title\":\"New schedule published\",\"detail\":\"Maxim Vakulchik published a new schedule for the team.\",\"at\":\"2026-09-20T03:13:43.587Z\"},{\"id\":\"1789874023587-7\",\"employeeId\":7,\"title\":\"New schedule published\",\"detail\":\"Maxim Vakulchik published a new schedule for the team.\",\"at\":\"2026-09-20T03:13:43.587Z\"},{\"id\":\"1789874023587-8\",\"employeeId\":8,\"title\":\"New schedule published\",\"detail\":\"Maxim Vakulchik published a new schedule for the team.\",\"at\":\"2026-09-20T03:13:43.587Z\"}],\"scheduleHasBeenPublished\":true,\"scheduleDraftsByManager\":{}}",
+    "dombase-staff-state-backup-v1": "{\"employees\":[{\"id\":1,\"name\":\"Serge Vakulchik\",\"role\":\"\",\"pin\":\"0000\",\"active\":true,\"email\":\"moldingmart@gmail.com\",\"phone\":\"(916) 236-7819\",\"accessLevel\":\"Admin\",\"location\":\"MOLDING MART\",\"wage\":\"\"},{\"id\":3,\"name\":\"Vitali R\",\"role\":\"IT\",\"pin\":\"5555\",\"active\":true,\"accessLevel\":\"\",\"email\":\"\",\"phone\":\"\",\"location\":\"\",\"wage\":\"\"},{\"id\":4,\"name\":\"Carlos P\",\"role\":\"Sales Associate\",\"pin\":\"6767\",\"active\":true,\"email\":\"\",\"phone\":\"\",\"accessLevel\":\"\",\"location\":\"\",\"wage\":\"\"},{\"id\":5,\"name\":\"Alex P\",\"role\":\"Sales Associate\",\"pin\":\"9999\",\"active\":true,\"email\":\"\",\"phone\":\"\",\"accessLevel\":\"\",\"location\":\"\",\"wage\":\"\"},{\"id\":6,\"name\":\"Geoff H\",\"role\":\"Sales Associate\",\"pin\":\"4545\",\"active\":true,\"email\":\"\",\"phone\":\"\",\"accessLevel\":\"\",\"location\":\"\",\"wage\":\"\"},{\"id\":7,\"name\":\"Ashot\",\"role\":\"Warehouse Associate\",\"pin\":\"9876\",\"active\":true,\"email\":\"\",\"phone\":\"\",\"accessLevel\":\"\",\"location\":\"\",\"wage\":\"\"},{\"id\":8,\"name\":\"Maxim Vakulchik\",\"role\":\"Warehouse Associate\",\"pin\":\"8755\",\"active\":true,\"email\":\"\",\"phone\":\"\",\"accessLevel\":\"Manager\",\"location\":\"\",\"wage\":\"\"}],\"shifts\":[{\"id\":1,\"employeeId\":3,\"date\":\"2026-08-08\",\"start\":\"08:00\",\"end\":\"14:45\",\"role\":\"IT\",\"station\":\"Floor\"},{\"id\":2,\"employeeId\":8,\"date\":\"2026-08-08\",\"start\":\"07:30\",\"end\":\"16:00\",\"role\":\"Warehouse Associate\",\"station\":\"Floor\"},{\"id\":3,\"employeeId\":3,\"date\":\"2026-08-18\",\"start\":\"07:00\",\"end\":\"16:00\",\"role\":\"IT\",\"station\":\"Floor\"},{\"id\":4,\"employeeId\":3,\"date\":\"2026-08-19\",\"start\":\"07:00\",\"end\":\"16:00\",\"role\":\"IT\",\"station\":\"Floor\"},{\"id\":5,\"employeeId\":3,\"date\":\"2026-08-20\",\"start\":\"12:33\",\"end\":\"16:00\",\"role\":\"IT\",\"station\":\"Floor\"},{\"id\":6,\"employeeId\":3,\"date\":\"2026-08-21\",\"start\":\"12:33\",\"end\":\"16:00\",\"role\":\"IT\",\"station\":\"Floor\"},{\"id\":7,\"employeeId\":8,\"date\":\"2026-08-20\",\"start\":\"08:00\",\"end\":\"16:00\",\"role\":\"Warehouse Associate\",\"station\":\"Floor\"},{\"id\":8,\"employeeId\":8,\"date\":\"2026-08-24\",\"start\":\"07:30\",\"end\":\"16:00\",\"role\":\"Warehouse Associate\",\"station\":\"Floor\"},{\"id\":9,\"employeeId\":5,\"date\":\"2026-08-18\",\"start\":\"06:00\",\"end\":\"16:00\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":10,\"employeeId\":5,\"date\":\"2026-09-15\",\"start\":\"07:30\",\"end\":\"16:00\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":11,\"employeeId\":5,\"date\":\"2026-09-14\",\"start\":\"07:30\",\"end\":\"16:00\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":12,\"employeeId\":5,\"date\":\"2026-09-16\",\"start\":\"07:30\",\"end\":\"16:00\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":13,\"employeeId\":5,\"date\":\"2026-09-17\",\"start\":\"07:30\",\"end\":\"16:00\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":14,\"employeeId\":5,\"date\":\"2026-09-19\",\"start\":\"09:00\",\"end\":\"14:00\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":15,\"employeeId\":4,\"date\":\"2026-09-14\",\"start\":\"10:00\",\"end\":\"16:45\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":16,\"employeeId\":6,\"date\":\"2026-09-01\",\"start\":\"07:00\",\"end\":\"15:30\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":17,\"employeeId\":6,\"date\":\"2026-09-02\",\"start\":\"07:00\",\"end\":\"15:30\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":18,\"employeeId\":6,\"date\":\"2026-09-03\",\"start\":\"07:00\",\"end\":\"15:30\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":19,\"employeeId\":6,\"date\":\"2026-09-08\",\"start\":\"07:00\",\"end\":\"15:30\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":20,\"employeeId\":6,\"date\":\"2026-09-09\",\"start\":\"07:00\",\"end\":\"15:30\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":21,\"employeeId\":6,\"date\":\"2026-09-10\",\"start\":\"07:00\",\"end\":\"15:30\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":22,\"employeeId\":6,\"date\":\"2026-09-15\",\"start\":\"07:00\",\"end\":\"15:30\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":23,\"employeeId\":6,\"date\":\"2026-09-16\",\"start\":\"07:00\",\"end\":\"15:30\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":24,\"employeeId\":6,\"date\":\"2026-09-17\",\"start\":\"07:00\",\"end\":\"15:30\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":25,\"employeeId\":6,\"date\":\"2026-09-04\",\"start\":\"07:00\",\"end\":\"14:00\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":26,\"employeeId\":6,\"date\":\"2026-09-11\",\"start\":\"07:00\",\"end\":\"14:00\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":27,\"employeeId\":6,\"date\":\"2026-09-18\",\"start\":\"07:00\",\"end\":\"14:00\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":28,\"employeeId\":6,\"date\":\"2026-09-12\",\"start\":\"09:00\",\"end\":\"14:00\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":29,\"employeeId\":5,\"date\":\"2026-09-01\",\"start\":\"07:30\",\"end\":\"16:00\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":30,\"employeeId\":5,\"date\":\"2026-09-02\",\"start\":\"07:30\",\"end\":\"16:00\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":31,\"employeeId\":5,\"date\":\"2026-09-08\",\"start\":\"07:30\",\"end\":\"16:00\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":32,\"employeeId\":5,\"date\":\"2026-09-09\",\"start\":\"07:30\",\"end\":\"16:00\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":33,\"employeeId\":4,\"date\":\"2026-09-01\",\"start\":\"08:15\",\"end\":\"16:45\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":34,\"employeeId\":4,\"date\":\"2026-09-02\",\"start\":\"08:15\",\"end\":\"16:45\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":35,\"employeeId\":4,\"date\":\"2026-09-08\",\"start\":\"08:15\",\"end\":\"16:45\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":36,\"employeeId\":4,\"date\":\"2026-09-09\",\"start\":\"08:15\",\"end\":\"16:45\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":37,\"employeeId\":4,\"date\":\"2026-09-15\",\"start\":\"08:15\",\"end\":\"16:45\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":38,\"employeeId\":4,\"date\":\"2026-09-16\",\"start\":\"08:15\",\"end\":\"16:45\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":39,\"employeeId\":8,\"date\":\"2026-09-04\",\"start\":\"07:30\",\"end\":\"16:00\",\"role\":\"Warehouse Associate\",\"station\":\"Floor\"},{\"id\":40,\"employeeId\":8,\"date\":\"2026-09-10\",\"start\":\"07:30\",\"end\":\"16:00\",\"role\":\"Warehouse Associate\",\"station\":\"Floor\"},{\"id\":41,\"employeeId\":8,\"date\":\"2026-09-11\",\"start\":\"07:30\",\"end\":\"16:00\",\"role\":\"Warehouse Associate\",\"station\":\"Floor\"},{\"id\":42,\"employeeId\":8,\"date\":\"2026-09-17\",\"start\":\"07:30\",\"end\":\"16:00\",\"role\":\"Warehouse Associate\",\"station\":\"Floor\"},{\"id\":43,\"employeeId\":8,\"date\":\"2026-09-18\",\"start\":\"07:30\",\"end\":\"16:00\",\"role\":\"Warehouse Associate\",\"station\":\"Floor\"},{\"id\":44,\"employeeId\":4,\"date\":\"2026-09-04\",\"start\":\"09:45\",\"end\":\"16:45\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":45,\"employeeId\":4,\"date\":\"2026-09-11\",\"start\":\"09:45\",\"end\":\"16:45\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":46,\"employeeId\":1,\"date\":\"2026-09-18\",\"start\":\"09:45\",\"end\":\"16:45\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":47,\"employeeId\":4,\"date\":\"2026-09-05\",\"start\":\"09:00\",\"end\":\"14:00\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":48,\"employeeId\":8,\"date\":\"2026-09-05\",\"start\":\"09:00\",\"end\":\"14:00\",\"role\":\"Warehouse Associate\",\"station\":\"Floor\"},{\"id\":49,\"employeeId\":8,\"date\":\"2026-09-12\",\"start\":\"09:00\",\"end\":\"14:00\",\"role\":\"Warehouse Associate\",\"station\":\"Floor\"},{\"id\":50,\"employeeId\":8,\"date\":\"2026-09-19\",\"start\":\"09:00\",\"end\":\"14:00\",\"role\":\"Warehouse Associate\",\"station\":\"Floor\"},{\"id\":51,\"employeeId\":6,\"date\":\"2026-09-14\",\"start\":\"07:00\",\"end\":\"15:30\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":52,\"employeeId\":5,\"date\":\"2026-09-03\",\"start\":\"08:15\",\"end\":\"16:45\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":53,\"employeeId\":5,\"date\":\"2026-09-10\",\"start\":\"08:15\",\"end\":\"16:45\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":54,\"employeeId\":4,\"date\":\"2026-09-07\",\"start\":\"09:00\",\"end\":\"13:00\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":55,\"employeeId\":1,\"date\":\"2026-09-07\",\"start\":\"09:00\",\"end\":\"13:00\",\"role\":\"\",\"station\":\"Floor\"},{\"id\":56,\"employeeId\":1,\"date\":\"2026-09-19\",\"start\":\"09:00\",\"end\":\"14:00\",\"role\":\"Sales Associate\",\"station\":\"Floor\"},{\"id\":57,\"employeeId\":8,\"date\":\"2026-09-23\",\"start\":\"08:00\",\"end\":\"18:00\",\"role\":\"Warehouse Associate\",\"station\":\"Floor\"},{\"id\":58,\"employeeId\":3,\"date\":\"2026-09-19\",\"start\":\"18:40\",\"end\":\"19:00\",\"role\":\"IT\",\"station\":\"Floor\"},{\"id\":59,\"employeeId\":7,\"date\":\"2026-09-15\",\"start\":\"15:00\",\"end\":\"16:00\",\"role\":\"Warehouse Associate\",\"station\":\"Floor\",\"notes\":\"\"},{\"id\":60,\"employeeId\":7,\"date\":\"2026-09-16\",\"start\":\"05:00\",\"end\":\"06:00\",\"role\":\"Warehouse Associate\",\"station\":\"Floor\",\"notes\":\"\"},{\"id\":61,\"employeeId\":8,\"date\":\"2026-09-16\",\"start\":\"05:00\",\"end\":\"07:00\",\"role\":\"Warehouse Associate\",\"station\":\"Floor\",\"notes\":\"\"},{\"id\":62,\"employeeId\":3,\"date\":\"2026-09-16\",\"start\":\"06:00\",\"end\":\"07:00\",\"role\":\"IT\",\"station\":\"Floor\",\"notes\":\"\"},{\"id\":63,\"employeeId\":3,\"date\":\"2026-09-15\",\"start\":\"15:00\",\"end\":\"17:00\",\"role\":\"IT\",\"station\":\"Floor\",\"notes\":\"\"}],\"clockEvents\":[{\"id\":17,\"employeeId\":3,\"type\":\"out\",\"at\":\"2026-09-20T01:46:18.802Z\",\"explanation\":\"i forgo\"},{\"id\":16,\"employeeId\":3,\"type\":\"in\",\"at\":\"2026-09-20T01:37:05.598Z\",\"explanation\":\"oops\"},{\"id\":15,\"employeeId\":8,\"type\":\"in\",\"at\":\"2026-09-16T20:43:16.732Z\",\"explanation\":\"testing\"},{\"id\":14,\"employeeId\":7,\"type\":\"out\",\"at\":\"2026-08-18T21:04:07.375Z\",\"explanation\":\"ghjgj\"},{\"id\":13,\"employeeId\":7,\"type\":\"in\",\"at\":\"2026-08-18T19:44:50.100Z\",\"explanation\":\"its ok\"},{\"id\":12,\"employeeId\":3,\"type\":\"out\",\"at\":\"2026-08-18T19:33:27.461Z\",\"explanation\":\"ok\"},{\"id\":11,\"employeeId\":3,\"type\":\"in\",\"at\":\"2026-08-18T19:33:22.441Z\",\"explanation\":\"\"},{\"id\":10,\"employeeId\":3,\"type\":\"out\",\"at\":\"2026-08-18T19:32:27.327Z\",\"explanation\":\"i didnt know\"},{\"id\":9,\"employeeId\":3,\"type\":\"break_end\",\"durationSeconds\":5,\"at\":\"2026-08-18T19:32:05.347Z\",\"explanation\":\"\"},{\"id\":8,\"employeeId\":3,\"type\":\"break\",\"durationSeconds\":5,\"at\":\"2026-08-18T19:31:57.318Z\"},{\"id\":7,\"employeeId\":3,\"type\":\"in\",\"at\":\"2026-08-18T19:31:43.127Z\",\"explanation\":\"oops my time is off\"},{\"id\":6,\"employeeId\":3,\"type\":\"out\",\"at\":\"2026-08-08T22:05:07.022Z\"},{\"id\":5,\"employeeId\":8,\"type\":\"out\",\"at\":\"2026-08-08T22:04:53.340Z\"},{\"id\":4,\"employeeId\":8,\"type\":\"in\",\"at\":\"2026-08-08T22:04:52.860Z\"},{\"id\":3,\"employeeId\":8,\"type\":\"out\",\"at\":\"2026-08-08T22:04:49.776Z\"},{\"id\":2,\"employeeId\":8,\"type\":\"in\",\"at\":\"2026-08-08T22:04:32.505Z\"},{\"id\":1,\"employeeId\":3,\"type\":\"in\",\"at\":\"2026-08-08T22:04:23.635Z\"}],\"hoursAdjustments\":[{\"id\":1,\"employeeId\":5,\"date\":\"2026-08-18\",\"hours\":70},{\"id\":2,\"employeeId\":5,\"date\":\"2026-08-18\",\"hours\":70},{\"id\":3,\"employeeId\":5,\"date\":\"2026-08-18\",\"hours\":70},{\"id\":4,\"employeeId\":5,\"date\":\"2026-08-18\",\"hours\":70},{\"id\":5,\"employeeId\":5,\"date\":\"2026-08-18\",\"hours\":70},{\"id\":6,\"employeeId\":5,\"date\":\"2026-08-18\",\"hours\":70},{\"id\":7,\"employeeId\":5,\"date\":\"2026-08-18\",\"hours\":70},{\"id\":8,\"employeeId\":5,\"date\":\"2026-08-18\",\"hours\":-420},{\"id\":9,\"employeeId\":5,\"date\":\"2026-08-18\",\"hours\":20},{\"id\":10,\"employeeId\":5,\"date\":\"2026-08-18\",\"hours\":-10},{\"id\":11,\"employeeId\":7,\"date\":\"2026-08-18\",\"hours\":-0.02841944444444444},{\"id\":12,\"employeeId\":3,\"date\":\"2026-08-18\",\"hours\":5.005224722222223},{\"id\":13,\"employeeId\":3,\"date\":\"2026-08-18\",\"hours\":85},{\"id\":14,\"employeeId\":3,\"date\":\"2026-08-18\",\"hours\":630},{\"id\":15,\"employeeId\":3,\"date\":\"2026-08-18\",\"hours\":-720.0166666666667},{\"id\":16,\"employeeId\":5,\"date\":\"2026-08-18\",\"hours\":-80},{\"id\":17,\"employeeId\":7,\"date\":\"2026-08-18\",\"hours\":-1.2930458333333332},{\"id\":18,\"employeeId\":8,\"date\":\"2026-09-16\",\"hours\":90.00272527777777},{\"id\":19,\"employeeId\":8,\"date\":\"2026-09-16\",\"hours\":410.00250083333333},{\"id\":20,\"employeeId\":8,\"date\":\"2026-09-16\",\"hours\":500.0012977777778},{\"id\":21,\"employeeId\":4,\"date\":\"2026-09-17\",\"hours\":1000},{\"id\":22,\"employeeId\":4,\"date\":\"2026-09-17\",\"hours\":29}],\"ptoRequests\":[{\"id\":5,\"employeeId\":8,\"compensation\":\"paid\",\"startDate\":\"2026-09-17\",\"endDate\":\"2026-09-17\",\"reason\":\"vacation\",\"explanation\":\"i dont feel like working cuh\",\"status\":\"approved\",\"requestedAt\":\"2026-09-16T21:32:14.576Z\",\"decidedAt\":\"2026-09-16T22:06:08.503Z\",\"decidedByEmployeeId\":1},{\"id\":4,\"employeeId\":3,\"startDate\":\"2026-08-18\",\"endDate\":\"2026-08-20\",\"startTime\":\"09:00\",\"endTime\":\"15:00\",\"reason\":\"sick_emergency\",\"explanation\":\"fgdfgfdg\",\"status\":\"denied\",\"requestedAt\":\"2026-08-18T20:57:42.709Z\",\"compensation\":\"paid\",\"decidedAt\":\"2026-09-16T21:26:42.308Z\",\"decidedByEmployeeId\":1},{\"id\":3,\"employeeId\":3,\"startDate\":\"2026-08-18\",\"endDate\":\"2026-08-20\",\"reason\":\"sick_emergency\",\"explanation\":\"fdgfdg\",\"status\":\"cancelled\",\"requestedAt\":\"2026-08-18T20:53:15.579Z\",\"compensation\":\"paid\"},{\"id\":2,\"employeeId\":3,\"startDate\":\"2026-08-18\",\"endDate\":\"2026-08-18\",\"startTime\":\"09:00\",\"endTime\":\"12:00\",\"reason\":\"sick_emergency\",\"explanation\":\";fdgdf\",\"status\":\"cancelled\",\"requestedAt\":\"2026-08-18T20:51:00.426Z\",\"compensation\":\"paid\"},{\"id\":1,\"employeeId\":7,\"startDate\":\"2026-08-20\",\"endDate\":\"2026-08-22\",\"reason\":\"sick_emergency\",\"explanation\":\"yuh\",\"status\":\"denied\",\"requestedAt\":\"2026-08-18T20:33:20.479Z\",\"compensation\":\"paid\",\"decidedAt\":\"2026-09-16T21:29:59.762Z\",\"decidedByEmployeeId\":1},{\"id\":6,\"employeeId\":3,\"compensation\":\"unpaid\",\"startDate\":\"2026-09-24\",\"endDate\":\"2026-09-24\",\"reason\":\"sick_emergency\",\"explanation\":\"\",\"status\":\"denied\",\"requestedAt\":\"2026-09-20T01:49:29.992Z\",\"decidedAt\":\"2026-09-20T02:26:37.906Z\",\"decidedByEmployeeId\":1},{\"id\":7,\"employeeId\":3,\"compensation\":\"unpaid\",\"startDate\":\"2026-09-19\",\"endDate\":\"2026-09-19\",\"reason\":\"sick_emergency\",\"explanation\":\"\",\"status\":\"cancelled\",\"requestedAt\":\"2026-09-20T01:57:56.581Z\"},{\"id\":8,\"employeeId\":1,\"compensation\":\"unpaid\",\"startDate\":\"2026-09-19\",\"endDate\":\"2026-09-19\",\"reason\":\"sick_emergency\",\"explanation\":\"\",\"status\":\"approved\",\"requestedAt\":\"2026-09-20T02:04:55.620Z\",\"decidedAt\":\"2026-09-20T02:04:55.620Z\",\"decidedByEmployeeId\":1},{\"id\":9,\"employeeId\":8,\"compensation\":\"unpaid\",\"startDate\":\"2026-09-19\",\"endDate\":\"2026-09-19\",\"reason\":\"vacation\",\"explanation\":\"\",\"status\":\"denied\",\"requestedAt\":\"2026-09-20T02:05:59.329Z\",\"decidedAt\":\"2026-09-20T02:36:00.003Z\",\"decidedByEmployeeId\":1},{\"id\":10,\"employeeId\":8,\"compensation\":\"unpaid\",\"startDate\":\"2026-09-19\",\"endDate\":\"2026-09-19\",\"reason\":\"vacation\",\"explanation\":\"\",\"status\":\"approved\",\"requestedAt\":\"2026-09-20T02:29:48.054Z\",\"decidedAt\":\"2026-09-20T02:30:05.086Z\",\"decidedByEmployeeId\":1},{\"id\":11,\"employeeId\":3,\"compensation\":\"unpaid\",\"startDate\":\"2026-09-19\",\"endDate\":\"2026-09-19\",\"reason\":\"vacation\",\"explanation\":\"pl;z\",\"status\":\"pending\",\"requestedAt\":\"2026-09-20T02:36:15.972Z\"},{\"id\":12,\"employeeId\":8,\"compensation\":\"unpaid\",\"startDate\":\"2026-09-19\",\"endDate\":\"2026-09-19\",\"reason\":\"vacation\",\"explanation\":\"\",\"status\":\"pending\",\"requestedAt\":\"2026-09-20T03:03:18.940Z\"}],\"conversations\":[{\"id\":2,\"participantIds\":[1,8],\"messages\":[{\"id\":1,\"senderEmployeeId\":1,\"body\":\"Hi Maxim, I have a question about your time off request.\",\"sentAt\":\"2026-09-16T21:38:21.120Z\",\"readByEmployeeIds\":[1,8]},{\"id\":2,\"senderEmployeeId\":8,\"body\":\"yea?\",\"sentAt\":\"2026-09-16T21:38:32.295Z\",\"readByEmployeeIds\":[8,1]},{\"id\":3,\"senderEmployeeId\":1,\"body\":\"ok\",\"sentAt\":\"2026-09-16T21:42:08.739Z\",\"readByEmployeeIds\":[1,8]},{\"id\":4,\"senderEmployeeId\":1,\"body\":\"sounds good\",\"sentAt\":\"2026-09-20T02:22:49.037Z\",\"readByEmployeeIds\":[1,8]},{\"id\":5,\"senderEmployeeId\":1,\"body\":\"ok bro\",\"sentAt\":\"2026-09-20T02:22:50.289Z\",\"readByEmployeeIds\":[1,8]},{\"id\":6,\"senderEmployeeId\":1,\"body\":\"Hi Maxim, I have a question about your time off request. hjh j jhj hjjjjjjh\",\"sentAt\":\"2026-09-20T03:05:44.415Z\",\"readByEmployeeIds\":[1,8]},{\"id\":7,\"senderEmployeeId\":1,\"body\":\"jjh\",\"sentAt\":\"2026-09-20T03:05:45.740Z\",\"readByEmployeeIds\":[1,8]},{\"id\":8,\"senderEmployeeId\":1,\"body\":\"bro again>\",\"sentAt\":\"2026-09-20T03:07:23.850Z\",\"readByEmployeeIds\":[1,8]},{\"id\":9,\"senderEmployeeId\":1,\"body\":\"fdsf\",\"sentAt\":\"2026-09-20T03:11:59.085Z\",\"readByEmployeeIds\":[1,8]},{\"id\":10,\"senderEmployeeId\":8,\"body\":\"my bad cuh\",\"sentAt\":\"2026-09-20T03:14:58.613Z\",\"readByEmployeeIds\":[8,1]},{\"id\":11,\"senderEmployeeId\":8,\"body\":\"ia fes\\nfasdf sda\",\"sentAt\":\"2026-09-20T03:15:35.328Z\",\"readByEmployeeIds\":[8,1]},{\"id\":12,\"senderEmployeeId\":8,\"body\":\"asdfasdf\",\"sentAt\":\"2026-09-20T03:15:36.521Z\",\"readByEmployeeIds\":[8,1]},{\"id\":13,\"senderEmployeeId\":8,\"body\":\"brtu\",\"sentAt\":\"2026-09-20T03:17:49.344Z\",\"readByEmployeeIds\":[8,1]},{\"id\":14,\"senderEmployeeId\":1,\"body\":\"Hi Maxim, I have a question about your time off request.\",\"sentAt\":\"2026-09-20T03:21:05.085Z\",\"readByEmployeeIds\":[1,8]},{\"id\":15,\"senderEmployeeId\":1,\"body\":\"sdafasdfasdfsda\",\"sentAt\":\"2026-09-20T03:21:06.875Z\",\"readByEmployeeIds\":[1,8]},{\"id\":16,\"senderEmployeeId\":1,\"body\":\"sadfasdfa\",\"sentAt\":\"2026-09-20T03:21:07.434Z\",\"readByEmployeeIds\":[1,8]},{\"id\":17,\"senderEmployeeId\":1,\"body\":\"Hi Maxim, I have a question about your time off request.\",\"sentAt\":\"2026-09-20T03:21:08.925Z\",\"readByEmployeeIds\":[1,8]},{\"id\":18,\"senderEmployeeId\":8,\"body\":\"whwt???\",\"sentAt\":\"2026-09-20T03:21:17.897Z\",\"readByEmployeeIds\":[8,1]}],\"creatorEmployeeId\":1,\"pinnedByEmployeeIds\":[],\"mutedByEmployeeIds\":[]},{\"id\":3,\"participantIds\":[1,4,5,8],\"messages\":[{\"id\":1,\"senderEmployeeId\":1,\"body\":\"yo guys lockin\",\"sentAt\":\"2026-09-16T21:48:30.122Z\",\"readByEmployeeIds\":[1,8]}],\"name\":\"Team\",\"creatorEmployeeId\":1},{\"id\":4,\"creatorEmployeeId\":1,\"participantIds\":[1,3],\"messages\":[{\"id\":1,\"senderEmployeeId\":1,\"body\":\"Hi Vitali, I have a question about your time off request. Could you do it for next week instead?\",\"sentAt\":\"2026-09-20T03:04:33.996Z\",\"readByEmployeeIds\":[1,3]},{\"id\":2,\"senderEmployeeId\":1,\"body\":\"Hi Vitali, I have a question about your time off request.\",\"sentAt\":\"2026-09-20T03:05:08.668Z\",\"readByEmployeeIds\":[1,3]},{\"id\":3,\"senderEmployeeId\":1,\"body\":\"Hi Vitali, I have a question about your time off request. fdf f\",\"sentAt\":\"2026-09-20T03:05:12.296Z\",\"readByEmployeeIds\":[1,3]},{\"id\":4,\"senderEmployeeId\":1,\"body\":\"Hi Vitali, I have a question about your time off request. fdsaf dsf\",\"sentAt\":\"2026-09-20T03:05:24.362Z\",\"readByEmployeeIds\":[1,3]},{\"id\":5,\"senderEmployeeId\":1,\"body\":\"hj\",\"sentAt\":\"2026-09-20T03:05:30.737Z\",\"readByEmployeeIds\":[1,3]},{\"id\":6,\"senderEmployeeId\":1,\"body\":\"hjhj\",\"sentAt\":\"2026-09-20T03:05:32.637Z\",\"readByEmployeeIds\":[1,3]},{\"id\":7,\"senderEmployeeId\":1,\"body\":\"Hi Vitali, I have a question about your time off request.\",\"sentAt\":\"2026-09-20T03:05:35.309Z\",\"readByEmployeeIds\":[1,3]},{\"id\":8,\"senderEmployeeId\":1,\"body\":\"dsafadsf\",\"sentAt\":\"2026-09-20T03:16:14.821Z\",\"readByEmployeeIds\":[1,3]},{\"id\":9,\"senderEmployeeId\":3,\"body\":\"fdgdsfg\",\"sentAt\":\"2026-09-20T03:17:54.798Z\",\"readByEmployeeIds\":[3,1]},{\"id\":10,\"senderEmployeeId\":3,\"body\":\"fdggd\",\"sentAt\":\"2026-09-20T03:17:56.220Z\",\"readByEmployeeIds\":[3,1]},{\"id\":11,\"senderEmployeeId\":3,\"body\":\"dfgdf\",\"sentAt\":\"2026-09-20T03:17:56.530Z\",\"readByEmployeeIds\":[3,1]},{\"id\":12,\"senderEmployeeId\":3,\"body\":\"dfg\",\"sentAt\":\"2026-09-20T03:17:56.866Z\",\"readByEmployeeIds\":[3,1]}]},{\"id\":5,\"creatorEmployeeId\":3,\"participantIds\":[3,8],\"messages\":[{\"id\":1,\"senderEmployeeId\":3,\"body\":\"bruh c on\",\"sentAt\":\"2026-09-20T03:13:15.649Z\",\"readByEmployeeIds\":[3,8]},{\"id\":2,\"senderEmployeeId\":3,\"body\":\"dsfdsf\",\"sentAt\":\"2026-09-20T03:13:16.979Z\",\"readByEmployeeIds\":[3,8]}]}],\"departments\":[{\"id\":2,\"name\":\"Department not set\",\"roles\":[\"IT\",\"Sales Associate\",\"Warehouse Associate\",\"IT DEV\",\"breh\"],\"managerIds\":[1]}],\"ptoPolicies\":[{\"id\":2,\"name\":\"dsaf\",\"method\":\"rate\",\"fixedHours\":0,\"earnedHours\":1,\"workedHours\":30,\"employeeIds\":[3,5,6,7,8],\"startingBalances\":{\"3\":{\"startDate\":\"2026-09-16\",\"balance\":0},\"5\":{\"startDate\":\"2026-09-16\",\"balance\":0},\"6\":{\"startDate\":\"2026-09-16\",\"balance\":0},\"7\":{\"startDate\":\"2026-09-16\",\"balance\":0},\"8\":{\"startDate\":\"2026-09-16\",\"balance\":0}}},{\"id\":3,\"name\":\"car\",\"method\":\"rate\",\"fixedHours\":0,\"earnedHours\":1,\"workedHours\":20,\"employeeIds\":[4],\"startingBalances\":{\"4\":{\"startDate\":\"2026-09-17\",\"balance\":0}}}],\"pendingScheduleUpdateEmployeeIds\":[],\"scheduleUpdates\":[{\"id\":\"1789863081069-8\",\"employeeId\":8,\"title\":\"Schedule updated\",\"detail\":\"Your published schedule has been updated.\",\"at\":\"2026-09-20T00:11:21.068Z\"},{\"id\":\"1789868217560-3\",\"employeeId\":3,\"title\":\"Schedule updated\",\"detail\":\"Your published schedule has been updated.\",\"at\":\"2026-09-20T01:36:57.560Z\"},{\"id\":\"1789869906122-3\",\"employeeId\":3,\"title\":\"Schedule updated\",\"detail\":\"Your published schedule has been updated.\",\"at\":\"2026-09-20T02:05:06.121Z\"},{\"id\":\"1789872861949-7\",\"employeeId\":7,\"title\":\"Schedule updated\",\"detail\":\"Your published schedule has been updated.\",\"at\":\"2026-09-20T02:54:21.948Z\"},{\"id\":\"1789872875294-7\",\"employeeId\":7,\"title\":\"Schedule updated\",\"detail\":\"Your published schedule has been updated.\",\"at\":\"2026-09-20T02:54:35.294Z\"},{\"id\":\"1789873580180-8\",\"employeeId\":8,\"title\":\"Schedule updated\",\"detail\":\"Your published schedule has been updated.\",\"at\":\"2026-09-20T03:06:20.180Z\"},{\"id\":\"1789873815963-1\",\"employeeId\":1,\"title\":\"New schedule published\",\"detail\":\"A new schedule was published for the team.\",\"at\":\"2026-09-20T03:10:15.963Z\"},{\"id\":\"1789873815963-3\",\"employeeId\":3,\"title\":\"New schedule published\",\"detail\":\"A new schedule was published for the team.\",\"at\":\"2026-09-20T03:10:15.963Z\"},{\"id\":\"1789873815963-4\",\"employeeId\":4,\"title\":\"New schedule published\",\"detail\":\"A new schedule was published for the team.\",\"at\":\"2026-09-20T03:10:15.963Z\"},{\"id\":\"1789873815963-5\",\"employeeId\":5,\"title\":\"New schedule published\",\"detail\":\"A new schedule was published for the team.\",\"at\":\"2026-09-20T03:10:15.963Z\"},{\"id\":\"1789873815963-6\",\"employeeId\":6,\"title\":\"New schedule published\",\"detail\":\"A new schedule was published for the team.\",\"at\":\"2026-09-20T03:10:15.963Z\"},{\"id\":\"1789873815963-7\",\"employeeId\":7,\"title\":\"New schedule published\",\"detail\":\"A new schedule was published for the team.\",\"at\":\"2026-09-20T03:10:15.963Z\"},{\"id\":\"1789873815963-8\",\"employeeId\":8,\"title\":\"New schedule published\",\"detail\":\"A new schedule was published for the team.\",\"at\":\"2026-09-20T03:10:15.963Z\"},{\"id\":\"1789874023587-1\",\"employeeId\":1,\"title\":\"New schedule published\",\"detail\":\"Maxim Vakulchik published a new schedule for the team.\",\"at\":\"2026-09-20T03:13:43.587Z\"},{\"id\":\"1789874023587-3\",\"employeeId\":3,\"title\":\"New schedule published\",\"detail\":\"Maxim Vakulchik published a new schedule for the team.\",\"at\":\"2026-09-20T03:13:43.587Z\"},{\"id\":\"1789874023587-4\",\"employeeId\":4,\"title\":\"New schedule published\",\"detail\":\"Maxim Vakulchik published a new schedule for the team.\",\"at\":\"2026-09-20T03:13:43.587Z\"},{\"id\":\"1789874023587-5\",\"employeeId\":5,\"title\":\"New schedule published\",\"detail\":\"Maxim Vakulchik published a new schedule for the team.\",\"at\":\"2026-09-20T03:13:43.587Z\"},{\"id\":\"1789874023587-6\",\"employeeId\":6,\"title\":\"New schedule published\",\"detail\":\"Maxim Vakulchik published a new schedule for the team.\",\"at\":\"2026-09-20T03:13:43.587Z\"},{\"id\":\"1789874023587-7\",\"employeeId\":7,\"title\":\"New schedule published\",\"detail\":\"Maxim Vakulchik published a new schedule for the team.\",\"at\":\"2026-09-20T03:13:43.587Z\"},{\"id\":\"1789874023587-8\",\"employeeId\":8,\"title\":\"New schedule published\",\"detail\":\"Maxim Vakulchik published a new schedule for the team.\",\"at\":\"2026-09-20T03:13:43.587Z\"}],\"scheduleHasBeenPublished\":true,\"scheduleDraftsByManager\":{}}",
+    "dombase-unpublished-shifts-v1": "[]",
+    "dombase-basic-info-v1": "{\"locationName\":\"MOLDING MART\",\"locationPhone\":\"\",\"address1\":\"\",\"address2\":\"\",\"city\":\"Sacramento\",\"stateProvince\":\"CA\",\"postalCode\":\"95624\",\"country\":\"United States\",\"timeZone\":\"Pacific Time (US & Canada)\",\"businessType\":\"\",\"businessCategory\":\"\",\"website\":\"\",\"companyName\":\"MOLDING MART\",\"accountOwner\":\"Serge Vakulchik\",\"companyPhone\":\"\"}",
+    "dombase-opened-notifications-v1": "{\"1\":[\"alert-missed-clock-in-14\",\"alert-missed-clock-in-50\",\"alert-missed-clock-in-56\",\"alert-missed-clock-in-46\",\"alert-missed-clock-in-43\",\"alert-missed-clock-in-27\",\"alert-missed-clock-in-13\",\"alert-missed-clock-in-42\",\"alert-missed-clock-in-24\",\"alert-missed-break-open-15\",\"request-5\",\"alert-unscheduled-15\",\"alert-missed-clock-in-38\",\"alert-missed-clock-in-12\",\"alert-missed-clock-in-23\",\"alert-missed-clock-in-37\",\"alert-missed-clock-in-10\",\"alert-missed-clock-in-22\",\"alert-missed-clock-in-15\",\"alert-missed-clock-in-11\",\"alert-missed-clock-in-51\",\"request-4\",\"request-3\",\"request-2\",\"request-1\",\"alert-no-show-14\",\"alert-no-show-50\",\"alert-no-show-56\",\"alert-no-show-46\",\"alert-no-show-43\",\"alert-no-show-27\",\"alert-no-show-13\",\"alert-no-show-42\",\"alert-no-show-24\",\"alert-no-show-38\",\"alert-no-show-12\",\"alert-no-show-23\",\"alert-no-show-37\",\"alert-no-show-10\",\"alert-no-show-22\",\"alert-no-show-15\",\"alert-no-show-11\",\"alert-no-show-51\",\"alert-early-clock-in-16\",\"alert-early-clock-out-17\",\"request-6\",\"request-7\",\"request-9\",\"alert-no-show-62\",\"alert-no-show-61\",\"alert-no-show-60\",\"request-10\",\"request-11\",\"alert-no-show-1\",\"alert-no-show-59\",\"request-12\",\"alert-late-clock-in-15\",\"schedule-1789873815963-1\",\"message-2-12\",\"schedule-1789874023587-1\",\"alert-no-show-63\"],\"3\":[\"schedule-1789868217560-3\",\"schedule-1789869906122-3\",\"schedule-1789874023587-3\",\"schedule-1789873815963-3\"],\"8\":[\"alert-missed-clock-in-14\",\"alert-missed-clock-in-50\",\"alert-missed-clock-in-56\",\"alert-missed-clock-in-46\",\"alert-missed-clock-in-43\",\"alert-missed-clock-in-27\",\"alert-missed-clock-in-13\",\"alert-missed-clock-in-42\",\"alert-missed-clock-in-24\",\"alert-missed-break-open-15\",\"request-5\",\"alert-unscheduled-15\",\"alert-missed-clock-in-38\",\"alert-missed-clock-in-12\",\"alert-missed-clock-in-23\",\"alert-missed-clock-in-37\",\"alert-missed-clock-in-10\",\"alert-missed-clock-in-22\",\"alert-missed-clock-in-15\",\"alert-missed-clock-in-11\",\"alert-missed-clock-in-51\",\"request-4\",\"request-3\",\"request-2\",\"request-1\",\"message-2-5\",\"request-8\",\"request-7\",\"request-6\",\"alert-early-clock-out-17\",\"alert-early-clock-in-16\",\"alert-no-show-14\",\"alert-no-show-50\",\"alert-no-show-56\",\"alert-no-show-46\",\"alert-no-show-43\",\"alert-no-show-27\",\"alert-no-show-13\",\"alert-no-show-42\",\"alert-no-show-24\",\"alert-no-show-38\",\"alert-no-show-12\",\"alert-no-show-23\",\"alert-no-show-37\",\"alert-no-show-10\",\"alert-no-show-22\",\"alert-no-show-15\",\"alert-no-show-11\",\"alert-no-show-51\",\"request-11\",\"alert-no-show-59\",\"alert-no-show-60\",\"message-2-7\",\"message-2-8\",\"alert-late-clock-in-15\",\"schedule-1789873580180-8\",\"schedule-1789863081069-8\",\"schedule-1789873815963-8\",\"alert-no-show-62\",\"message-5-2\",\"message-2-9\",\"schedule-1789874023587-8\",\"alert-no-show-63\"]}",
+    "dombase-dismissed-notifications-v1": "{\"1\":[\"alert-missed-clock-in-14\",\"alert-missed-clock-in-50\",\"alert-missed-clock-in-56\",\"alert-missed-clock-in-46\",\"alert-missed-clock-in-43\",\"alert-missed-clock-in-27\",\"alert-missed-clock-in-13\",\"alert-missed-clock-in-42\",\"alert-missed-clock-in-24\",\"alert-missed-break-open-15\",\"request-5\",\"alert-unscheduled-15\",\"alert-missed-clock-in-38\",\"alert-missed-clock-in-12\",\"alert-missed-clock-in-23\",\"alert-missed-clock-in-37\",\"alert-missed-clock-in-10\",\"alert-missed-clock-in-22\",\"alert-missed-clock-in-15\",\"alert-missed-clock-in-11\",\"alert-missed-clock-in-51\",\"request-4\",\"request-3\",\"request-2\",\"request-1\",\"alert-early-clock-in-16\",\"alert-no-show-14\",\"alert-no-show-50\",\"alert-no-show-56\",\"alert-no-show-46\",\"alert-no-show-43\",\"alert-no-show-27\",\"alert-no-show-13\",\"alert-no-show-42\",\"alert-no-show-24\",\"alert-no-show-38\",\"alert-no-show-12\",\"alert-no-show-23\",\"alert-no-show-37\",\"alert-no-show-10\",\"alert-no-show-22\",\"alert-no-show-15\",\"alert-no-show-11\",\"alert-no-show-51\",\"request-10\",\"request-9\",\"request-7\",\"request-6\",\"alert-early-clock-out-17\",\"alert-no-show-1\"],\"3\":[\"schedule-1789874023587-3\",\"schedule-1789873815963-3\",\"schedule-1789869906122-3\",\"schedule-1789868217560-3\"],\"8\":[\"alert-missed-clock-in-14\",\"alert-missed-clock-in-50\",\"alert-missed-clock-in-56\",\"alert-missed-clock-in-46\",\"alert-missed-clock-in-43\",\"alert-missed-clock-in-27\",\"alert-missed-clock-in-13\",\"alert-missed-clock-in-42\",\"alert-missed-clock-in-24\",\"alert-missed-break-open-15\",\"request-5\",\"alert-unscheduled-15\",\"alert-missed-clock-in-38\",\"alert-missed-clock-in-12\",\"alert-missed-clock-in-23\",\"alert-missed-clock-in-37\",\"alert-missed-clock-in-10\",\"alert-missed-clock-in-22\",\"alert-missed-clock-in-15\",\"alert-missed-clock-in-11\",\"alert-missed-clock-in-51\",\"request-4\",\"request-3\",\"request-2\",\"request-1\",\"schedule-1789874023587-8\",\"message-5-2\",\"message-2-9\",\"schedule-1789873815963-8\",\"schedule-1789873580180-8\",\"request-11\",\"request-8\",\"request-7\",\"request-6\",\"alert-early-clock-out-17\",\"alert-early-clock-in-16\",\"schedule-1789863081069-8\",\"alert-no-show-14\",\"alert-no-show-50\",\"alert-no-show-56\",\"alert-no-show-46\",\"alert-no-show-43\",\"alert-no-show-27\",\"alert-no-show-13\",\"alert-no-show-42\",\"alert-no-show-24\",\"alert-late-clock-in-15\",\"alert-no-show-38\",\"alert-no-show-12\",\"alert-no-show-23\",\"alert-no-show-62\",\"alert-no-show-60\",\"alert-no-show-59\",\"alert-no-show-63\",\"alert-no-show-37\",\"alert-no-show-10\",\"alert-no-show-22\",\"alert-no-show-15\",\"alert-no-show-11\"]}"
+  },
+  "parsedData": {
+    "dombase-staff-state-v1": {
+      "employees": [
+        {
+          "id": 1,
+          "name": "Serge Vakulchik",
+          "role": "",
+          "pin": "0000",
+          "active": true,
+          "email": "moldingmart@gmail.com",
+          "phone": "(916) 236-7819",
+          "accessLevel": "Admin",
+          "location": "MOLDING MART",
+          "wage": ""
+        },
+        {
+          "id": 3,
+          "name": "Vitali R",
+          "role": "IT",
+          "pin": "5555",
+          "active": true,
+          "accessLevel": "",
+          "email": "",
+          "phone": "",
+          "location": "",
+          "wage": ""
+        },
+        {
+          "id": 4,
+          "name": "Carlos P",
+          "role": "Sales Associate",
+          "pin": "6767",
+          "active": true,
+          "email": "",
+          "phone": "",
+          "accessLevel": "",
+          "location": "",
+          "wage": ""
+        },
+        {
+          "id": 5,
+          "name": "Alex P",
+          "role": "Sales Associate",
+          "pin": "9999",
+          "active": true,
+          "email": "",
+          "phone": "",
+          "accessLevel": "",
+          "location": "",
+          "wage": ""
+        },
+        {
+          "id": 6,
+          "name": "Geoff H",
+          "role": "Sales Associate",
+          "pin": "4545",
+          "active": true,
+          "email": "",
+          "phone": "",
+          "accessLevel": "",
+          "location": "",
+          "wage": ""
+        },
+        {
+          "id": 7,
+          "name": "Ashot",
+          "role": "Warehouse Associate",
+          "pin": "9876",
+          "active": true,
+          "email": "",
+          "phone": "",
+          "accessLevel": "",
+          "location": "",
+          "wage": ""
+        },
+        {
+          "id": 8,
+          "name": "Maxim Vakulchik",
+          "role": "Warehouse Associate",
+          "pin": "8755",
+          "active": true,
+          "email": "",
+          "phone": "",
+          "accessLevel": "Manager",
+          "location": "",
+          "wage": ""
+        }
+      ],
+      "shifts": [
+        {
+          "id": 1,
+          "employeeId": 3,
+          "date": "2026-08-08",
+          "start": "08:00",
+          "end": "14:45",
+          "role": "IT",
+          "station": "Floor"
+        },
+        {
+          "id": 2,
+          "employeeId": 8,
+          "date": "2026-08-08",
+          "start": "07:30",
+          "end": "16:00",
+          "role": "Warehouse Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 3,
+          "employeeId": 3,
+          "date": "2026-08-18",
+          "start": "07:00",
+          "end": "16:00",
+          "role": "IT",
+          "station": "Floor"
+        },
+        {
+          "id": 4,
+          "employeeId": 3,
+          "date": "2026-08-19",
+          "start": "07:00",
+          "end": "16:00",
+          "role": "IT",
+          "station": "Floor"
+        },
+        {
+          "id": 5,
+          "employeeId": 3,
+          "date": "2026-08-20",
+          "start": "12:33",
+          "end": "16:00",
+          "role": "IT",
+          "station": "Floor"
+        },
+        {
+          "id": 6,
+          "employeeId": 3,
+          "date": "2026-08-21",
+          "start": "12:33",
+          "end": "16:00",
+          "role": "IT",
+          "station": "Floor"
+        },
+        {
+          "id": 7,
+          "employeeId": 8,
+          "date": "2026-08-20",
+          "start": "08:00",
+          "end": "16:00",
+          "role": "Warehouse Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 8,
+          "employeeId": 8,
+          "date": "2026-08-24",
+          "start": "07:30",
+          "end": "16:00",
+          "role": "Warehouse Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 9,
+          "employeeId": 5,
+          "date": "2026-08-18",
+          "start": "06:00",
+          "end": "16:00",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 10,
+          "employeeId": 5,
+          "date": "2026-09-15",
+          "start": "07:30",
+          "end": "16:00",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 11,
+          "employeeId": 5,
+          "date": "2026-09-14",
+          "start": "07:30",
+          "end": "16:00",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 12,
+          "employeeId": 5,
+          "date": "2026-09-16",
+          "start": "07:30",
+          "end": "16:00",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 13,
+          "employeeId": 5,
+          "date": "2026-09-17",
+          "start": "07:30",
+          "end": "16:00",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 14,
+          "employeeId": 5,
+          "date": "2026-09-19",
+          "start": "09:00",
+          "end": "14:00",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 15,
+          "employeeId": 4,
+          "date": "2026-09-14",
+          "start": "10:00",
+          "end": "16:45",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 16,
+          "employeeId": 6,
+          "date": "2026-09-01",
+          "start": "07:00",
+          "end": "15:30",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 17,
+          "employeeId": 6,
+          "date": "2026-09-02",
+          "start": "07:00",
+          "end": "15:30",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 18,
+          "employeeId": 6,
+          "date": "2026-09-03",
+          "start": "07:00",
+          "end": "15:30",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 19,
+          "employeeId": 6,
+          "date": "2026-09-08",
+          "start": "07:00",
+          "end": "15:30",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 20,
+          "employeeId": 6,
+          "date": "2026-09-09",
+          "start": "07:00",
+          "end": "15:30",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 21,
+          "employeeId": 6,
+          "date": "2026-09-10",
+          "start": "07:00",
+          "end": "15:30",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 22,
+          "employeeId": 6,
+          "date": "2026-09-15",
+          "start": "07:00",
+          "end": "15:30",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 23,
+          "employeeId": 6,
+          "date": "2026-09-16",
+          "start": "07:00",
+          "end": "15:30",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 24,
+          "employeeId": 6,
+          "date": "2026-09-17",
+          "start": "07:00",
+          "end": "15:30",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 25,
+          "employeeId": 6,
+          "date": "2026-09-04",
+          "start": "07:00",
+          "end": "14:00",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 26,
+          "employeeId": 6,
+          "date": "2026-09-11",
+          "start": "07:00",
+          "end": "14:00",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 27,
+          "employeeId": 6,
+          "date": "2026-09-18",
+          "start": "07:00",
+          "end": "14:00",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 28,
+          "employeeId": 6,
+          "date": "2026-09-12",
+          "start": "09:00",
+          "end": "14:00",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 29,
+          "employeeId": 5,
+          "date": "2026-09-01",
+          "start": "07:30",
+          "end": "16:00",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 30,
+          "employeeId": 5,
+          "date": "2026-09-02",
+          "start": "07:30",
+          "end": "16:00",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 31,
+          "employeeId": 5,
+          "date": "2026-09-08",
+          "start": "07:30",
+          "end": "16:00",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 32,
+          "employeeId": 5,
+          "date": "2026-09-09",
+          "start": "07:30",
+          "end": "16:00",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 33,
+          "employeeId": 4,
+          "date": "2026-09-01",
+          "start": "08:15",
+          "end": "16:45",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 34,
+          "employeeId": 4,
+          "date": "2026-09-02",
+          "start": "08:15",
+          "end": "16:45",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 35,
+          "employeeId": 4,
+          "date": "2026-09-08",
+          "start": "08:15",
+          "end": "16:45",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 36,
+          "employeeId": 4,
+          "date": "2026-09-09",
+          "start": "08:15",
+          "end": "16:45",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 37,
+          "employeeId": 4,
+          "date": "2026-09-15",
+          "start": "08:15",
+          "end": "16:45",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 38,
+          "employeeId": 4,
+          "date": "2026-09-16",
+          "start": "08:15",
+          "end": "16:45",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 39,
+          "employeeId": 8,
+          "date": "2026-09-04",
+          "start": "07:30",
+          "end": "16:00",
+          "role": "Warehouse Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 40,
+          "employeeId": 8,
+          "date": "2026-09-10",
+          "start": "07:30",
+          "end": "16:00",
+          "role": "Warehouse Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 41,
+          "employeeId": 8,
+          "date": "2026-09-11",
+          "start": "07:30",
+          "end": "16:00",
+          "role": "Warehouse Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 42,
+          "employeeId": 8,
+          "date": "2026-09-17",
+          "start": "07:30",
+          "end": "16:00",
+          "role": "Warehouse Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 43,
+          "employeeId": 8,
+          "date": "2026-09-18",
+          "start": "07:30",
+          "end": "16:00",
+          "role": "Warehouse Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 44,
+          "employeeId": 4,
+          "date": "2026-09-04",
+          "start": "09:45",
+          "end": "16:45",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 45,
+          "employeeId": 4,
+          "date": "2026-09-11",
+          "start": "09:45",
+          "end": "16:45",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 46,
+          "employeeId": 1,
+          "date": "2026-09-18",
+          "start": "09:45",
+          "end": "16:45",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 47,
+          "employeeId": 4,
+          "date": "2026-09-05",
+          "start": "09:00",
+          "end": "14:00",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 48,
+          "employeeId": 8,
+          "date": "2026-09-05",
+          "start": "09:00",
+          "end": "14:00",
+          "role": "Warehouse Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 49,
+          "employeeId": 8,
+          "date": "2026-09-12",
+          "start": "09:00",
+          "end": "14:00",
+          "role": "Warehouse Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 50,
+          "employeeId": 8,
+          "date": "2026-09-19",
+          "start": "09:00",
+          "end": "14:00",
+          "role": "Warehouse Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 51,
+          "employeeId": 6,
+          "date": "2026-09-14",
+          "start": "07:00",
+          "end": "15:30",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 52,
+          "employeeId": 5,
+          "date": "2026-09-03",
+          "start": "08:15",
+          "end": "16:45",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 53,
+          "employeeId": 5,
+          "date": "2026-09-10",
+          "start": "08:15",
+          "end": "16:45",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 54,
+          "employeeId": 4,
+          "date": "2026-09-07",
+          "start": "09:00",
+          "end": "13:00",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 55,
+          "employeeId": 1,
+          "date": "2026-09-07",
+          "start": "09:00",
+          "end": "13:00",
+          "role": "",
+          "station": "Floor"
+        },
+        {
+          "id": 56,
+          "employeeId": 1,
+          "date": "2026-09-19",
+          "start": "09:00",
+          "end": "14:00",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 57,
+          "employeeId": 8,
+          "date": "2026-09-23",
+          "start": "08:00",
+          "end": "18:00",
+          "role": "Warehouse Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 58,
+          "employeeId": 3,
+          "date": "2026-09-19",
+          "start": "18:40",
+          "end": "19:00",
+          "role": "IT",
+          "station": "Floor"
+        },
+        {
+          "id": 59,
+          "employeeId": 7,
+          "date": "2026-09-15",
+          "start": "15:00",
+          "end": "16:00",
+          "role": "Warehouse Associate",
+          "station": "Floor",
+          "notes": ""
+        },
+        {
+          "id": 60,
+          "employeeId": 7,
+          "date": "2026-09-16",
+          "start": "05:00",
+          "end": "06:00",
+          "role": "Warehouse Associate",
+          "station": "Floor",
+          "notes": ""
+        },
+        {
+          "id": 61,
+          "employeeId": 8,
+          "date": "2026-09-16",
+          "start": "05:00",
+          "end": "07:00",
+          "role": "Warehouse Associate",
+          "station": "Floor",
+          "notes": ""
+        },
+        {
+          "id": 62,
+          "employeeId": 3,
+          "date": "2026-09-16",
+          "start": "06:00",
+          "end": "07:00",
+          "role": "IT",
+          "station": "Floor",
+          "notes": ""
+        },
+        {
+          "id": 63,
+          "employeeId": 3,
+          "date": "2026-09-15",
+          "start": "15:00",
+          "end": "17:00",
+          "role": "IT",
+          "station": "Floor",
+          "notes": ""
+        }
+      ],
+      "clockEvents": [
+        {
+          "id": 17,
+          "employeeId": 3,
+          "type": "out",
+          "at": "2026-09-20T01:46:18.802Z",
+          "explanation": "i forgo"
+        },
+        {
+          "id": 16,
+          "employeeId": 3,
+          "type": "in",
+          "at": "2026-09-20T01:37:05.598Z",
+          "explanation": "oops"
+        },
+        {
+          "id": 15,
+          "employeeId": 8,
+          "type": "in",
+          "at": "2026-09-16T20:43:16.732Z",
+          "explanation": "testing"
+        },
+        {
+          "id": 14,
+          "employeeId": 7,
+          "type": "out",
+          "at": "2026-08-18T21:04:07.375Z",
+          "explanation": "ghjgj"
+        },
+        {
+          "id": 13,
+          "employeeId": 7,
+          "type": "in",
+          "at": "2026-08-18T19:44:50.100Z",
+          "explanation": "its ok"
+        },
+        {
+          "id": 12,
+          "employeeId": 3,
+          "type": "out",
+          "at": "2026-08-18T19:33:27.461Z",
+          "explanation": "ok"
+        },
+        {
+          "id": 11,
+          "employeeId": 3,
+          "type": "in",
+          "at": "2026-08-18T19:33:22.441Z",
+          "explanation": ""
+        },
+        {
+          "id": 10,
+          "employeeId": 3,
+          "type": "out",
+          "at": "2026-08-18T19:32:27.327Z",
+          "explanation": "i didnt know"
+        },
+        {
+          "id": 9,
+          "employeeId": 3,
+          "type": "break_end",
+          "durationSeconds": 5,
+          "at": "2026-08-18T19:32:05.347Z",
+          "explanation": ""
+        },
+        {
+          "id": 8,
+          "employeeId": 3,
+          "type": "break",
+          "durationSeconds": 5,
+          "at": "2026-08-18T19:31:57.318Z"
+        },
+        {
+          "id": 7,
+          "employeeId": 3,
+          "type": "in",
+          "at": "2026-08-18T19:31:43.127Z",
+          "explanation": "oops my time is off"
+        },
+        {
+          "id": 6,
+          "employeeId": 3,
+          "type": "out",
+          "at": "2026-08-08T22:05:07.022Z"
+        },
+        {
+          "id": 5,
+          "employeeId": 8,
+          "type": "out",
+          "at": "2026-08-08T22:04:53.340Z"
+        },
+        {
+          "id": 4,
+          "employeeId": 8,
+          "type": "in",
+          "at": "2026-08-08T22:04:52.860Z"
+        },
+        {
+          "id": 3,
+          "employeeId": 8,
+          "type": "out",
+          "at": "2026-08-08T22:04:49.776Z"
+        },
+        {
+          "id": 2,
+          "employeeId": 8,
+          "type": "in",
+          "at": "2026-08-08T22:04:32.505Z"
+        },
+        {
+          "id": 1,
+          "employeeId": 3,
+          "type": "in",
+          "at": "2026-08-08T22:04:23.635Z"
+        }
+      ],
+      "hoursAdjustments": [
+        {
+          "id": 1,
+          "employeeId": 5,
+          "date": "2026-08-18",
+          "hours": 70
+        },
+        {
+          "id": 2,
+          "employeeId": 5,
+          "date": "2026-08-18",
+          "hours": 70
+        },
+        {
+          "id": 3,
+          "employeeId": 5,
+          "date": "2026-08-18",
+          "hours": 70
+        },
+        {
+          "id": 4,
+          "employeeId": 5,
+          "date": "2026-08-18",
+          "hours": 70
+        },
+        {
+          "id": 5,
+          "employeeId": 5,
+          "date": "2026-08-18",
+          "hours": 70
+        },
+        {
+          "id": 6,
+          "employeeId": 5,
+          "date": "2026-08-18",
+          "hours": 70
+        },
+        {
+          "id": 7,
+          "employeeId": 5,
+          "date": "2026-08-18",
+          "hours": 70
+        },
+        {
+          "id": 8,
+          "employeeId": 5,
+          "date": "2026-08-18",
+          "hours": -420
+        },
+        {
+          "id": 9,
+          "employeeId": 5,
+          "date": "2026-08-18",
+          "hours": 20
+        },
+        {
+          "id": 10,
+          "employeeId": 5,
+          "date": "2026-08-18",
+          "hours": -10
+        },
+        {
+          "id": 11,
+          "employeeId": 7,
+          "date": "2026-08-18",
+          "hours": -0.02841944444444444
+        },
+        {
+          "id": 12,
+          "employeeId": 3,
+          "date": "2026-08-18",
+          "hours": 5.005224722222223
+        },
+        {
+          "id": 13,
+          "employeeId": 3,
+          "date": "2026-08-18",
+          "hours": 85
+        },
+        {
+          "id": 14,
+          "employeeId": 3,
+          "date": "2026-08-18",
+          "hours": 630
+        },
+        {
+          "id": 15,
+          "employeeId": 3,
+          "date": "2026-08-18",
+          "hours": -720.0166666666667
+        },
+        {
+          "id": 16,
+          "employeeId": 5,
+          "date": "2026-08-18",
+          "hours": -80
+        },
+        {
+          "id": 17,
+          "employeeId": 7,
+          "date": "2026-08-18",
+          "hours": -1.2930458333333332
+        },
+        {
+          "id": 18,
+          "employeeId": 8,
+          "date": "2026-09-16",
+          "hours": 90.00272527777777
+        },
+        {
+          "id": 19,
+          "employeeId": 8,
+          "date": "2026-09-16",
+          "hours": 410.00250083333333
+        },
+        {
+          "id": 20,
+          "employeeId": 8,
+          "date": "2026-09-16",
+          "hours": 500.0012977777778
+        },
+        {
+          "id": 21,
+          "employeeId": 4,
+          "date": "2026-09-17",
+          "hours": 1000
+        },
+        {
+          "id": 22,
+          "employeeId": 4,
+          "date": "2026-09-17",
+          "hours": 29
+        }
+      ],
+      "ptoRequests": [
+        {
+          "id": 5,
+          "employeeId": 8,
+          "compensation": "paid",
+          "startDate": "2026-09-17",
+          "endDate": "2026-09-17",
+          "reason": "vacation",
+          "explanation": "i dont feel like working cuh",
+          "status": "approved",
+          "requestedAt": "2026-09-16T21:32:14.576Z",
+          "decidedAt": "2026-09-16T22:06:08.503Z",
+          "decidedByEmployeeId": 1
+        },
+        {
+          "id": 4,
+          "employeeId": 3,
+          "startDate": "2026-08-18",
+          "endDate": "2026-08-20",
+          "startTime": "09:00",
+          "endTime": "15:00",
+          "reason": "sick_emergency",
+          "explanation": "fgdfgfdg",
+          "status": "denied",
+          "requestedAt": "2026-08-18T20:57:42.709Z",
+          "compensation": "paid",
+          "decidedAt": "2026-09-16T21:26:42.308Z",
+          "decidedByEmployeeId": 1
+        },
+        {
+          "id": 3,
+          "employeeId": 3,
+          "startDate": "2026-08-18",
+          "endDate": "2026-08-20",
+          "reason": "sick_emergency",
+          "explanation": "fdgfdg",
+          "status": "cancelled",
+          "requestedAt": "2026-08-18T20:53:15.579Z",
+          "compensation": "paid"
+        },
+        {
+          "id": 2,
+          "employeeId": 3,
+          "startDate": "2026-08-18",
+          "endDate": "2026-08-18",
+          "startTime": "09:00",
+          "endTime": "12:00",
+          "reason": "sick_emergency",
+          "explanation": ";fdgdf",
+          "status": "cancelled",
+          "requestedAt": "2026-08-18T20:51:00.426Z",
+          "compensation": "paid"
+        },
+        {
+          "id": 1,
+          "employeeId": 7,
+          "startDate": "2026-08-20",
+          "endDate": "2026-08-22",
+          "reason": "sick_emergency",
+          "explanation": "yuh",
+          "status": "denied",
+          "requestedAt": "2026-08-18T20:33:20.479Z",
+          "compensation": "paid",
+          "decidedAt": "2026-09-16T21:29:59.762Z",
+          "decidedByEmployeeId": 1
+        },
+        {
+          "id": 6,
+          "employeeId": 3,
+          "compensation": "unpaid",
+          "startDate": "2026-09-24",
+          "endDate": "2026-09-24",
+          "reason": "sick_emergency",
+          "explanation": "",
+          "status": "denied",
+          "requestedAt": "2026-09-20T01:49:29.992Z",
+          "decidedAt": "2026-09-20T02:26:37.906Z",
+          "decidedByEmployeeId": 1
+        },
+        {
+          "id": 7,
+          "employeeId": 3,
+          "compensation": "unpaid",
+          "startDate": "2026-09-19",
+          "endDate": "2026-09-19",
+          "reason": "sick_emergency",
+          "explanation": "",
+          "status": "cancelled",
+          "requestedAt": "2026-09-20T01:57:56.581Z"
+        },
+        {
+          "id": 8,
+          "employeeId": 1,
+          "compensation": "unpaid",
+          "startDate": "2026-09-19",
+          "endDate": "2026-09-19",
+          "reason": "sick_emergency",
+          "explanation": "",
+          "status": "approved",
+          "requestedAt": "2026-09-20T02:04:55.620Z",
+          "decidedAt": "2026-09-20T02:04:55.620Z",
+          "decidedByEmployeeId": 1
+        },
+        {
+          "id": 9,
+          "employeeId": 8,
+          "compensation": "unpaid",
+          "startDate": "2026-09-19",
+          "endDate": "2026-09-19",
+          "reason": "vacation",
+          "explanation": "",
+          "status": "denied",
+          "requestedAt": "2026-09-20T02:05:59.329Z",
+          "decidedAt": "2026-09-20T02:36:00.003Z",
+          "decidedByEmployeeId": 1
+        },
+        {
+          "id": 10,
+          "employeeId": 8,
+          "compensation": "unpaid",
+          "startDate": "2026-09-19",
+          "endDate": "2026-09-19",
+          "reason": "vacation",
+          "explanation": "",
+          "status": "approved",
+          "requestedAt": "2026-09-20T02:29:48.054Z",
+          "decidedAt": "2026-09-20T02:30:05.086Z",
+          "decidedByEmployeeId": 1
+        },
+        {
+          "id": 11,
+          "employeeId": 3,
+          "compensation": "unpaid",
+          "startDate": "2026-09-19",
+          "endDate": "2026-09-19",
+          "reason": "vacation",
+          "explanation": "pl;z",
+          "status": "pending",
+          "requestedAt": "2026-09-20T02:36:15.972Z"
+        },
+        {
+          "id": 12,
+          "employeeId": 8,
+          "compensation": "unpaid",
+          "startDate": "2026-09-19",
+          "endDate": "2026-09-19",
+          "reason": "vacation",
+          "explanation": "",
+          "status": "pending",
+          "requestedAt": "2026-09-20T03:03:18.940Z"
+        }
+      ],
+      "conversations": [
+        {
+          "id": 2,
+          "participantIds": [
+            1,
+            8
+          ],
+          "messages": [
+            {
+              "id": 1,
+              "senderEmployeeId": 1,
+              "body": "Hi Maxim, I have a question about your time off request.",
+              "sentAt": "2026-09-16T21:38:21.120Z",
+              "readByEmployeeIds": [
+                1,
+                8
+              ]
+            },
+            {
+              "id": 2,
+              "senderEmployeeId": 8,
+              "body": "yea?",
+              "sentAt": "2026-09-16T21:38:32.295Z",
+              "readByEmployeeIds": [
+                8,
+                1
+              ]
+            },
+            {
+              "id": 3,
+              "senderEmployeeId": 1,
+              "body": "ok",
+              "sentAt": "2026-09-16T21:42:08.739Z",
+              "readByEmployeeIds": [
+                1,
+                8
+              ]
+            },
+            {
+              "id": 4,
+              "senderEmployeeId": 1,
+              "body": "sounds good",
+              "sentAt": "2026-09-20T02:22:49.037Z",
+              "readByEmployeeIds": [
+                1,
+                8
+              ]
+            },
+            {
+              "id": 5,
+              "senderEmployeeId": 1,
+              "body": "ok bro",
+              "sentAt": "2026-09-20T02:22:50.289Z",
+              "readByEmployeeIds": [
+                1,
+                8
+              ]
+            },
+            {
+              "id": 6,
+              "senderEmployeeId": 1,
+              "body": "Hi Maxim, I have a question about your time off request. hjh j jhj hjjjjjjh",
+              "sentAt": "2026-09-20T03:05:44.415Z",
+              "readByEmployeeIds": [
+                1,
+                8
+              ]
+            },
+            {
+              "id": 7,
+              "senderEmployeeId": 1,
+              "body": "jjh",
+              "sentAt": "2026-09-20T03:05:45.740Z",
+              "readByEmployeeIds": [
+                1,
+                8
+              ]
+            },
+            {
+              "id": 8,
+              "senderEmployeeId": 1,
+              "body": "bro again>",
+              "sentAt": "2026-09-20T03:07:23.850Z",
+              "readByEmployeeIds": [
+                1,
+                8
+              ]
+            },
+            {
+              "id": 9,
+              "senderEmployeeId": 1,
+              "body": "fdsf",
+              "sentAt": "2026-09-20T03:11:59.085Z",
+              "readByEmployeeIds": [
+                1,
+                8
+              ]
+            },
+            {
+              "id": 10,
+              "senderEmployeeId": 8,
+              "body": "my bad cuh",
+              "sentAt": "2026-09-20T03:14:58.613Z",
+              "readByEmployeeIds": [
+                8,
+                1
+              ]
+            },
+            {
+              "id": 11,
+              "senderEmployeeId": 8,
+              "body": "ia fes\nfasdf sda",
+              "sentAt": "2026-09-20T03:15:35.328Z",
+              "readByEmployeeIds": [
+                8,
+                1
+              ]
+            },
+            {
+              "id": 12,
+              "senderEmployeeId": 8,
+              "body": "asdfasdf",
+              "sentAt": "2026-09-20T03:15:36.521Z",
+              "readByEmployeeIds": [
+                8,
+                1
+              ]
+            },
+            {
+              "id": 13,
+              "senderEmployeeId": 8,
+              "body": "brtu",
+              "sentAt": "2026-09-20T03:17:49.344Z",
+              "readByEmployeeIds": [
+                8,
+                1
+              ]
+            },
+            {
+              "id": 14,
+              "senderEmployeeId": 1,
+              "body": "Hi Maxim, I have a question about your time off request.",
+              "sentAt": "2026-09-20T03:21:05.085Z",
+              "readByEmployeeIds": [
+                1,
+                8
+              ]
+            },
+            {
+              "id": 15,
+              "senderEmployeeId": 1,
+              "body": "sdafasdfasdfsda",
+              "sentAt": "2026-09-20T03:21:06.875Z",
+              "readByEmployeeIds": [
+                1,
+                8
+              ]
+            },
+            {
+              "id": 16,
+              "senderEmployeeId": 1,
+              "body": "sadfasdfa",
+              "sentAt": "2026-09-20T03:21:07.434Z",
+              "readByEmployeeIds": [
+                1,
+                8
+              ]
+            },
+            {
+              "id": 17,
+              "senderEmployeeId": 1,
+              "body": "Hi Maxim, I have a question about your time off request.",
+              "sentAt": "2026-09-20T03:21:08.925Z",
+              "readByEmployeeIds": [
+                1,
+                8
+              ]
+            },
+            {
+              "id": 18,
+              "senderEmployeeId": 8,
+              "body": "whwt???",
+              "sentAt": "2026-09-20T03:21:17.897Z",
+              "readByEmployeeIds": [
+                8,
+                1
+              ]
+            }
+          ],
+          "creatorEmployeeId": 1,
+          "pinnedByEmployeeIds": [],
+          "mutedByEmployeeIds": []
+        },
+        {
+          "id": 3,
+          "participantIds": [
+            1,
+            4,
+            5,
+            8
+          ],
+          "messages": [
+            {
+              "id": 1,
+              "senderEmployeeId": 1,
+              "body": "yo guys lockin",
+              "sentAt": "2026-09-16T21:48:30.122Z",
+              "readByEmployeeIds": [
+                1,
+                8
+              ]
+            }
+          ],
+          "name": "Team",
+          "creatorEmployeeId": 1
+        },
+        {
+          "id": 4,
+          "creatorEmployeeId": 1,
+          "participantIds": [
+            1,
+            3
+          ],
+          "messages": [
+            {
+              "id": 1,
+              "senderEmployeeId": 1,
+              "body": "Hi Vitali, I have a question about your time off request. Could you do it for next week instead?",
+              "sentAt": "2026-09-20T03:04:33.996Z",
+              "readByEmployeeIds": [
+                1,
+                3
+              ]
+            },
+            {
+              "id": 2,
+              "senderEmployeeId": 1,
+              "body": "Hi Vitali, I have a question about your time off request.",
+              "sentAt": "2026-09-20T03:05:08.668Z",
+              "readByEmployeeIds": [
+                1,
+                3
+              ]
+            },
+            {
+              "id": 3,
+              "senderEmployeeId": 1,
+              "body": "Hi Vitali, I have a question about your time off request. fdf f",
+              "sentAt": "2026-09-20T03:05:12.296Z",
+              "readByEmployeeIds": [
+                1,
+                3
+              ]
+            },
+            {
+              "id": 4,
+              "senderEmployeeId": 1,
+              "body": "Hi Vitali, I have a question about your time off request. fdsaf dsf",
+              "sentAt": "2026-09-20T03:05:24.362Z",
+              "readByEmployeeIds": [
+                1,
+                3
+              ]
+            },
+            {
+              "id": 5,
+              "senderEmployeeId": 1,
+              "body": "hj",
+              "sentAt": "2026-09-20T03:05:30.737Z",
+              "readByEmployeeIds": [
+                1,
+                3
+              ]
+            },
+            {
+              "id": 6,
+              "senderEmployeeId": 1,
+              "body": "hjhj",
+              "sentAt": "2026-09-20T03:05:32.637Z",
+              "readByEmployeeIds": [
+                1,
+                3
+              ]
+            },
+            {
+              "id": 7,
+              "senderEmployeeId": 1,
+              "body": "Hi Vitali, I have a question about your time off request.",
+              "sentAt": "2026-09-20T03:05:35.309Z",
+              "readByEmployeeIds": [
+                1,
+                3
+              ]
+            },
+            {
+              "id": 8,
+              "senderEmployeeId": 1,
+              "body": "dsafadsf",
+              "sentAt": "2026-09-20T03:16:14.821Z",
+              "readByEmployeeIds": [
+                1,
+                3
+              ]
+            },
+            {
+              "id": 9,
+              "senderEmployeeId": 3,
+              "body": "fdgdsfg",
+              "sentAt": "2026-09-20T03:17:54.798Z",
+              "readByEmployeeIds": [
+                3,
+                1
+              ]
+            },
+            {
+              "id": 10,
+              "senderEmployeeId": 3,
+              "body": "fdggd",
+              "sentAt": "2026-09-20T03:17:56.220Z",
+              "readByEmployeeIds": [
+                3,
+                1
+              ]
+            },
+            {
+              "id": 11,
+              "senderEmployeeId": 3,
+              "body": "dfgdf",
+              "sentAt": "2026-09-20T03:17:56.530Z",
+              "readByEmployeeIds": [
+                3,
+                1
+              ]
+            },
+            {
+              "id": 12,
+              "senderEmployeeId": 3,
+              "body": "dfg",
+              "sentAt": "2026-09-20T03:17:56.866Z",
+              "readByEmployeeIds": [
+                3,
+                1
+              ]
+            },
+            {
+              "id": 13,
+              "senderEmployeeId": 1,
+              "body": "Hi Vitali, I have a question about your time off request.",
+              "sentAt": "2026-09-20T03:26:07.225Z",
+              "readByEmployeeIds": [
+                1
+              ]
+            }
+          ]
+        },
+        {
+          "id": 5,
+          "creatorEmployeeId": 3,
+          "participantIds": [
+            3,
+            8
+          ],
+          "messages": [
+            {
+              "id": 1,
+              "senderEmployeeId": 3,
+              "body": "bruh c on",
+              "sentAt": "2026-09-20T03:13:15.649Z",
+              "readByEmployeeIds": [
+                3,
+                8
+              ]
+            },
+            {
+              "id": 2,
+              "senderEmployeeId": 3,
+              "body": "dsfdsf",
+              "sentAt": "2026-09-20T03:13:16.979Z",
+              "readByEmployeeIds": [
+                3,
+                8
+              ]
+            }
+          ]
+        }
+      ],
+      "departments": [
+        {
+          "id": 2,
+          "name": "Department not set",
+          "roles": [
+            "IT",
+            "Sales Associate",
+            "Warehouse Associate",
+            "IT DEV",
+            "breh"
+          ],
+          "managerIds": [
+            1
+          ]
+        }
+      ],
+      "ptoPolicies": [
+        {
+          "id": 2,
+          "name": "dsaf",
+          "method": "rate",
+          "fixedHours": 0,
+          "earnedHours": 1,
+          "workedHours": 30,
+          "employeeIds": [
+            3,
+            5,
+            6,
+            7,
+            8
+          ],
+          "startingBalances": {
+            "3": {
+              "startDate": "2026-09-16",
+              "balance": 0
+            },
+            "5": {
+              "startDate": "2026-09-16",
+              "balance": 0
+            },
+            "6": {
+              "startDate": "2026-09-16",
+              "balance": 0
+            },
+            "7": {
+              "startDate": "2026-09-16",
+              "balance": 0
+            },
+            "8": {
+              "startDate": "2026-09-16",
+              "balance": 0
+            }
+          }
+        },
+        {
+          "id": 3,
+          "name": "car",
+          "method": "rate",
+          "fixedHours": 0,
+          "earnedHours": 1,
+          "workedHours": 20,
+          "employeeIds": [
+            4
+          ],
+          "startingBalances": {
+            "4": {
+              "startDate": "2026-09-17",
+              "balance": 0
+            }
+          }
+        }
+      ],
+      "pendingScheduleUpdateEmployeeIds": [],
+      "scheduleUpdates": [
+        {
+          "id": "1789863081069-8",
+          "employeeId": 8,
+          "title": "Schedule updated",
+          "detail": "Your published schedule has been updated.",
+          "at": "2026-09-20T00:11:21.068Z"
+        },
+        {
+          "id": "1789868217560-3",
+          "employeeId": 3,
+          "title": "Schedule updated",
+          "detail": "Your published schedule has been updated.",
+          "at": "2026-09-20T01:36:57.560Z"
+        },
+        {
+          "id": "1789869906122-3",
+          "employeeId": 3,
+          "title": "Schedule updated",
+          "detail": "Your published schedule has been updated.",
+          "at": "2026-09-20T02:05:06.121Z"
+        },
+        {
+          "id": "1789872861949-7",
+          "employeeId": 7,
+          "title": "Schedule updated",
+          "detail": "Your published schedule has been updated.",
+          "at": "2026-09-20T02:54:21.948Z"
+        },
+        {
+          "id": "1789872875294-7",
+          "employeeId": 7,
+          "title": "Schedule updated",
+          "detail": "Your published schedule has been updated.",
+          "at": "2026-09-20T02:54:35.294Z"
+        },
+        {
+          "id": "1789873580180-8",
+          "employeeId": 8,
+          "title": "Schedule updated",
+          "detail": "Your published schedule has been updated.",
+          "at": "2026-09-20T03:06:20.180Z"
+        },
+        {
+          "id": "1789873815963-1",
+          "employeeId": 1,
+          "title": "New schedule published",
+          "detail": "A new schedule was published for the team.",
+          "at": "2026-09-20T03:10:15.963Z"
+        },
+        {
+          "id": "1789873815963-3",
+          "employeeId": 3,
+          "title": "New schedule published",
+          "detail": "A new schedule was published for the team.",
+          "at": "2026-09-20T03:10:15.963Z"
+        },
+        {
+          "id": "1789873815963-4",
+          "employeeId": 4,
+          "title": "New schedule published",
+          "detail": "A new schedule was published for the team.",
+          "at": "2026-09-20T03:10:15.963Z"
+        },
+        {
+          "id": "1789873815963-5",
+          "employeeId": 5,
+          "title": "New schedule published",
+          "detail": "A new schedule was published for the team.",
+          "at": "2026-09-20T03:10:15.963Z"
+        },
+        {
+          "id": "1789873815963-6",
+          "employeeId": 6,
+          "title": "New schedule published",
+          "detail": "A new schedule was published for the team.",
+          "at": "2026-09-20T03:10:15.963Z"
+        },
+        {
+          "id": "1789873815963-7",
+          "employeeId": 7,
+          "title": "New schedule published",
+          "detail": "A new schedule was published for the team.",
+          "at": "2026-09-20T03:10:15.963Z"
+        },
+        {
+          "id": "1789873815963-8",
+          "employeeId": 8,
+          "title": "New schedule published",
+          "detail": "A new schedule was published for the team.",
+          "at": "2026-09-20T03:10:15.963Z"
+        },
+        {
+          "id": "1789874023587-1",
+          "employeeId": 1,
+          "title": "New schedule published",
+          "detail": "Maxim Vakulchik published a new schedule for the team.",
+          "at": "2026-09-20T03:13:43.587Z"
+        },
+        {
+          "id": "1789874023587-3",
+          "employeeId": 3,
+          "title": "New schedule published",
+          "detail": "Maxim Vakulchik published a new schedule for the team.",
+          "at": "2026-09-20T03:13:43.587Z"
+        },
+        {
+          "id": "1789874023587-4",
+          "employeeId": 4,
+          "title": "New schedule published",
+          "detail": "Maxim Vakulchik published a new schedule for the team.",
+          "at": "2026-09-20T03:13:43.587Z"
+        },
+        {
+          "id": "1789874023587-5",
+          "employeeId": 5,
+          "title": "New schedule published",
+          "detail": "Maxim Vakulchik published a new schedule for the team.",
+          "at": "2026-09-20T03:13:43.587Z"
+        },
+        {
+          "id": "1789874023587-6",
+          "employeeId": 6,
+          "title": "New schedule published",
+          "detail": "Maxim Vakulchik published a new schedule for the team.",
+          "at": "2026-09-20T03:13:43.587Z"
+        },
+        {
+          "id": "1789874023587-7",
+          "employeeId": 7,
+          "title": "New schedule published",
+          "detail": "Maxim Vakulchik published a new schedule for the team.",
+          "at": "2026-09-20T03:13:43.587Z"
+        },
+        {
+          "id": "1789874023587-8",
+          "employeeId": 8,
+          "title": "New schedule published",
+          "detail": "Maxim Vakulchik published a new schedule for the team.",
+          "at": "2026-09-20T03:13:43.587Z"
+        }
+      ],
+      "scheduleHasBeenPublished": true,
+      "scheduleDraftsByManager": {}
+    },
+    "dombase-staff-state-backup-v1": {
+      "employees": [
+        {
+          "id": 1,
+          "name": "Serge Vakulchik",
+          "role": "",
+          "pin": "0000",
+          "active": true,
+          "email": "moldingmart@gmail.com",
+          "phone": "(916) 236-7819",
+          "accessLevel": "Admin",
+          "location": "MOLDING MART",
+          "wage": ""
+        },
+        {
+          "id": 3,
+          "name": "Vitali R",
+          "role": "IT",
+          "pin": "5555",
+          "active": true,
+          "accessLevel": "",
+          "email": "",
+          "phone": "",
+          "location": "",
+          "wage": ""
+        },
+        {
+          "id": 4,
+          "name": "Carlos P",
+          "role": "Sales Associate",
+          "pin": "6767",
+          "active": true,
+          "email": "",
+          "phone": "",
+          "accessLevel": "",
+          "location": "",
+          "wage": ""
+        },
+        {
+          "id": 5,
+          "name": "Alex P",
+          "role": "Sales Associate",
+          "pin": "9999",
+          "active": true,
+          "email": "",
+          "phone": "",
+          "accessLevel": "",
+          "location": "",
+          "wage": ""
+        },
+        {
+          "id": 6,
+          "name": "Geoff H",
+          "role": "Sales Associate",
+          "pin": "4545",
+          "active": true,
+          "email": "",
+          "phone": "",
+          "accessLevel": "",
+          "location": "",
+          "wage": ""
+        },
+        {
+          "id": 7,
+          "name": "Ashot",
+          "role": "Warehouse Associate",
+          "pin": "9876",
+          "active": true,
+          "email": "",
+          "phone": "",
+          "accessLevel": "",
+          "location": "",
+          "wage": ""
+        },
+        {
+          "id": 8,
+          "name": "Maxim Vakulchik",
+          "role": "Warehouse Associate",
+          "pin": "8755",
+          "active": true,
+          "email": "",
+          "phone": "",
+          "accessLevel": "Manager",
+          "location": "",
+          "wage": ""
+        }
+      ],
+      "shifts": [
+        {
+          "id": 1,
+          "employeeId": 3,
+          "date": "2026-08-08",
+          "start": "08:00",
+          "end": "14:45",
+          "role": "IT",
+          "station": "Floor"
+        },
+        {
+          "id": 2,
+          "employeeId": 8,
+          "date": "2026-08-08",
+          "start": "07:30",
+          "end": "16:00",
+          "role": "Warehouse Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 3,
+          "employeeId": 3,
+          "date": "2026-08-18",
+          "start": "07:00",
+          "end": "16:00",
+          "role": "IT",
+          "station": "Floor"
+        },
+        {
+          "id": 4,
+          "employeeId": 3,
+          "date": "2026-08-19",
+          "start": "07:00",
+          "end": "16:00",
+          "role": "IT",
+          "station": "Floor"
+        },
+        {
+          "id": 5,
+          "employeeId": 3,
+          "date": "2026-08-20",
+          "start": "12:33",
+          "end": "16:00",
+          "role": "IT",
+          "station": "Floor"
+        },
+        {
+          "id": 6,
+          "employeeId": 3,
+          "date": "2026-08-21",
+          "start": "12:33",
+          "end": "16:00",
+          "role": "IT",
+          "station": "Floor"
+        },
+        {
+          "id": 7,
+          "employeeId": 8,
+          "date": "2026-08-20",
+          "start": "08:00",
+          "end": "16:00",
+          "role": "Warehouse Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 8,
+          "employeeId": 8,
+          "date": "2026-08-24",
+          "start": "07:30",
+          "end": "16:00",
+          "role": "Warehouse Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 9,
+          "employeeId": 5,
+          "date": "2026-08-18",
+          "start": "06:00",
+          "end": "16:00",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 10,
+          "employeeId": 5,
+          "date": "2026-09-15",
+          "start": "07:30",
+          "end": "16:00",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 11,
+          "employeeId": 5,
+          "date": "2026-09-14",
+          "start": "07:30",
+          "end": "16:00",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 12,
+          "employeeId": 5,
+          "date": "2026-09-16",
+          "start": "07:30",
+          "end": "16:00",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 13,
+          "employeeId": 5,
+          "date": "2026-09-17",
+          "start": "07:30",
+          "end": "16:00",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 14,
+          "employeeId": 5,
+          "date": "2026-09-19",
+          "start": "09:00",
+          "end": "14:00",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 15,
+          "employeeId": 4,
+          "date": "2026-09-14",
+          "start": "10:00",
+          "end": "16:45",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 16,
+          "employeeId": 6,
+          "date": "2026-09-01",
+          "start": "07:00",
+          "end": "15:30",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 17,
+          "employeeId": 6,
+          "date": "2026-09-02",
+          "start": "07:00",
+          "end": "15:30",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 18,
+          "employeeId": 6,
+          "date": "2026-09-03",
+          "start": "07:00",
+          "end": "15:30",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 19,
+          "employeeId": 6,
+          "date": "2026-09-08",
+          "start": "07:00",
+          "end": "15:30",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 20,
+          "employeeId": 6,
+          "date": "2026-09-09",
+          "start": "07:00",
+          "end": "15:30",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 21,
+          "employeeId": 6,
+          "date": "2026-09-10",
+          "start": "07:00",
+          "end": "15:30",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 22,
+          "employeeId": 6,
+          "date": "2026-09-15",
+          "start": "07:00",
+          "end": "15:30",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 23,
+          "employeeId": 6,
+          "date": "2026-09-16",
+          "start": "07:00",
+          "end": "15:30",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 24,
+          "employeeId": 6,
+          "date": "2026-09-17",
+          "start": "07:00",
+          "end": "15:30",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 25,
+          "employeeId": 6,
+          "date": "2026-09-04",
+          "start": "07:00",
+          "end": "14:00",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 26,
+          "employeeId": 6,
+          "date": "2026-09-11",
+          "start": "07:00",
+          "end": "14:00",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 27,
+          "employeeId": 6,
+          "date": "2026-09-18",
+          "start": "07:00",
+          "end": "14:00",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 28,
+          "employeeId": 6,
+          "date": "2026-09-12",
+          "start": "09:00",
+          "end": "14:00",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 29,
+          "employeeId": 5,
+          "date": "2026-09-01",
+          "start": "07:30",
+          "end": "16:00",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 30,
+          "employeeId": 5,
+          "date": "2026-09-02",
+          "start": "07:30",
+          "end": "16:00",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 31,
+          "employeeId": 5,
+          "date": "2026-09-08",
+          "start": "07:30",
+          "end": "16:00",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 32,
+          "employeeId": 5,
+          "date": "2026-09-09",
+          "start": "07:30",
+          "end": "16:00",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 33,
+          "employeeId": 4,
+          "date": "2026-09-01",
+          "start": "08:15",
+          "end": "16:45",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 34,
+          "employeeId": 4,
+          "date": "2026-09-02",
+          "start": "08:15",
+          "end": "16:45",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 35,
+          "employeeId": 4,
+          "date": "2026-09-08",
+          "start": "08:15",
+          "end": "16:45",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 36,
+          "employeeId": 4,
+          "date": "2026-09-09",
+          "start": "08:15",
+          "end": "16:45",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 37,
+          "employeeId": 4,
+          "date": "2026-09-15",
+          "start": "08:15",
+          "end": "16:45",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 38,
+          "employeeId": 4,
+          "date": "2026-09-16",
+          "start": "08:15",
+          "end": "16:45",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 39,
+          "employeeId": 8,
+          "date": "2026-09-04",
+          "start": "07:30",
+          "end": "16:00",
+          "role": "Warehouse Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 40,
+          "employeeId": 8,
+          "date": "2026-09-10",
+          "start": "07:30",
+          "end": "16:00",
+          "role": "Warehouse Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 41,
+          "employeeId": 8,
+          "date": "2026-09-11",
+          "start": "07:30",
+          "end": "16:00",
+          "role": "Warehouse Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 42,
+          "employeeId": 8,
+          "date": "2026-09-17",
+          "start": "07:30",
+          "end": "16:00",
+          "role": "Warehouse Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 43,
+          "employeeId": 8,
+          "date": "2026-09-18",
+          "start": "07:30",
+          "end": "16:00",
+          "role": "Warehouse Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 44,
+          "employeeId": 4,
+          "date": "2026-09-04",
+          "start": "09:45",
+          "end": "16:45",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 45,
+          "employeeId": 4,
+          "date": "2026-09-11",
+          "start": "09:45",
+          "end": "16:45",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 46,
+          "employeeId": 1,
+          "date": "2026-09-18",
+          "start": "09:45",
+          "end": "16:45",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 47,
+          "employeeId": 4,
+          "date": "2026-09-05",
+          "start": "09:00",
+          "end": "14:00",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 48,
+          "employeeId": 8,
+          "date": "2026-09-05",
+          "start": "09:00",
+          "end": "14:00",
+          "role": "Warehouse Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 49,
+          "employeeId": 8,
+          "date": "2026-09-12",
+          "start": "09:00",
+          "end": "14:00",
+          "role": "Warehouse Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 50,
+          "employeeId": 8,
+          "date": "2026-09-19",
+          "start": "09:00",
+          "end": "14:00",
+          "role": "Warehouse Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 51,
+          "employeeId": 6,
+          "date": "2026-09-14",
+          "start": "07:00",
+          "end": "15:30",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 52,
+          "employeeId": 5,
+          "date": "2026-09-03",
+          "start": "08:15",
+          "end": "16:45",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 53,
+          "employeeId": 5,
+          "date": "2026-09-10",
+          "start": "08:15",
+          "end": "16:45",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 54,
+          "employeeId": 4,
+          "date": "2026-09-07",
+          "start": "09:00",
+          "end": "13:00",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 55,
+          "employeeId": 1,
+          "date": "2026-09-07",
+          "start": "09:00",
+          "end": "13:00",
+          "role": "",
+          "station": "Floor"
+        },
+        {
+          "id": 56,
+          "employeeId": 1,
+          "date": "2026-09-19",
+          "start": "09:00",
+          "end": "14:00",
+          "role": "Sales Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 57,
+          "employeeId": 8,
+          "date": "2026-09-23",
+          "start": "08:00",
+          "end": "18:00",
+          "role": "Warehouse Associate",
+          "station": "Floor"
+        },
+        {
+          "id": 58,
+          "employeeId": 3,
+          "date": "2026-09-19",
+          "start": "18:40",
+          "end": "19:00",
+          "role": "IT",
+          "station": "Floor"
+        },
+        {
+          "id": 59,
+          "employeeId": 7,
+          "date": "2026-09-15",
+          "start": "15:00",
+          "end": "16:00",
+          "role": "Warehouse Associate",
+          "station": "Floor",
+          "notes": ""
+        },
+        {
+          "id": 60,
+          "employeeId": 7,
+          "date": "2026-09-16",
+          "start": "05:00",
+          "end": "06:00",
+          "role": "Warehouse Associate",
+          "station": "Floor",
+          "notes": ""
+        },
+        {
+          "id": 61,
+          "employeeId": 8,
+          "date": "2026-09-16",
+          "start": "05:00",
+          "end": "07:00",
+          "role": "Warehouse Associate",
+          "station": "Floor",
+          "notes": ""
+        },
+        {
+          "id": 62,
+          "employeeId": 3,
+          "date": "2026-09-16",
+          "start": "06:00",
+          "end": "07:00",
+          "role": "IT",
+          "station": "Floor",
+          "notes": ""
+        },
+        {
+          "id": 63,
+          "employeeId": 3,
+          "date": "2026-09-15",
+          "start": "15:00",
+          "end": "17:00",
+          "role": "IT",
+          "station": "Floor",
+          "notes": ""
+        }
+      ],
+      "clockEvents": [
+        {
+          "id": 17,
+          "employeeId": 3,
+          "type": "out",
+          "at": "2026-09-20T01:46:18.802Z",
+          "explanation": "i forgo"
+        },
+        {
+          "id": 16,
+          "employeeId": 3,
+          "type": "in",
+          "at": "2026-09-20T01:37:05.598Z",
+          "explanation": "oops"
+        },
+        {
+          "id": 15,
+          "employeeId": 8,
+          "type": "in",
+          "at": "2026-09-16T20:43:16.732Z",
+          "explanation": "testing"
+        },
+        {
+          "id": 14,
+          "employeeId": 7,
+          "type": "out",
+          "at": "2026-08-18T21:04:07.375Z",
+          "explanation": "ghjgj"
+        },
+        {
+          "id": 13,
+          "employeeId": 7,
+          "type": "in",
+          "at": "2026-08-18T19:44:50.100Z",
+          "explanation": "its ok"
+        },
+        {
+          "id": 12,
+          "employeeId": 3,
+          "type": "out",
+          "at": "2026-08-18T19:33:27.461Z",
+          "explanation": "ok"
+        },
+        {
+          "id": 11,
+          "employeeId": 3,
+          "type": "in",
+          "at": "2026-08-18T19:33:22.441Z",
+          "explanation": ""
+        },
+        {
+          "id": 10,
+          "employeeId": 3,
+          "type": "out",
+          "at": "2026-08-18T19:32:27.327Z",
+          "explanation": "i didnt know"
+        },
+        {
+          "id": 9,
+          "employeeId": 3,
+          "type": "break_end",
+          "durationSeconds": 5,
+          "at": "2026-08-18T19:32:05.347Z",
+          "explanation": ""
+        },
+        {
+          "id": 8,
+          "employeeId": 3,
+          "type": "break",
+          "durationSeconds": 5,
+          "at": "2026-08-18T19:31:57.318Z"
+        },
+        {
+          "id": 7,
+          "employeeId": 3,
+          "type": "in",
+          "at": "2026-08-18T19:31:43.127Z",
+          "explanation": "oops my time is off"
+        },
+        {
+          "id": 6,
+          "employeeId": 3,
+          "type": "out",
+          "at": "2026-08-08T22:05:07.022Z"
+        },
+        {
+          "id": 5,
+          "employeeId": 8,
+          "type": "out",
+          "at": "2026-08-08T22:04:53.340Z"
+        },
+        {
+          "id": 4,
+          "employeeId": 8,
+          "type": "in",
+          "at": "2026-08-08T22:04:52.860Z"
+        },
+        {
+          "id": 3,
+          "employeeId": 8,
+          "type": "out",
+          "at": "2026-08-08T22:04:49.776Z"
+        },
+        {
+          "id": 2,
+          "employeeId": 8,
+          "type": "in",
+          "at": "2026-08-08T22:04:32.505Z"
+        },
+        {
+          "id": 1,
+          "employeeId": 3,
+          "type": "in",
+          "at": "2026-08-08T22:04:23.635Z"
+        }
+      ],
+      "hoursAdjustments": [
+        {
+          "id": 1,
+          "employeeId": 5,
+          "date": "2026-08-18",
+          "hours": 70
+        },
+        {
+          "id": 2,
+          "employeeId": 5,
+          "date": "2026-08-18",
+          "hours": 70
+        },
+        {
+          "id": 3,
+          "employeeId": 5,
+          "date": "2026-08-18",
+          "hours": 70
+        },
+        {
+          "id": 4,
+          "employeeId": 5,
+          "date": "2026-08-18",
+          "hours": 70
+        },
+        {
+          "id": 5,
+          "employeeId": 5,
+          "date": "2026-08-18",
+          "hours": 70
+        },
+        {
+          "id": 6,
+          "employeeId": 5,
+          "date": "2026-08-18",
+          "hours": 70
+        },
+        {
+          "id": 7,
+          "employeeId": 5,
+          "date": "2026-08-18",
+          "hours": 70
+        },
+        {
+          "id": 8,
+          "employeeId": 5,
+          "date": "2026-08-18",
+          "hours": -420
+        },
+        {
+          "id": 9,
+          "employeeId": 5,
+          "date": "2026-08-18",
+          "hours": 20
+        },
+        {
+          "id": 10,
+          "employeeId": 5,
+          "date": "2026-08-18",
+          "hours": -10
+        },
+        {
+          "id": 11,
+          "employeeId": 7,
+          "date": "2026-08-18",
+          "hours": -0.02841944444444444
+        },
+        {
+          "id": 12,
+          "employeeId": 3,
+          "date": "2026-08-18",
+          "hours": 5.005224722222223
+        },
+        {
+          "id": 13,
+          "employeeId": 3,
+          "date": "2026-08-18",
+          "hours": 85
+        },
+        {
+          "id": 14,
+          "employeeId": 3,
+          "date": "2026-08-18",
+          "hours": 630
+        },
+        {
+          "id": 15,
+          "employeeId": 3,
+          "date": "2026-08-18",
+          "hours": -720.0166666666667
+        },
+        {
+          "id": 16,
+          "employeeId": 5,
+          "date": "2026-08-18",
+          "hours": -80
+        },
+        {
+          "id": 17,
+          "employeeId": 7,
+          "date": "2026-08-18",
+          "hours": -1.2930458333333332
+        },
+        {
+          "id": 18,
+          "employeeId": 8,
+          "date": "2026-09-16",
+          "hours": 90.00272527777777
+        },
+        {
+          "id": 19,
+          "employeeId": 8,
+          "date": "2026-09-16",
+          "hours": 410.00250083333333
+        },
+        {
+          "id": 20,
+          "employeeId": 8,
+          "date": "2026-09-16",
+          "hours": 500.0012977777778
+        },
+        {
+          "id": 21,
+          "employeeId": 4,
+          "date": "2026-09-17",
+          "hours": 1000
+        },
+        {
+          "id": 22,
+          "employeeId": 4,
+          "date": "2026-09-17",
+          "hours": 29
+        }
+      ],
+      "ptoRequests": [
+        {
+          "id": 5,
+          "employeeId": 8,
+          "compensation": "paid",
+          "startDate": "2026-09-17",
+          "endDate": "2026-09-17",
+          "reason": "vacation",
+          "explanation": "i dont feel like working cuh",
+          "status": "approved",
+          "requestedAt": "2026-09-16T21:32:14.576Z",
+          "decidedAt": "2026-09-16T22:06:08.503Z",
+          "decidedByEmployeeId": 1
+        },
+        {
+          "id": 4,
+          "employeeId": 3,
+          "startDate": "2026-08-18",
+          "endDate": "2026-08-20",
+          "startTime": "09:00",
+          "endTime": "15:00",
+          "reason": "sick_emergency",
+          "explanation": "fgdfgfdg",
+          "status": "denied",
+          "requestedAt": "2026-08-18T20:57:42.709Z",
+          "compensation": "paid",
+          "decidedAt": "2026-09-16T21:26:42.308Z",
+          "decidedByEmployeeId": 1
+        },
+        {
+          "id": 3,
+          "employeeId": 3,
+          "startDate": "2026-08-18",
+          "endDate": "2026-08-20",
+          "reason": "sick_emergency",
+          "explanation": "fdgfdg",
+          "status": "cancelled",
+          "requestedAt": "2026-08-18T20:53:15.579Z",
+          "compensation": "paid"
+        },
+        {
+          "id": 2,
+          "employeeId": 3,
+          "startDate": "2026-08-18",
+          "endDate": "2026-08-18",
+          "startTime": "09:00",
+          "endTime": "12:00",
+          "reason": "sick_emergency",
+          "explanation": ";fdgdf",
+          "status": "cancelled",
+          "requestedAt": "2026-08-18T20:51:00.426Z",
+          "compensation": "paid"
+        },
+        {
+          "id": 1,
+          "employeeId": 7,
+          "startDate": "2026-08-20",
+          "endDate": "2026-08-22",
+          "reason": "sick_emergency",
+          "explanation": "yuh",
+          "status": "denied",
+          "requestedAt": "2026-08-18T20:33:20.479Z",
+          "compensation": "paid",
+          "decidedAt": "2026-09-16T21:29:59.762Z",
+          "decidedByEmployeeId": 1
+        },
+        {
+          "id": 6,
+          "employeeId": 3,
+          "compensation": "unpaid",
+          "startDate": "2026-09-24",
+          "endDate": "2026-09-24",
+          "reason": "sick_emergency",
+          "explanation": "",
+          "status": "denied",
+          "requestedAt": "2026-09-20T01:49:29.992Z",
+          "decidedAt": "2026-09-20T02:26:37.906Z",
+          "decidedByEmployeeId": 1
+        },
+        {
+          "id": 7,
+          "employeeId": 3,
+          "compensation": "unpaid",
+          "startDate": "2026-09-19",
+          "endDate": "2026-09-19",
+          "reason": "sick_emergency",
+          "explanation": "",
+          "status": "cancelled",
+          "requestedAt": "2026-09-20T01:57:56.581Z"
+        },
+        {
+          "id": 8,
+          "employeeId": 1,
+          "compensation": "unpaid",
+          "startDate": "2026-09-19",
+          "endDate": "2026-09-19",
+          "reason": "sick_emergency",
+          "explanation": "",
+          "status": "approved",
+          "requestedAt": "2026-09-20T02:04:55.620Z",
+          "decidedAt": "2026-09-20T02:04:55.620Z",
+          "decidedByEmployeeId": 1
+        },
+        {
+          "id": 9,
+          "employeeId": 8,
+          "compensation": "unpaid",
+          "startDate": "2026-09-19",
+          "endDate": "2026-09-19",
+          "reason": "vacation",
+          "explanation": "",
+          "status": "denied",
+          "requestedAt": "2026-09-20T02:05:59.329Z",
+          "decidedAt": "2026-09-20T02:36:00.003Z",
+          "decidedByEmployeeId": 1
+        },
+        {
+          "id": 10,
+          "employeeId": 8,
+          "compensation": "unpaid",
+          "startDate": "2026-09-19",
+          "endDate": "2026-09-19",
+          "reason": "vacation",
+          "explanation": "",
+          "status": "approved",
+          "requestedAt": "2026-09-20T02:29:48.054Z",
+          "decidedAt": "2026-09-20T02:30:05.086Z",
+          "decidedByEmployeeId": 1
+        },
+        {
+          "id": 11,
+          "employeeId": 3,
+          "compensation": "unpaid",
+          "startDate": "2026-09-19",
+          "endDate": "2026-09-19",
+          "reason": "vacation",
+          "explanation": "pl;z",
+          "status": "pending",
+          "requestedAt": "2026-09-20T02:36:15.972Z"
+        },
+        {
+          "id": 12,
+          "employeeId": 8,
+          "compensation": "unpaid",
+          "startDate": "2026-09-19",
+          "endDate": "2026-09-19",
+          "reason": "vacation",
+          "explanation": "",
+          "status": "pending",
+          "requestedAt": "2026-09-20T03:03:18.940Z"
+        }
+      ],
+      "conversations": [
+        {
+          "id": 2,
+          "participantIds": [
+            1,
+            8
+          ],
+          "messages": [
+            {
+              "id": 1,
+              "senderEmployeeId": 1,
+              "body": "Hi Maxim, I have a question about your time off request.",
+              "sentAt": "2026-09-16T21:38:21.120Z",
+              "readByEmployeeIds": [
+                1,
+                8
+              ]
+            },
+            {
+              "id": 2,
+              "senderEmployeeId": 8,
+              "body": "yea?",
+              "sentAt": "2026-09-16T21:38:32.295Z",
+              "readByEmployeeIds": [
+                8,
+                1
+              ]
+            },
+            {
+              "id": 3,
+              "senderEmployeeId": 1,
+              "body": "ok",
+              "sentAt": "2026-09-16T21:42:08.739Z",
+              "readByEmployeeIds": [
+                1,
+                8
+              ]
+            },
+            {
+              "id": 4,
+              "senderEmployeeId": 1,
+              "body": "sounds good",
+              "sentAt": "2026-09-20T02:22:49.037Z",
+              "readByEmployeeIds": [
+                1,
+                8
+              ]
+            },
+            {
+              "id": 5,
+              "senderEmployeeId": 1,
+              "body": "ok bro",
+              "sentAt": "2026-09-20T02:22:50.289Z",
+              "readByEmployeeIds": [
+                1,
+                8
+              ]
+            },
+            {
+              "id": 6,
+              "senderEmployeeId": 1,
+              "body": "Hi Maxim, I have a question about your time off request. hjh j jhj hjjjjjjh",
+              "sentAt": "2026-09-20T03:05:44.415Z",
+              "readByEmployeeIds": [
+                1,
+                8
+              ]
+            },
+            {
+              "id": 7,
+              "senderEmployeeId": 1,
+              "body": "jjh",
+              "sentAt": "2026-09-20T03:05:45.740Z",
+              "readByEmployeeIds": [
+                1,
+                8
+              ]
+            },
+            {
+              "id": 8,
+              "senderEmployeeId": 1,
+              "body": "bro again>",
+              "sentAt": "2026-09-20T03:07:23.850Z",
+              "readByEmployeeIds": [
+                1,
+                8
+              ]
+            },
+            {
+              "id": 9,
+              "senderEmployeeId": 1,
+              "body": "fdsf",
+              "sentAt": "2026-09-20T03:11:59.085Z",
+              "readByEmployeeIds": [
+                1,
+                8
+              ]
+            },
+            {
+              "id": 10,
+              "senderEmployeeId": 8,
+              "body": "my bad cuh",
+              "sentAt": "2026-09-20T03:14:58.613Z",
+              "readByEmployeeIds": [
+                8,
+                1
+              ]
+            },
+            {
+              "id": 11,
+              "senderEmployeeId": 8,
+              "body": "ia fes\nfasdf sda",
+              "sentAt": "2026-09-20T03:15:35.328Z",
+              "readByEmployeeIds": [
+                8,
+                1
+              ]
+            },
+            {
+              "id": 12,
+              "senderEmployeeId": 8,
+              "body": "asdfasdf",
+              "sentAt": "2026-09-20T03:15:36.521Z",
+              "readByEmployeeIds": [
+                8,
+                1
+              ]
+            },
+            {
+              "id": 13,
+              "senderEmployeeId": 8,
+              "body": "brtu",
+              "sentAt": "2026-09-20T03:17:49.344Z",
+              "readByEmployeeIds": [
+                8,
+                1
+              ]
+            },
+            {
+              "id": 14,
+              "senderEmployeeId": 1,
+              "body": "Hi Maxim, I have a question about your time off request.",
+              "sentAt": "2026-09-20T03:21:05.085Z",
+              "readByEmployeeIds": [
+                1,
+                8
+              ]
+            },
+            {
+              "id": 15,
+              "senderEmployeeId": 1,
+              "body": "sdafasdfasdfsda",
+              "sentAt": "2026-09-20T03:21:06.875Z",
+              "readByEmployeeIds": [
+                1,
+                8
+              ]
+            },
+            {
+              "id": 16,
+              "senderEmployeeId": 1,
+              "body": "sadfasdfa",
+              "sentAt": "2026-09-20T03:21:07.434Z",
+              "readByEmployeeIds": [
+                1,
+                8
+              ]
+            },
+            {
+              "id": 17,
+              "senderEmployeeId": 1,
+              "body": "Hi Maxim, I have a question about your time off request.",
+              "sentAt": "2026-09-20T03:21:08.925Z",
+              "readByEmployeeIds": [
+                1,
+                8
+              ]
+            },
+            {
+              "id": 18,
+              "senderEmployeeId": 8,
+              "body": "whwt???",
+              "sentAt": "2026-09-20T03:21:17.897Z",
+              "readByEmployeeIds": [
+                8,
+                1
+              ]
+            }
+          ],
+          "creatorEmployeeId": 1,
+          "pinnedByEmployeeIds": [],
+          "mutedByEmployeeIds": []
+        },
+        {
+          "id": 3,
+          "participantIds": [
+            1,
+            4,
+            5,
+            8
+          ],
+          "messages": [
+            {
+              "id": 1,
+              "senderEmployeeId": 1,
+              "body": "yo guys lockin",
+              "sentAt": "2026-09-16T21:48:30.122Z",
+              "readByEmployeeIds": [
+                1,
+                8
+              ]
+            }
+          ],
+          "name": "Team",
+          "creatorEmployeeId": 1
+        },
+        {
+          "id": 4,
+          "creatorEmployeeId": 1,
+          "participantIds": [
+            1,
+            3
+          ],
+          "messages": [
+            {
+              "id": 1,
+              "senderEmployeeId": 1,
+              "body": "Hi Vitali, I have a question about your time off request. Could you do it for next week instead?",
+              "sentAt": "2026-09-20T03:04:33.996Z",
+              "readByEmployeeIds": [
+                1,
+                3
+              ]
+            },
+            {
+              "id": 2,
+              "senderEmployeeId": 1,
+              "body": "Hi Vitali, I have a question about your time off request.",
+              "sentAt": "2026-09-20T03:05:08.668Z",
+              "readByEmployeeIds": [
+                1,
+                3
+              ]
+            },
+            {
+              "id": 3,
+              "senderEmployeeId": 1,
+              "body": "Hi Vitali, I have a question about your time off request. fdf f",
+              "sentAt": "2026-09-20T03:05:12.296Z",
+              "readByEmployeeIds": [
+                1,
+                3
+              ]
+            },
+            {
+              "id": 4,
+              "senderEmployeeId": 1,
+              "body": "Hi Vitali, I have a question about your time off request. fdsaf dsf",
+              "sentAt": "2026-09-20T03:05:24.362Z",
+              "readByEmployeeIds": [
+                1,
+                3
+              ]
+            },
+            {
+              "id": 5,
+              "senderEmployeeId": 1,
+              "body": "hj",
+              "sentAt": "2026-09-20T03:05:30.737Z",
+              "readByEmployeeIds": [
+                1,
+                3
+              ]
+            },
+            {
+              "id": 6,
+              "senderEmployeeId": 1,
+              "body": "hjhj",
+              "sentAt": "2026-09-20T03:05:32.637Z",
+              "readByEmployeeIds": [
+                1,
+                3
+              ]
+            },
+            {
+              "id": 7,
+              "senderEmployeeId": 1,
+              "body": "Hi Vitali, I have a question about your time off request.",
+              "sentAt": "2026-09-20T03:05:35.309Z",
+              "readByEmployeeIds": [
+                1,
+                3
+              ]
+            },
+            {
+              "id": 8,
+              "senderEmployeeId": 1,
+              "body": "dsafadsf",
+              "sentAt": "2026-09-20T03:16:14.821Z",
+              "readByEmployeeIds": [
+                1,
+                3
+              ]
+            },
+            {
+              "id": 9,
+              "senderEmployeeId": 3,
+              "body": "fdgdsfg",
+              "sentAt": "2026-09-20T03:17:54.798Z",
+              "readByEmployeeIds": [
+                3,
+                1
+              ]
+            },
+            {
+              "id": 10,
+              "senderEmployeeId": 3,
+              "body": "fdggd",
+              "sentAt": "2026-09-20T03:17:56.220Z",
+              "readByEmployeeIds": [
+                3,
+                1
+              ]
+            },
+            {
+              "id": 11,
+              "senderEmployeeId": 3,
+              "body": "dfgdf",
+              "sentAt": "2026-09-20T03:17:56.530Z",
+              "readByEmployeeIds": [
+                3,
+                1
+              ]
+            },
+            {
+              "id": 12,
+              "senderEmployeeId": 3,
+              "body": "dfg",
+              "sentAt": "2026-09-20T03:17:56.866Z",
+              "readByEmployeeIds": [
+                3,
+                1
+              ]
+            }
+          ]
+        },
+        {
+          "id": 5,
+          "creatorEmployeeId": 3,
+          "participantIds": [
+            3,
+            8
+          ],
+          "messages": [
+            {
+              "id": 1,
+              "senderEmployeeId": 3,
+              "body": "bruh c on",
+              "sentAt": "2026-09-20T03:13:15.649Z",
+              "readByEmployeeIds": [
+                3,
+                8
+              ]
+            },
+            {
+              "id": 2,
+              "senderEmployeeId": 3,
+              "body": "dsfdsf",
+              "sentAt": "2026-09-20T03:13:16.979Z",
+              "readByEmployeeIds": [
+                3,
+                8
+              ]
+            }
+          ]
+        }
+      ],
+      "departments": [
+        {
+          "id": 2,
+          "name": "Department not set",
+          "roles": [
+            "IT",
+            "Sales Associate",
+            "Warehouse Associate",
+            "IT DEV",
+            "breh"
+          ],
+          "managerIds": [
+            1
+          ]
+        }
+      ],
+      "ptoPolicies": [
+        {
+          "id": 2,
+          "name": "dsaf",
+          "method": "rate",
+          "fixedHours": 0,
+          "earnedHours": 1,
+          "workedHours": 30,
+          "employeeIds": [
+            3,
+            5,
+            6,
+            7,
+            8
+          ],
+          "startingBalances": {
+            "3": {
+              "startDate": "2026-09-16",
+              "balance": 0
+            },
+            "5": {
+              "startDate": "2026-09-16",
+              "balance": 0
+            },
+            "6": {
+              "startDate": "2026-09-16",
+              "balance": 0
+            },
+            "7": {
+              "startDate": "2026-09-16",
+              "balance": 0
+            },
+            "8": {
+              "startDate": "2026-09-16",
+              "balance": 0
+            }
+          }
+        },
+        {
+          "id": 3,
+          "name": "car",
+          "method": "rate",
+          "fixedHours": 0,
+          "earnedHours": 1,
+          "workedHours": 20,
+          "employeeIds": [
+            4
+          ],
+          "startingBalances": {
+            "4": {
+              "startDate": "2026-09-17",
+              "balance": 0
+            }
+          }
+        }
+      ],
+      "pendingScheduleUpdateEmployeeIds": [],
+      "scheduleUpdates": [
+        {
+          "id": "1789863081069-8",
+          "employeeId": 8,
+          "title": "Schedule updated",
+          "detail": "Your published schedule has been updated.",
+          "at": "2026-09-20T00:11:21.068Z"
+        },
+        {
+          "id": "1789868217560-3",
+          "employeeId": 3,
+          "title": "Schedule updated",
+          "detail": "Your published schedule has been updated.",
+          "at": "2026-09-20T01:36:57.560Z"
+        },
+        {
+          "id": "1789869906122-3",
+          "employeeId": 3,
+          "title": "Schedule updated",
+          "detail": "Your published schedule has been updated.",
+          "at": "2026-09-20T02:05:06.121Z"
+        },
+        {
+          "id": "1789872861949-7",
+          "employeeId": 7,
+          "title": "Schedule updated",
+          "detail": "Your published schedule has been updated.",
+          "at": "2026-09-20T02:54:21.948Z"
+        },
+        {
+          "id": "1789872875294-7",
+          "employeeId": 7,
+          "title": "Schedule updated",
+          "detail": "Your published schedule has been updated.",
+          "at": "2026-09-20T02:54:35.294Z"
+        },
+        {
+          "id": "1789873580180-8",
+          "employeeId": 8,
+          "title": "Schedule updated",
+          "detail": "Your published schedule has been updated.",
+          "at": "2026-09-20T03:06:20.180Z"
+        },
+        {
+          "id": "1789873815963-1",
+          "employeeId": 1,
+          "title": "New schedule published",
+          "detail": "A new schedule was published for the team.",
+          "at": "2026-09-20T03:10:15.963Z"
+        },
+        {
+          "id": "1789873815963-3",
+          "employeeId": 3,
+          "title": "New schedule published",
+          "detail": "A new schedule was published for the team.",
+          "at": "2026-09-20T03:10:15.963Z"
+        },
+        {
+          "id": "1789873815963-4",
+          "employeeId": 4,
+          "title": "New schedule published",
+          "detail": "A new schedule was published for the team.",
+          "at": "2026-09-20T03:10:15.963Z"
+        },
+        {
+          "id": "1789873815963-5",
+          "employeeId": 5,
+          "title": "New schedule published",
+          "detail": "A new schedule was published for the team.",
+          "at": "2026-09-20T03:10:15.963Z"
+        },
+        {
+          "id": "1789873815963-6",
+          "employeeId": 6,
+          "title": "New schedule published",
+          "detail": "A new schedule was published for the team.",
+          "at": "2026-09-20T03:10:15.963Z"
+        },
+        {
+          "id": "1789873815963-7",
+          "employeeId": 7,
+          "title": "New schedule published",
+          "detail": "A new schedule was published for the team.",
+          "at": "2026-09-20T03:10:15.963Z"
+        },
+        {
+          "id": "1789873815963-8",
+          "employeeId": 8,
+          "title": "New schedule published",
+          "detail": "A new schedule was published for the team.",
+          "at": "2026-09-20T03:10:15.963Z"
+        },
+        {
+          "id": "1789874023587-1",
+          "employeeId": 1,
+          "title": "New schedule published",
+          "detail": "Maxim Vakulchik published a new schedule for the team.",
+          "at": "2026-09-20T03:13:43.587Z"
+        },
+        {
+          "id": "1789874023587-3",
+          "employeeId": 3,
+          "title": "New schedule published",
+          "detail": "Maxim Vakulchik published a new schedule for the team.",
+          "at": "2026-09-20T03:13:43.587Z"
+        },
+        {
+          "id": "1789874023587-4",
+          "employeeId": 4,
+          "title": "New schedule published",
+          "detail": "Maxim Vakulchik published a new schedule for the team.",
+          "at": "2026-09-20T03:13:43.587Z"
+        },
+        {
+          "id": "1789874023587-5",
+          "employeeId": 5,
+          "title": "New schedule published",
+          "detail": "Maxim Vakulchik published a new schedule for the team.",
+          "at": "2026-09-20T03:13:43.587Z"
+        },
+        {
+          "id": "1789874023587-6",
+          "employeeId": 6,
+          "title": "New schedule published",
+          "detail": "Maxim Vakulchik published a new schedule for the team.",
+          "at": "2026-09-20T03:13:43.587Z"
+        },
+        {
+          "id": "1789874023587-7",
+          "employeeId": 7,
+          "title": "New schedule published",
+          "detail": "Maxim Vakulchik published a new schedule for the team.",
+          "at": "2026-09-20T03:13:43.587Z"
+        },
+        {
+          "id": "1789874023587-8",
+          "employeeId": 8,
+          "title": "New schedule published",
+          "detail": "Maxim Vakulchik published a new schedule for the team.",
+          "at": "2026-09-20T03:13:43.587Z"
+        }
+      ],
+      "scheduleHasBeenPublished": true,
+      "scheduleDraftsByManager": {}
+    },
+    "dombase-unpublished-shifts-v1": [],
+    "dombase-basic-info-v1": {
+      "locationName": "MOLDING MART",
+      "locationPhone": "",
+      "address1": "",
+      "address2": "",
+      "city": "Sacramento",
+      "stateProvince": "CA",
+      "postalCode": "95624",
+      "country": "United States",
+      "timeZone": "Pacific Time (US & Canada)",
+      "businessType": "",
+      "businessCategory": "",
+      "website": "",
+      "companyName": "MOLDING MART",
+      "accountOwner": "Serge Vakulchik",
+      "companyPhone": ""
+    },
+    "dombase-opened-notifications-v1": {
+      "1": [
+        "alert-missed-clock-in-14",
+        "alert-missed-clock-in-50",
+        "alert-missed-clock-in-56",
+        "alert-missed-clock-in-46",
+        "alert-missed-clock-in-43",
+        "alert-missed-clock-in-27",
+        "alert-missed-clock-in-13",
+        "alert-missed-clock-in-42",
+        "alert-missed-clock-in-24",
+        "alert-missed-break-open-15",
+        "request-5",
+        "alert-unscheduled-15",
+        "alert-missed-clock-in-38",
+        "alert-missed-clock-in-12",
+        "alert-missed-clock-in-23",
+        "alert-missed-clock-in-37",
+        "alert-missed-clock-in-10",
+        "alert-missed-clock-in-22",
+        "alert-missed-clock-in-15",
+        "alert-missed-clock-in-11",
+        "alert-missed-clock-in-51",
+        "request-4",
+        "request-3",
+        "request-2",
+        "request-1",
+        "alert-no-show-14",
+        "alert-no-show-50",
+        "alert-no-show-56",
+        "alert-no-show-46",
+        "alert-no-show-43",
+        "alert-no-show-27",
+        "alert-no-show-13",
+        "alert-no-show-42",
+        "alert-no-show-24",
+        "alert-no-show-38",
+        "alert-no-show-12",
+        "alert-no-show-23",
+        "alert-no-show-37",
+        "alert-no-show-10",
+        "alert-no-show-22",
+        "alert-no-show-15",
+        "alert-no-show-11",
+        "alert-no-show-51",
+        "alert-early-clock-in-16",
+        "alert-early-clock-out-17",
+        "request-6",
+        "request-7",
+        "request-9",
+        "alert-no-show-62",
+        "alert-no-show-61",
+        "alert-no-show-60",
+        "request-10",
+        "request-11",
+        "alert-no-show-1",
+        "alert-no-show-59",
+        "request-12",
+        "alert-late-clock-in-15",
+        "schedule-1789873815963-1",
+        "message-2-12",
+        "schedule-1789874023587-1",
+        "alert-no-show-63"
+      ],
+      "3": [
+        "schedule-1789868217560-3",
+        "schedule-1789869906122-3",
+        "schedule-1789874023587-3",
+        "schedule-1789873815963-3"
+      ],
+      "8": [
+        "alert-missed-clock-in-14",
+        "alert-missed-clock-in-50",
+        "alert-missed-clock-in-56",
+        "alert-missed-clock-in-46",
+        "alert-missed-clock-in-43",
+        "alert-missed-clock-in-27",
+        "alert-missed-clock-in-13",
+        "alert-missed-clock-in-42",
+        "alert-missed-clock-in-24",
+        "alert-missed-break-open-15",
+        "request-5",
+        "alert-unscheduled-15",
+        "alert-missed-clock-in-38",
+        "alert-missed-clock-in-12",
+        "alert-missed-clock-in-23",
+        "alert-missed-clock-in-37",
+        "alert-missed-clock-in-10",
+        "alert-missed-clock-in-22",
+        "alert-missed-clock-in-15",
+        "alert-missed-clock-in-11",
+        "alert-missed-clock-in-51",
+        "request-4",
+        "request-3",
+        "request-2",
+        "request-1",
+        "message-2-5",
+        "request-8",
+        "request-7",
+        "request-6",
+        "alert-early-clock-out-17",
+        "alert-early-clock-in-16",
+        "alert-no-show-14",
+        "alert-no-show-50",
+        "alert-no-show-56",
+        "alert-no-show-46",
+        "alert-no-show-43",
+        "alert-no-show-27",
+        "alert-no-show-13",
+        "alert-no-show-42",
+        "alert-no-show-24",
+        "alert-no-show-38",
+        "alert-no-show-12",
+        "alert-no-show-23",
+        "alert-no-show-37",
+        "alert-no-show-10",
+        "alert-no-show-22",
+        "alert-no-show-15",
+        "alert-no-show-11",
+        "alert-no-show-51",
+        "request-11",
+        "alert-no-show-59",
+        "alert-no-show-60",
+        "message-2-7",
+        "message-2-8",
+        "alert-late-clock-in-15",
+        "schedule-1789873580180-8",
+        "schedule-1789863081069-8",
+        "schedule-1789873815963-8",
+        "alert-no-show-62",
+        "message-5-2",
+        "message-2-9",
+        "schedule-1789874023587-8",
+        "alert-no-show-63"
+      ]
+    },
+    "dombase-dismissed-notifications-v1": {
+      "1": [
+        "alert-missed-clock-in-14",
+        "alert-missed-clock-in-50",
+        "alert-missed-clock-in-56",
+        "alert-missed-clock-in-46",
+        "alert-missed-clock-in-43",
+        "alert-missed-clock-in-27",
+        "alert-missed-clock-in-13",
+        "alert-missed-clock-in-42",
+        "alert-missed-clock-in-24",
+        "alert-missed-break-open-15",
+        "request-5",
+        "alert-unscheduled-15",
+        "alert-missed-clock-in-38",
+        "alert-missed-clock-in-12",
+        "alert-missed-clock-in-23",
+        "alert-missed-clock-in-37",
+        "alert-missed-clock-in-10",
+        "alert-missed-clock-in-22",
+        "alert-missed-clock-in-15",
+        "alert-missed-clock-in-11",
+        "alert-missed-clock-in-51",
+        "request-4",
+        "request-3",
+        "request-2",
+        "request-1",
+        "alert-early-clock-in-16",
+        "alert-no-show-14",
+        "alert-no-show-50",
+        "alert-no-show-56",
+        "alert-no-show-46",
+        "alert-no-show-43",
+        "alert-no-show-27",
+        "alert-no-show-13",
+        "alert-no-show-42",
+        "alert-no-show-24",
+        "alert-no-show-38",
+        "alert-no-show-12",
+        "alert-no-show-23",
+        "alert-no-show-37",
+        "alert-no-show-10",
+        "alert-no-show-22",
+        "alert-no-show-15",
+        "alert-no-show-11",
+        "alert-no-show-51",
+        "request-10",
+        "request-9",
+        "request-7",
+        "request-6",
+        "alert-early-clock-out-17",
+        "alert-no-show-1"
+      ],
+      "3": [
+        "schedule-1789874023587-3",
+        "schedule-1789873815963-3",
+        "schedule-1789869906122-3",
+        "schedule-1789868217560-3"
+      ],
+      "8": [
+        "alert-missed-clock-in-14",
+        "alert-missed-clock-in-50",
+        "alert-missed-clock-in-56",
+        "alert-missed-clock-in-46",
+        "alert-missed-clock-in-43",
+        "alert-missed-clock-in-27",
+        "alert-missed-clock-in-13",
+        "alert-missed-clock-in-42",
+        "alert-missed-clock-in-24",
+        "alert-missed-break-open-15",
+        "request-5",
+        "alert-unscheduled-15",
+        "alert-missed-clock-in-38",
+        "alert-missed-clock-in-12",
+        "alert-missed-clock-in-23",
+        "alert-missed-clock-in-37",
+        "alert-missed-clock-in-10",
+        "alert-missed-clock-in-22",
+        "alert-missed-clock-in-15",
+        "alert-missed-clock-in-11",
+        "alert-missed-clock-in-51",
+        "request-4",
+        "request-3",
+        "request-2",
+        "request-1",
+        "schedule-1789874023587-8",
+        "message-5-2",
+        "message-2-9",
+        "schedule-1789873815963-8",
+        "schedule-1789873580180-8",
+        "request-11",
+        "request-8",
+        "request-7",
+        "request-6",
+        "alert-early-clock-out-17",
+        "alert-early-clock-in-16",
+        "schedule-1789863081069-8",
+        "alert-no-show-14",
+        "alert-no-show-50",
+        "alert-no-show-56",
+        "alert-no-show-46",
+        "alert-no-show-43",
+        "alert-no-show-27",
+        "alert-no-show-13",
+        "alert-no-show-42",
+        "alert-no-show-24",
+        "alert-late-clock-in-15",
+        "alert-no-show-38",
+        "alert-no-show-12",
+        "alert-no-show-23",
+        "alert-no-show-62",
+        "alert-no-show-60",
+        "alert-no-show-59",
+        "alert-no-show-63",
+        "alert-no-show-37",
+        "alert-no-show-10",
+        "alert-no-show-22",
+        "alert-no-show-15",
+        "alert-no-show-11"
+      ]
+    }
+  },
+  "restoreNote": "Restore each non-null localStorage value under its exact key, then reload DomBase."
+}

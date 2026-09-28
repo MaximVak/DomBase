@@ -5235,6 +5235,32 @@ button[aria-label^="Remove"]:focus-visible,
   color: var(--danger);
 }
 
+.department-role-tags > span button[aria-label^="Remove"],
+.department-manager-list > span button[aria-label^="Remove"] {
+  display: inline-flex;
+  width: auto;
+  min-height: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0 !important;
+  background: transparent !important;
+  color: #aeb5bf !important;
+  font-size: 1.05rem;
+  line-height: 1;
+  opacity: 1;
+  padding: 0;
+  transform: translateY(-1px);
+}
+
+.department-role-tags > span button[aria-label^="Remove"]:hover,
+.department-role-tags > span button[aria-label^="Remove"]:focus-visible,
+.department-manager-list > span button[aria-label^="Remove"]:hover,
+.department-manager-list > span button[aria-label^="Remove"]:focus-visible {
+  background: transparent !important;
+  color: #ffffff !important;
+  outline: 0;
+}
+
 .shift-create-modal input,
 .shift-create-modal select,
 .shift-edit-modal input,
@@ -5297,10 +5323,24 @@ button[aria-label^="Remove"]:focus-visible,
 
 .shift-apply-days > div {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: flex-start;
   gap: 12px;
   margin-top: 5px;
+}
+
+.shift-apply-day-option {
+  display: grid;
+  flex: 0 0 42px;
+  justify-items: center;
+  gap: 5px;
+}
+
+.shift-apply-day-option > span {
+  color: #7d8998;
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .shift-apply-days button {
@@ -5394,6 +5434,79 @@ button[aria-label^="Remove"]:focus-visible,
   font-size: 1rem;
   padding: 0 12px;
   white-space: nowrap;
+}
+
+.time-wheel-picker {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 6px);
+  left: 0;
+  display: grid;
+  grid-template-columns: repeat(3, 74px);
+  gap: 4px;
+  border: 1px solid #b8cfe7;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 14px 32px rgba(7, 29, 58, 0.2);
+  padding: 8px;
+}
+
+.time-wheel-column {
+  display: grid;
+  grid-template-rows: auto repeat(3, 36px);
+  min-width: 0;
+  border-radius: 6px;
+  outline: 0;
+  overflow: hidden;
+  touch-action: none;
+}
+
+.time-wheel-column.bounded {
+  grid-template-rows: auto repeat(2, 36px);
+  align-self: start;
+}
+
+.time-wheel-column:focus-visible {
+  box-shadow: 0 0 0 2px rgba(15, 116, 189, 0.22);
+}
+
+.time-wheel-label {
+  color: #7d8998;
+  font-size: 0.65rem;
+  font-weight: 800;
+  line-height: 1;
+  padding: 3px 0 7px;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.time-wheel-column button {
+  display: grid;
+  min-height: 36px;
+  place-items: center;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #8a96a6;
+  font-size: 0.9rem;
+  font-weight: 700;
+  padding: 0;
+}
+
+.time-wheel-column button:hover,
+.time-wheel-column button:focus-visible {
+  background: #edf5fc;
+  color: var(--blue-deep);
+  outline: 0;
+}
+
+.time-wheel-column button.current {
+  border-top: 1px solid #d9e4ef;
+  border-bottom: 1px solid #d9e4ef;
+  background: #edf5fc;
+  color: var(--blue-deep);
+  font-size: 1rem;
+  font-weight: 900;
 }
 
 .shift-create-modal input:disabled,
