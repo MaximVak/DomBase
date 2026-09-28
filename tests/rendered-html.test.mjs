@@ -49,6 +49,10 @@ test("dashboard navigation is labeled Home and shows the signed-in mode", async 
   assert.match(page, /id: "dashboard", label: "Home", icon: "home"/);
   assert.match(page, /mode === "manager" \? "Manager mode" : "Employee mode"/);
   assert.match(page, /activeViewLabel\(activeView, mode\)/);
+  assert.match(page, /const sidebarLocationName = savedBasicInfo\.locationName\.trim\(\) \|\| defaultBasicInfo\.locationName/);
+  assert.match(page, /className="brand-lockup" aria-label=\{`\$\{sidebarLocationName\} location`\}/);
+  assert.match(page, /<h1>\{sidebarLocationName\}<\/h1>/);
+  assert.doesNotMatch(page, /className="brand-lockup"[^]*?<p className="eyebrow">Workforce<\/p>/);
 });
 
 test("Team is a sidebar dropdown beneath Home with roster and role routes", async () => {
@@ -72,6 +76,18 @@ test("Schedule is a sidebar dropdown with scheduling routes", async () => {
   assert.match(page, />My availability<\/button>/);
   assert.match(page, />Team availability<\/button>/);
   assert.match(page, /navigateToView\("team_availability"\)/);
+});
+
+test("manager schedule can open the shared add-team-member modal below the planner", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+
+  assert.match(page, /className="shift-planner-layout"/);
+  assert.match(page, /className="shift-add-employees-button"[^]*?aria-controls="add-team-member-form"[^]*?Add Employees/);
+  assert.equal((page.match(/id="add-team-member-form"/g) ?? []).length, 1);
+  assert.match(page, /className=\{activeView === "employees"[\s\S]*?viewingRosterEmployee \? "team-member-profile-view" : "panel feature-panel"[\s\S]*?: "employee-modal-host"\}/);
+  assert.match(styles, /\.shift-planner-layout \{[^}]*display: grid;[^}]*gap: 12px;/s);
+  assert.match(styles, /\.shift-add-employees-button \{[^}]*justify-self: start;[^}]*color: var\(--blue-deep\);/s);
 });
 
 test("shift editor uses clear time labels and available role options", async () => {
@@ -233,6 +249,7 @@ test("sidebar dropdowns collapse when another section is selected", async () => 
 
 test("Roster includes complete team fields without placeholders for contact, location, or role", async () => {
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
 
   [
     "Team member",
@@ -247,29 +264,23 @@ test("Roster includes complete team fields without placeholders for contact, loc
   assert.doesNotMatch(page, /phone: "To be added"/);
   assert.doesNotMatch(page, /location: "To be added"/);
   assert.doesNotMatch(page, /wage: "To be added"/);
-  assert.match(page, /function updateEmployeeDetail/);
-  assert.match(page, /function rosterInputValue/);
   assert.match(page, /className="roster-table"/);
   assert.match(page, /clearRosterPlaceholder\(normalizedEmployee\.email\)/);
   assert.match(page, /role: clearRosterPlaceholder\(normalizedEmployee\.role\)/);
   assert.match(page, /wage: formatWageInput\(clearRosterPlaceholder\(normalizedEmployee\.wage\)\)/);
   assert.doesNotMatch(page, /<small>Email<\/small>/);
   assert.doesNotMatch(page, /<small>Phone number<\/small>/);
-  assert.match(page, /placeholder="Email"/);
-  assert.match(page, /placeholder="Phone number"/);
+  assert.match(page, /type="email"[\s\S]*?value=\{employeeForm\.email\}/);
+  assert.match(page, /type="tel"[\s\S]*?value=\{employeeForm\.phone\}/);
   assert.match(page, /availableLocations\.map\(\(location\)/);
   assert.match(page, /locationNamesFromBasicInfo\(savedBasicInfo\)/);
   assert.match(page, /employee\.location === previousLocationName/);
   assert.doesNotMatch(page, /!availableLocations\.includes\(employee\.location\)/);
   assert.match(page, /availableRoles\.map\(\(role\)/);
-  assert.match(page, /<select[^]*aria-label=\{`Location for \$\{employee\.name\}`\}/);
-  assert.match(page, /<select[^]*aria-label=\{`Role for \$\{employee\.name\}`\}/);
   assert.match(page, /<option value="">Select<\/option>/);
-  assert.match(page, /employee\.id === 1 \? \(/);
+  assert.match(page, /employee\.id === 1 \? <span>Admin<\/span> : employee\.accessLevel/);
   assert.match(page, /<span>Admin<\/span>/);
   assert.match(page, /normalizedEmployee\.id === 1[^]*\? "Admin"/);
-  assert.match(page, /aria-label=\{`Access level for \$\{employee\.name\}`\}/);
-  assert.match(page, /<option value="Employee">Employee<\/option>/);
   assert.match(page, />\s*Add team member\s*<\/button>/);
   assert.match(page, /className="roster-heading"/);
   assert.match(page, /isAddingEmployee \? \(/);
@@ -283,18 +294,27 @@ test("Roster includes complete team fields without placeholders for contact, loc
   assert.match(page, /employeeForm\.email/);
   assert.match(page, /employeeForm\.phone/);
   assert.match(page, /<span>First name <b[^>]*>\*<\/b><\/span>[^]*?<input[^]*?required/s);
-  assert.match(page, /<span>Last name <b[^>]*>\*<\/b><\/span>[^]*?<input[^]*?required/s);
+  assert.match(page, /<span>Last name <b[^>]*>\*<\/b><\/span>[^]*?<input[^]*?required=\{editingEmployeeId === null\}/s);
   assert.match(page, /<span>Email <b[^>]*>\*<\/b><\/span>[^]*?<input[^]*?required/s);
   assert.match(page, /<span>Mobile phone number <b[^>]*>\*<\/b><\/span>[^]*?<input[^]*?required/s);
   assert.match(page, /employeeForm\.location/);
   assert.match(page, /employeeForm\.wage/);
+  assert.match(page, /function sanitizeWageInput/);
+  assert.match(page, /value\.replace\(\/\[\^\\d\.\]\/g, ""\)/);
+  assert.match(page, /wage: sanitizeWageInput\(event\.target\.value\)/);
   assert.match(page, /function formatWageInput/);
   assert.match(page, /return `\$\$\{amount\.toFixed\(2\)\}\/hr`/);
-  assert.match(page, /updateEmployeeDetail\(employee\.id, "wage", formatWageInput\(event\.target\.value\)\)/);
-  assert.match(page, /onFocus=\{\(\) => updateEmployeeDetail\(employee\.id, "wage", ""\)\}/);
+  assert.match(page, /onBlur=\{\(\) => setEmployeeForm\(\(form\) => \(\{ \.\.\.form, wage: formatWageInput\(form\.wage\) \}\)\)\}/);
   assert.match(page, /event\.target\.value\.replace\(\/\\D\/g, ""\)/);
-  assert.match(page, /pattern="\[0-9\]\*"/);
   assert.match(page, /function cancelAddingEmployee/);
+  assert.match(page, /function openEditEmployeeModal\(employee: Employee\)/);
+  assert.match(page, /setEditingEmployeeId\(employee\.id\)/);
+  assert.match(page, /onClick=\{\(\) => openEditEmployeeModal\(employee\)\}/);
+  assert.match(page, /editingEmployeeId === null \? "Add team member" : "Edit team member"/);
+  assert.match(page, /editingEmployeeId === null \? "Add team member" : "Save changes"/);
+  assert.match(page, /findEmployeeWithPin\(state\.employees, pin, editingEmployeeId \?\? undefined\)/);
+  assert.match(page, /hasEmployeeWithName\(state\.employees, name, editingEmployeeId \?\? undefined\)/);
+  assert.match(page, /employee\.id === editingEmployeeId[\s\S]*?name,[\s\S]*?email: employeeForm\.email\.trim\(\)/);
   assert.match(page, /className="employee-edit-button"/);
   assert.match(page, /className="roster-row-remove"/);
   assert.match(page, /const activeUserIsAdmin = activeEmployee\?\.accessLevel === "Admin"/);
@@ -305,14 +325,14 @@ test("Roster includes complete team fields without placeholders for contact, loc
   assert.match(page, /className="employee-delete-modal"/);
   assert.match(page, />Delete employee<\/button>/);
   assert.doesNotMatch(page, /window\.confirm\("Are you sure you want to remove this employee\?"\)/);
-  assert.match(page, /data-editing-employee-row=\{isEditing \? employee\.id : undefined\}/);
-  assert.match(page, /function finishRosterEditing/);
-  assert.match(page, /document\.addEventListener\("pointerdown", finishRosterEditing\)/);
-  assert.match(page, /const numericPin = pin\.replace\(\/\\D\/g, ""\)\.slice\(0, 4\)/);
+  assert.doesNotMatch(page, /data-editing-employee-row/);
+  assert.doesNotMatch(page, /function finishRosterEditing/);
+  assert.doesNotMatch(page, /aria-label=\{`Name for \$\{employee\.name\}`\}/);
   assert.match(page, /pin: event\.target\.value\.replace\(\/\\D\/g, ""\)\.slice\(0, 4\)/);
   assert.match(page, /pattern="\[0-9\]\{4\}"/);
   assert.match(page, /maxLength=\{4\}/);
   assert.match(page, /placeholder="\*\*\*\*"/);
+  assert.match(page, /type="text"[\s\S]*?value=\{employeeForm\.pin\}[\s\S]*?aria-label="Employee PIN"/);
   assert.match(page, /className="team-member-add-role-button"/);
   assert.match(page, /function addRoleFromEmployeeForm/);
   assert.match(page, /aria-label="New role name"/);
@@ -326,21 +346,148 @@ test("Roster includes complete team fields without placeholders for contact, loc
   assert.match(page, /type="radio"/);
   assert.match(page, /name="new-team-member-access-level"/);
   assert.match(page, /checked=\{employeeForm\.accessLevel === accessLevel\}/);
+  assert.match(page, /className=\{`access-\$\{accessLevel\.toLocaleLowerCase\(\)\}`\}/);
+  assert.match(styles, /\.team-member-access-options label\.access-admin input:checked \+ span \{[^}]*background: var\(--danger\);/s);
+  assert.match(styles, /\.team-member-access-options label\.access-manager input:checked \+ span \{[^}]*background: #d97706;/s);
+  assert.match(styles, /\.team-member-access-options label\.access-employee input:checked \+ span \{[^}]*background: var\(--blue-deep\);/s);
   assert.match(page, /className="team-member-setting-fields"/);
   assert.match(page, /className="team-member-pill-options team-member-status-options"/);
   assert.match(page, /name="new-team-member-status"/);
   assert.match(page, /checked=\{employeeForm\.active === isActive\}/);
   assert.match(page, /active: employeeForm\.active/);
   assert.match(page, /employee\.active \? "Active" : "Inactive"/);
-  assert.match(page, /\{state\.employees\.map\(\(employee\) => \{/);
+  assert.match(page, /\{\[\.\.\.state\.employees\][\s\S]*?\.sort\(\(first, second\) => first\.name\.localeCompare\(second\.name, undefined, \{ sensitivity: "base" \}\)\)[\s\S]*?\.map\(\(employee\) => \{/);
+  assert.match(page, /className="roster-name-link" onClick=\{\(\) => openRosterEmployeeProfile\(employee\.id\)\}/);
+  assert.match(page, /const accountOwnerEmployeeId = state\.employees\.find/);
+  assert.match(page, /employee\.id === accountOwnerEmployeeId \? <span className="roster-account-owner">Account Owner<\/span>/);
+  assert.match(page, /className="team-member-profile-back" onClick=\{closeRosterEmployeeProfile\}/);
+  assert.match(page, /className="team-member-profile-back-label">Back<\/span>/);
+  assert.match(page, /className="team-member-profile-summary"/);
+  assert.match(page, /Team member profile sections/);
+  assert.match(page, /Access, roles &amp; wages/);
+  assert.match(page, /Payroll information/);
+  assert.match(page, /W-2 Employee/);
+  assert.match(page, /1099 Contractor/);
+  assert.match(page, /Recent job history/);
+  assert.match(page, /Time off balances/);
+  assert.match(page, /<h3>Contact information<\/h3>/);
+  assert.match(page, /<dt>Preferred name<\/dt>/);
+  assert.match(page, /<dt>Personal email<\/dt>/);
+  assert.match(page, /className="personal-email-status">Not verified<\/small>/);
+  assert.match(page, /<dt>Mobile number<\/dt>/);
+  assert.match(page, /<dt>Emergency contact<\/dt>/);
+  assert.match(page, /Emergency contact notification preference/);
+  assert.match(page, /<h3>Payroll information<\/h3>/);
+  assert.match(page, /<dt>Legal name<\/dt>/);
+  assert.match(page, /<dt>Date of birth<\/dt>/);
+  assert.match(page, /<dt>Social Security number<\/dt>/);
+  assert.match(page, /<dt>Home address<\/dt>/);
+  assert.match(page, /function startEditingPersonalPayroll/);
+  assert.match(page, /function savePersonalPayroll/);
+  assert.match(page, /Certificates \(\{viewingRosterEmployee\.certificates\?\.length \?\? 0\}\)/);
+  assert.match(page, /Add a certificate/);
+  assert.match(page, /No certificates added for \{viewingRosterEmployee\.name\.split\(" "\)\[0\]\} yet\./);
+  assert.match(page, /Onboarding \(\{Object\.keys\(viewingRosterEmployee\.onboardingDocuments \?\? \{\}\)\.length\}\)/);
+  ["W-4 Form", "I-9 Form", "State Withholding Form", "W-9 Form", "Payment Method Form"]
+    .forEach((documentName) => assert.match(page, new RegExp(`"${documentName}"`)));
+  assert.match(page, /function uploadEmployeeCertificate/);
+  assert.match(page, /function uploadOnboardingDocument/);
+  assert.match(page, /className="team-availability-week-calendar" role="dialog" aria-label="Choose team availability week"/);
+  assert.match(page, /function chooseAvailabilityWeek/);
+  assert.match(page, /className="apply" onClick=\{applyAvailabilityWeek\} disabled=\{pendingWeekDate === weekDate\}>Apply<\/button>/);
+  assert.match(styles, /\.team-availability-week-calendar-days button\.in-range \{ background: #dceeff; \}/);
+  assert.match(styles, /radial-gradient\(circle at center, var\(--blue-accent\) 0 22px, transparent 23px\)/);
+  assert.match(styles, /\.team-availability-preference button \{[^}]*font-size: 0\.88rem;[^}]*font-weight: 800;/s);
+  assert.match(page, /<h3>Attendance • this month<\/h3>/);
+  [
+    "On time rate",
+    "Average hours/week",
+    "Missed clock outs",
+    "No shows",
+    "Average shift rating",
+    "Shifts worked",
+    "Missed breaks",
+    "Role breakdown",
+    "Shoutouts",
+    "Manager notes",
+  ].forEach((performanceLabel) => assert.match(page, new RegExp(performanceLabel)));
+  assert.match(page, /function employeePerformanceFor/);
+  assert.match(page, /function addManagerNote/);
+  assert.match(page, /managerNotes: \[/);
+  assert.match(styles, /\.performance-metric-grid \{[^}]*grid-template-columns: repeat\(4, minmax\(0, 1fr\)\);/s);
+  assert.match(styles, /\.performance-manager-notes-card textarea \{/);
+  assert.match(page, /function messageRosterEmployee/);
+  assert.match(page, /function savePayrollClassification/);
+  assert.match(page, /function updateEmployeeLocationSetting/);
+  assert.match(page, /className="team-member-location-toggle"/);
+  assert.match(page, /role="switch"/);
+  assert.match(page, /disabled=\{Boolean\(viewingRosterEmployee\.terminated\)\}/);
+  assert.match(page, /updateEmployeeStatus\(viewingRosterEmployee\.id, event\.target\.checked\)/);
+  assert.match(page, /viewingRosterEmployee\.active \? "team-member-job-details" : "team-member-job-details inactive"/);
+  assert.match(page, /disabled=\{!viewingRosterEmployee\.active\}/);
+  assert.match(page, /checked=\{viewingRosterEmployee\.locationSettings\.showInSchedule\}/);
+  assert.match(page, /checked=\{viewingRosterEmployee\.locationSettings\.canWaiveMissedBreaks\}/);
+  assert.match(page, /function openTerminationFlow/);
+  assert.match(page, /terminationStep === "notice"/);
+  assert.match(page, /Before terminating \{terminatingEmployee\.name\} please note that:/);
+  assert.match(page, /onClick=\{\(\) => setTerminationStep\("details"\)\}>Next<\/button>/);
+  assert.match(page, /aria-label="Reason for termination"/);
+  assert.match(page, /aria-label="Termination date"/);
+  assert.match(page, /checked=\{eligibleForRehire\}/);
+  assert.match(page, /placeholder="Add an optional note\.\.\."/);
+  [
+    "Absenteeism / Late",
+    "Admin Error / Accidental Account",
+    "Availability Change",
+    "Business Conditions",
+    "Contractor",
+    "Inadequate Job Performance",
+    "Poor Fit - Culture",
+    "Poor Fit - Experience",
+    "Project Completed",
+    "Requested via Clover",
+    "Seasonal",
+    "Unacceptable Behavior",
+    "Voluntary Resignation",
+  ].forEach((reason) => assert.match(page, new RegExp(`<option value="${reason.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}">${reason.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}<\\/option>`)));
+  assert.match(page, /function terminateRosterEmployee/);
+  assert.match(page, /terminated: true,[\s\S]*?terminationReason,/);
+  assert.match(page, /\{ type: "terminated", date: terminationDate, reason: terminationReason \}/);
+  assert.match(page, /function rehireRosterEmployee/);
+  assert.match(page, /\{ type: "rehired", date: today \}/);
+  assert.match(page, /className=\{viewingRosterEmployee\.terminated \? "team-member-rehire" : "team-member-terminate"\}/);
+  assert.match(page, /\{viewingRosterEmployee\.terminated \? "Rehire" : "Terminate"\}/);
+  assert.match(page, /viewingRosterEmployee\.id !== activeEmployeeId && !viewingRosterEmployee\.terminated/);
+  assert.match(page, /terminationReason,[\s\S]*?terminationDate,[\s\S]*?eligibleForRehire,[\s\S]*?terminationNote: terminationNote\.trim\(\)/);
+  assert.match(page, /setTerminationStep\("success"\)/);
+  assert.match(page, /terminationStep === "success"/);
+  assert.match(page, /was successfully terminated\./);
+  assert.match(page, /viewingRosterEmployee\.employmentHistory \?\? \[\]/);
+  assert.match(page, /Terminated from \$\{viewingRosterEmployee\.location \|\| sidebarLocationName\}/);
+  assert.match(page, /Rehired at \$\{viewingRosterEmployee\.location \|\| sidebarLocationName\}/);
+  assert.match(page, /employmentHistory: Array\.isArray\(normalizedEmployee\.employmentHistory\)/);
+  assert.match(styles, /\.roster-name-link \{[^}]*color: var\(--blue-accent\);[^}]*text-decoration: underline;/s);
+  assert.match(styles, /\.team-member-profile-layout \{[^}]*grid-template-columns: 250px minmax\(0, 1fr\);/s);
+  assert.match(styles, /\.team-member-profile-summary,[\s\S]*?\.team-member-profile-tabs \{[^}]*background: #ffffff;/s);
+  assert.match(styles, /\.team-member-personal-content \{[^}]*display: grid;[^}]*gap: 18px;/s);
+  assert.match(styles, /\.team-member-personal-details div \{[^}]*grid-template-columns: minmax\(190px, 280px\) minmax\(0, 1fr\);/s);
+  assert.match(styles, /\.personal-email-status \{[^}]*background: #fff0e9;[^}]*color: #c34c24;/s);
+  assert.match(styles, /\.team-member-documents-content \{[^}]*display: grid;[^}]*gap: 18px;/s);
+  assert.match(styles, /\.onboarding-document-header,[\s\S]*?\.onboarding-document-row \{[^}]*grid-template-columns: 1fr 1fr 1\.1fr;/s);
+  assert.match(styles, /\.team-member-profile-back \{[^}]*text-decoration: none;/s);
+  assert.match(styles, /\.team-member-profile-back-label \{[^}]*text-decoration: underline;/s);
+  assert.match(styles, /\.termination-modal \{[^}]*width: min\(760px, 100%\);[^}]*border-radius: 20px;/s);
+  assert.match(styles, /\.termination-notice-modal \{[^}]*width: min\(640px, 100%\);/s);
+  assert.match(styles, /\.termination-notice-modal ul \{[^}]*list-style: disc outside;/s);
+  assert.match(styles, /\.termination-notice-modal li \{[^}]*display: list-item;/s);
+  assert.match(styles, /\.termination-fields \{[^}]*grid-template-columns: minmax\(0, 1fr\) minmax\(240px, 300px\);/s);
+  assert.match(styles, /\.team-member-location-toggle input:checked \+ span \{ background: var\(--blue-accent\); \}/);
+  assert.match(styles, /\.team-member-job-details\.inactive \{[^}]*filter: grayscale\(1\);[^}]*opacity: 0\.42;/s);
+  assert.match(styles, /\.termination-success-check \{[^}]*color: #16842f;/s);
   assert.match(page, /function updateEmployeeStatus/);
-  assert.match(page, /aria-label=\{`Status for \$\{employee\.name\}`\}/);
-  assert.match(page, /updateEmployeeStatus\(employee\.id, event\.target\.value === "active"\)/);
-  assert.match(page, /<option value="Admin">Admin<\/option>/);
-  assert.match(page, /<option value="Manager">Manager<\/option>/);
-  assert.match(page, /<option value="Employee">Employee<\/option>/);
-
-  const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+  assert.match(page, /className=\{employee\.active \? "roster-status active" : "roster-status"\}/);
+  assert.doesNotMatch(page, /aria-label=\{`Status for \$\{employee\.name\}`\}/);
+  assert.doesNotMatch(page, /updateEmployeeStatus\(employee\.id, event\.target\.value === "active"\)/);
   assert.match(styles, /\.roster-actions \{[^}]*justify-content: center;[^}]*padding-right: 28px;/s);
   assert.match(styles, /\.roster-header > span:nth-child\(n \+ 2\) \{\s*text-align: center;/);
   assert.match(styles, /\.roster-row > div\[role="cell"\]:nth-child\(n \+ 2\) \{\s*text-align: center;/);
@@ -463,11 +610,22 @@ test("manager can persist manual worked-hour adjustments", async () => {
 
 test("employee Hours view is read-only and filtered to the signed-in employee", async () => {
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
 
   assert.match(page, /id: "hours", label: "Hours", icon: "clock"/);
   assert.match(page, /employee\.id === activeEmployeeId/);
   assert.match(page, /mode === "manager" \? \(/);
-  assert.match(page, /mode === "manager" \? hoursRounding : "actual"/);
+  assert.match(page, /type HoursDisplay = "actual" \| "rounded"/);
+  assert.match(page, /hoursRoundingMinutes: HoursRoundingMinutes/);
+  assert.match(page, /function setHoursRoundingPolicy/);
+  assert.match(page, /hoursRoundingMinutes: hoursRounding/);
+  assert.match(page, /hoursDisplay === "rounded"[\s\S]*?state\.hoursRoundingMinutes[\s\S]*?: "actual"/);
+  assert.match(page, /aria-label="View actual or rounded time worked"/);
+  assert.match(page, /Rounded \(\{state\.hoursRoundingMinutes\} min\)/);
+  assert.match(page, /className="hours-rounding-set-button"/);
+  assert.match(page, />\s*Set\s*<\/button>/);
+  assert.match(styles, /\.hours-rounding-actions \{[^}]*display: flex;/s);
+  assert.match(styles, /\.hours-rounding-set-button \{[^}]*background: var\(--blue-deep\);/s);
   assert.match(page, /if \(view === "hours"\) \{[\s\S]*?setActiveHoursSectionTab\("hours"\)/);
 });
 
@@ -640,6 +798,15 @@ test("signed-in users have a header account menu instead of a sidebar logout pan
   assert.match(page, /notificationRequests = activeUserCanManage/);
   assert.match(page, /operationalAlerts = activeUserCanManage/);
   assert.match(page, /function operationalAlertsFor/);
+  assert.match(page, /const earlyClockInGraceMs = 5 \* 60 \* 1000;/);
+  assert.match(page, /const automaticClockOutDelayMs = 2 \* 60 \* 60 \* 1000;/);
+  assert.match(page, /function isWithinClockInGrace/);
+  assert.match(page, /\? !isWithinClockInGrace\(currentTime, scheduledTime\.getTime\(\)\)/);
+  assert.match(page, /function applyAutomaticClockOuts/);
+  assert.match(page, /shiftEndDateTime\(shift\)\.getTime\(\) \+ automaticClockOutDelayMs/);
+  assert.match(page, /explanation: automaticClockOutExplanation/);
+  assert.match(page, /title: "Automatic clock-out"/);
+  assert.match(page, /return "Automatic clock-out";/);
   assert.match(page, /title: `\$\{timing\} \$\{action\}`/);
   assert.match(page, /detail: `\$\{employeeName\} \$\{actionPastTense\} \$\{timing\.toLocaleLowerCase\(\)\} at \$\{formatClockTime\(event\.at\)\}; scheduled for/);
   assert.match(page, /title: "Late return from break"/);
@@ -833,6 +1000,7 @@ test("dismissible popups close from the backdrop while required forms stay prote
 
 test("manager settings includes a gear icon, copied tabs, and the basic info template", async () => {
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
   const expectedTabs = [
     "Basic info",
     "POS connection",
@@ -879,4 +1047,23 @@ test("manager settings includes a gear icon, copied tabs, and the basic info tem
   assert.match(page, /maxLength=\{inputType === "tel" \? 14 : undefined\}/);
   assert.match(page, /className="settings-field-pencil"/);
   assert.match(page, /aria-label=\{`Edit \$\{label\}`\}/);
+  assert.match(page, /onClick=\{openAddLocationModal\}>Add a new location<\/button>/);
+  assert.match(page, /We&apos;re glad you&apos;re adding a new location!/);
+  assert.match(page, /New Location Name/);
+  assert.match(page, /New Location Zip/);
+  assert.match(page, /\/\^\\d\{5\}\$\/\.test\(location\.zip\)/);
+  assert.match(page, /event\.target\.value\.replace\(\/\\D\/g, ""\)\.slice\(0, 5\)/);
+  assert.match(page, /pattern="\[0-9\]\{5\}"/);
+  assert.match(page, /minLength=\{5\}/);
+  assert.match(page, /maxLength=\{5\}/);
+  assert.match(page, /newLocationDrafts\.length < maximumNewLocations/);
+  assert.match(page, />\s*<span aria-hidden="true">\+<\/span> Add Another Location\s*<\/button>/);
+  assert.match(page, /className="add-location-submit" disabled=\{!canAddNewLocations\}>Add Location<\/button>/);
+  assert.match(page, /window\.localStorage\.setItem\(companyLocationsStorageKey, JSON\.stringify\(updatedLocations\)\)/);
+  assert.match(page, /\.\.\.companyLocations\.map\(\(location\) => location\.name\.trim\(\)\)\.filter\(Boolean\)/);
+  assert.match(styles, /\.brand-lockup \{[^}]*width: 100%;[^}]*align-items: center;/s);
+  assert.match(styles, /\.brand-lockup > div \{[^}]*flex: 1 1 auto;[^}]*min-width: 0;/s);
+  assert.match(styles, /\.brand-lockup h1 \{[^}]*font-size: 1\.05rem;[^}]*line-height: 1;[^}]*text-overflow: ellipsis;[^}]*white-space: nowrap;/s);
+  assert.match(styles, /\.add-location-modal \{[^}]*width: min\(820px, 100%\);[^}]*border-radius: 20px;/s);
+  assert.match(styles, /\.add-location-row \{[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/s);
 });

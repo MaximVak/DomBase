@@ -47,9 +47,49 @@ type BasicInfo = {
   companyPhone: string;
 };
 type BasicInfoField = keyof BasicInfo;
+type CompanyLocation = {
+  name: string;
+  zip: string;
+};
+type NewLocationDraft = CompanyLocation;
 type EmployeeScheduleTab = "day" | "week" | "month";
-type HoursRounding = "actual" | 5 | 10 | 15;
+type HoursRoundingMinutes = 5 | 10 | 15;
+type HoursRounding = "actual" | HoursRoundingMinutes;
+type HoursDisplay = "actual" | "rounded";
+type TeamMemberProfileTab = "job" | "personal" | "documents" | "performance";
+type PayrollClassification = "W-2 Employee" | "1099 Contractor";
 type AccessLevel = "Admin" | "Manager" | "Employee" | "";
+type EmployeeLocationSettings = {
+  showInSchedule: boolean;
+  sendLocationAlerts: boolean;
+  includeInTimeClockErrors: boolean;
+  eligibleForOpenShifts: boolean;
+  canWaiveMissedBreaks: boolean;
+};
+type EmploymentHistoryEvent = {
+  type: "terminated" | "rehired";
+  date: string;
+  reason?: string;
+};
+type EmployeeCertificate = {
+  id: number;
+  name: string;
+  fileName: string;
+};
+type ManagerNote = {
+  id: number;
+  text: string;
+  createdAt: string;
+};
+type EmployeePerformance = {
+  onTimeRate: number;
+  averageHoursPerWeek: number;
+  missedClockOuts: number;
+  noShows: number;
+  shiftsWorked: number;
+  missedBreaks: number;
+  roleHours: { role: string; hours: number; percentage: number }[];
+};
 type PtoHistoryStatusFilter = "all" | Exclude<PtoRequest["status"], "pending">;
 type TimeExceptionAction = "in" | "out" | "break_end";
 type Employee = {
@@ -63,6 +103,25 @@ type Employee = {
   wage: string;
   pin: string;
   active: boolean;
+  terminated?: boolean;
+  startDate: string;
+  payrollId: string;
+  payrollClassification: PayrollClassification;
+  dateOfBirth: string;
+  socialSecurityNumber: string;
+  homeAddress: string;
+  homeCityStateZip: string;
+  emergencyContact: string;
+  emergencyContactPreference: string;
+  locationSettings: EmployeeLocationSettings;
+  terminationReason?: string;
+  terminationDate?: string;
+  eligibleForRehire?: boolean;
+  terminationNote?: string;
+  employmentHistory?: EmploymentHistoryEvent[];
+  certificates?: EmployeeCertificate[];
+  onboardingDocuments?: Record<string, string>;
+  managerNotes?: ManagerNote[];
 };
 
 type Department = {
@@ -226,6 +285,7 @@ type StaffState = {
   pendingScheduleUpdateEmployeeIds: number[];
   scheduleDraftsByManager: Record<number, ScheduleDraft>;
   availabilityRequests: AvailabilityRequest[];
+  hoursRoundingMinutes: HoursRoundingMinutes;
 };
 
 const managerPin = "0000";
@@ -233,10 +293,14 @@ const storageKey = "dombase-staff-state-v1";
 const stateBackupStorageKey = "dombase-staff-state-backup-v1";
 const unpublishedShiftsStorageKey = "dombase-unpublished-shifts-v1";
 const basicInfoStorageKey = "dombase-basic-info-v1";
+const companyLocationsStorageKey = "dombase-company-locations-v1";
 const openedNotificationsStorageKey = "dombase-opened-notifications-v1";
 const dismissedNotificationsStorageKey = "dombase-dismissed-notifications-v1";
 const timeExceptionExplanationLimit = 250;
+const earlyClockInGraceMs = 5 * 60 * 1000;
 const missedClockInGraceMs = 5 * 60 * 1000;
+const automaticClockOutDelayMs = 2 * 60 * 60 * 1000;
+const automaticClockOutExplanation = "Automatically clocked out two hours after the scheduled shift ended.";
 const missedBreakThresholdMs = 5 * 60 * 60 * 1000;
 const operationalAlertLookbackMs = 7 * 24 * 60 * 60 * 1000;
 const scheduleStartHour = 7;
@@ -253,6 +317,22 @@ const shiftWeekdayOptions = [
   { label: "Fri", value: 5 },
   { label: "Sat", value: 6 },
   { label: "Sun", value: 0 },
+];
+const maximumNewLocations = 5;
+const emptyNewLocationDraft = (): NewLocationDraft => ({ name: "", zip: "" });
+const defaultEmployeeLocationSettings = (): EmployeeLocationSettings => ({
+  showInSchedule: true,
+  sendLocationAlerts: true,
+  includeInTimeClockErrors: true,
+  eligibleForOpenShifts: true,
+  canWaiveMissedBreaks: false,
+});
+const onboardingDocumentNames = [
+  "W-4 Form",
+  "I-9 Form",
+  "State Withholding Form",
+  "W-9 Form",
+  "Payment Method Form",
 ];
 
 const navItems: { id: ViewId; label: string; icon: string; managerOnly?: boolean }[] = [
@@ -318,6 +398,21 @@ const starterState: StaffState = {
       wage: "",
       pin: "0000",
       active: true,
+      terminated: false,
+      startDate: getLocalDateValue(),
+      payrollId: "",
+      payrollClassification: "W-2 Employee",
+      dateOfBirth: "",
+      socialSecurityNumber: "",
+      homeAddress: "",
+      homeCityStateZip: "",
+      emergencyContact: "",
+      emergencyContactPreference: "",
+      locationSettings: defaultEmployeeLocationSettings(),
+      employmentHistory: [],
+      certificates: [],
+      onboardingDocuments: {},
+      managerNotes: [],
     },
   ],
   departments: [{ id: 1, name: "Department not set", roles: [], managerIds: [1] }],
@@ -341,6 +436,7 @@ const starterState: StaffState = {
   pendingScheduleUpdateEmployeeIds: [],
   scheduleDraftsByManager: {},
   availabilityRequests: [],
+  hoursRoundingMinutes: 15,
 };
 
 export default function Home() {
@@ -359,6 +455,10 @@ export default function Home() {
   const [basicInfo, setBasicInfo] = useState<BasicInfo>(() => readStoredBasicInfo());
   const [savedBasicInfoSnapshot, setSavedBasicInfoSnapshot] = useState(() => JSON.stringify(readStoredBasicInfo()));
   const [editingBasicInfoField, setEditingBasicInfoField] = useState<BasicInfoField | null>(null);
+  const [companyLocations, setCompanyLocations] = useState<CompanyLocation[]>(() => readStoredCompanyLocations());
+  const [isAddingLocation, setIsAddingLocation] = useState(false);
+  const [newLocationDrafts, setNewLocationDrafts] = useState<NewLocationDraft[]>([emptyNewLocationDraft()]);
+  const [newLocationError, setNewLocationError] = useState("");
   const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [isMessagesOpen, setIsMessagesOpen] = useState(false);
@@ -395,6 +495,7 @@ export default function Home() {
   const [activeHoursTab, setActiveHoursTab] = useState<CalendarTab>("today");
   const [activeHoursSectionTab, setActiveHoursSectionTab] = useState<HoursSectionTab>("hours");
   const [hoursRounding, setHoursRounding] = useState<HoursRounding>("actual");
+  const [hoursDisplay, setHoursDisplay] = useState<HoursDisplay>("actual");
   const [authMessage, setAuthMessage] = useState("");
   const [employeeForm, setEmployeeForm] = useState(emptyEmployeeForm);
   const [employeeMessage, setEmployeeMessage] = useState("");
@@ -403,6 +504,24 @@ export default function Home() {
   const [newEmployeeRole, setNewEmployeeRole] = useState("");
   const employeeRoleInputRef = useRef<HTMLInputElement>(null);
   const [editingEmployeeId, setEditingEmployeeId] = useState<number | null>(null);
+  const [viewingRosterEmployeeId, setViewingRosterEmployeeId] = useState<number | null>(null);
+  const [teamMemberProfileTab, setTeamMemberProfileTab] = useState<TeamMemberProfileTab>("job");
+  const [editingPayrollEmployeeId, setEditingPayrollEmployeeId] = useState<number | null>(null);
+  const [payrollClassificationDraft, setPayrollClassificationDraft] = useState<PayrollClassification>("W-2 Employee");
+  const [editingPersonalPayrollEmployeeId, setEditingPersonalPayrollEmployeeId] = useState<number | null>(null);
+  const [personalPayrollDraft, setPersonalPayrollDraft] = useState({
+    dateOfBirth: "",
+    socialSecurityNumber: "",
+    homeAddress: "",
+    homeCityStateZip: "",
+  });
+  const [managerNoteDraft, setManagerNoteDraft] = useState("");
+  const [terminatingEmployeeId, setTerminatingEmployeeId] = useState<number | null>(null);
+  const [terminationStep, setTerminationStep] = useState<"notice" | "details" | "success">("notice");
+  const [terminationReason, setTerminationReason] = useState("");
+  const [terminationDate, setTerminationDate] = useState(today);
+  const [eligibleForRehire, setEligibleForRehire] = useState(true);
+  const [terminationNote, setTerminationNote] = useState("");
   const [employeePendingDeletion, setEmployeePendingDeletion] = useState<Employee | null>(null);
   const [isAddingDepartment, setIsAddingDepartment] = useState(false);
   const [newDepartmentName, setNewDepartmentName] = useState("");
@@ -489,6 +608,14 @@ export default function Home() {
     const timer = window.setInterval(() => setCurrentTime(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setState((current) => applyAutomaticClockOuts(current, currentTime));
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [currentTime]);
 
   useEffect(() => {
     if (!isAccountMenuOpen) return;
@@ -661,20 +788,6 @@ export default function Home() {
     };
   }, [isPtoHistoryEmployeeFilterOpen]);
 
-  useEffect(() => {
-    if (editingEmployeeId === null) return;
-
-    function finishRosterEditing(event: PointerEvent) {
-      const target = event.target as Element | null;
-      if (!target?.closest(`[data-editing-employee-row="${editingEmployeeId}"]`)) {
-        setEditingEmployeeId(null);
-      }
-    }
-
-    document.addEventListener("pointerdown", finishRosterEditing);
-    return () => document.removeEventListener("pointerdown", finishRosterEditing);
-  }, [editingEmployeeId]);
-
   const activeEmployee = state.employees.find((employee) => employee.id === activeEmployeeId);
   const activeUserIsAdmin = activeEmployee?.accessLevel === "Admin";
   const activeAvailabilityRequest = [...(state.availabilityRequests ?? [])]
@@ -838,7 +951,17 @@ export default function Home() {
     [state.employees],
   );
   const savedBasicInfo = JSON.parse(savedBasicInfoSnapshot) as BasicInfo;
-  const availableLocations = locationNamesFromBasicInfo(savedBasicInfo);
+  const sidebarLocationName = savedBasicInfo.locationName.trim() || defaultBasicInfo.locationName;
+  const accountOwnerEmployeeId = state.employees.find(
+    (employee) => employee.name.trim().toLocaleLowerCase() === savedBasicInfo.accountOwner.trim().toLocaleLowerCase(),
+  )?.id ?? state.employees.find((employee) => employee.accessLevel === "Admin")?.id;
+  const availableLocations = Array.from(new Set([
+    ...locationNamesFromBasicInfo(savedBasicInfo),
+    ...companyLocations.map((location) => location.name.trim()).filter(Boolean),
+  ]));
+  const canAddNewLocations = newLocationDrafts.length > 0 && newLocationDrafts.every(
+    (location) => location.name.trim() && /^\d{5}$/.test(location.zip),
+  );
   const rosterRoles = Array.from(new Set(
     activeEmployees
       .map((employee) => employee.role.trim())
@@ -953,6 +1076,11 @@ export default function Home() {
   const hoursRows = useMemo(
     () => {
       const range = dateRangeForCalendarTab(parseLocalDate(hoursDate), activeHoursTab);
+      const selectedRounding = activeUserIsAdmin && mode === "manager"
+        ? hoursRounding
+        : hoursDisplay === "rounded"
+          ? state.hoursRoundingMinutes
+          : "actual";
 
       return hoursEmployees.map((employee) => ({
         employee,
@@ -964,11 +1092,11 @@ export default function Home() {
             range,
             currentTime,
           ),
-          mode === "manager" ? hoursRounding : "actual",
+          selectedRounding,
         ),
       }));
     },
-    [activeHoursTab, currentTime, hoursDate, hoursEmployees, hoursRounding, mode, state.clockEvents, state.hoursAdjustments],
+    [activeHoursTab, activeUserIsAdmin, currentTime, hoursDate, hoursDisplay, hoursEmployees, hoursRounding, mode, state.clockEvents, state.hoursAdjustments, state.hoursRoundingMinutes],
   );
   const ptoRows = useMemo(() => {
     const yearToDate = yearToDateRange(new Date(currentTime));
@@ -1007,6 +1135,18 @@ export default function Home() {
     });
   }, [currentTime, state.clockEvents, state.employees, state.hoursAdjustments, state.ptoPolicies, state.ptoRequests]);
   const activeEmployeePto = ptoRows.find((row) => row.employee.id === activeEmployeeId);
+  const viewingRosterEmployee = state.employees.find((employee) => employee.id === viewingRosterEmployeeId);
+  const terminatingEmployee = state.employees.find((employee) => employee.id === terminatingEmployeeId);
+  const viewingRosterEmployeePto = ptoRows.find((row) => row.employee.id === viewingRosterEmployeeId);
+  const viewingRosterEmployeePtoPolicy = (state.ptoPolicies ?? []).find(
+    (policy) => viewingRosterEmployeeId !== null && policy.employeeIds.includes(viewingRosterEmployeeId),
+  );
+  const viewingRosterEmployeePerformance = useMemo(
+    () => viewingRosterEmployeeId === null
+      ? null
+      : employeePerformanceFor(state, viewingRosterEmployeeId, currentTime),
+    [currentTime, state, viewingRosterEmployeeId],
+  );
   const sortedPtoRequests = useMemo(
     () => (state.ptoRequests ?? [])
       .filter((request) => mode === "manager" || request.employeeId === activeEmployeeId)
@@ -1425,6 +1565,61 @@ export default function Home() {
     setEditingBasicInfoField(null);
   }
 
+  function openAddLocationModal() {
+    setNewLocationDrafts([emptyNewLocationDraft()]);
+    setNewLocationError("");
+    setIsAddingLocation(true);
+  }
+
+  function closeAddLocationModal() {
+    setNewLocationDrafts([emptyNewLocationDraft()]);
+    setNewLocationError("");
+    setIsAddingLocation(false);
+  }
+
+  function updateNewLocationDraft(index: number, field: keyof NewLocationDraft, value: string) {
+    setNewLocationDrafts((locations) => locations.map((location, locationIndex) => (
+      locationIndex === index ? { ...location, [field]: value } : location
+    )));
+    setNewLocationError("");
+  }
+
+  function addAnotherLocationDraft() {
+    setNewLocationDrafts((locations) => (
+      locations.length < maximumNewLocations
+        ? [...locations, emptyNewLocationDraft()]
+        : locations
+    ));
+  }
+
+  function addCompanyLocations(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!canAddNewLocations) return;
+
+    const locationsToAdd = newLocationDrafts.map((location) => ({
+      name: location.name.trim(),
+      zip: location.zip.trim(),
+    }));
+    const existingNames = new Set(availableLocations.map((location) => location.toLocaleLowerCase()));
+    const requestedNames = new Set<string>();
+    const duplicateLocation = locationsToAdd.find((location) => {
+      const normalizedName = location.name.toLocaleLowerCase();
+      if (existingNames.has(normalizedName) || requestedNames.has(normalizedName)) return true;
+      requestedNames.add(normalizedName);
+      return false;
+    });
+
+    if (duplicateLocation) {
+      setNewLocationError(`${duplicateLocation.name} is already in your company locations.`);
+      return;
+    }
+
+    const updatedLocations = [...companyLocations, ...locationsToAdd];
+    window.localStorage.setItem(companyLocationsStorageKey, JSON.stringify(updatedLocations));
+    setCompanyLocations(updatedLocations);
+    closeAddLocationModal();
+  }
+
   function signOut() {
     setIsUnlocked(false);
     setIsPublicSchedule(false);
@@ -1467,6 +1662,11 @@ export default function Home() {
       setActiveHoursTab("today");
       setHoursDate(today);
     }
+    if (view === "employees") {
+      setViewingRosterEmployeeId(null);
+      setTeamMemberProfileTab("job");
+      setEditingPayrollEmployeeId(null);
+    }
     if (view === "time_off") setActiveHoursSectionTab("pto");
     if (view === "settings") setActiveSettingsTab("Basic info");
     setIsTeamNavOpen(view === "employees" || view === "departments_roles");
@@ -1485,7 +1685,7 @@ export default function Home() {
     setAuthMessage("Public schedule view. Sign in with a PIN to access employee tools.");
   }
 
-  function addEmployee(event: FormEvent<HTMLFormElement>) {
+  function saveEmployee(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const name = [employeeForm.firstName.trim(), employeeForm.lastName.trim()].filter(Boolean).join(" ");
     const role = employeeForm.role.trim();
@@ -1493,47 +1693,127 @@ export default function Home() {
 
     if (
       !employeeForm.firstName.trim()
-      || !employeeForm.lastName.trim()
+      || (editingEmployeeId === null && !employeeForm.lastName.trim())
       || !employeeForm.email.trim()
       || !employeeForm.phone.trim()
       || !role
       || pin.length !== 4
     ) return;
 
-    const employeeWithPin = findEmployeeWithPin(state.employees, pin);
+    const employeeWithPin = findEmployeeWithPin(state.employees, pin, editingEmployeeId ?? undefined);
     if (employeeWithPin) {
       setEmployeeMessage(`PIN already in use by ${employeeWithPin.name}.`);
       return;
     }
 
-    if (hasEmployeeWithName(state.employees, name)) {
+    if (hasEmployeeWithName(state.employees, name, editingEmployeeId ?? undefined)) {
       setEmployeeMessage("Name already in use.");
       return;
     }
 
-    setState((current) => ({
-      ...current,
-      employees: [
-        ...current.employees,
-        {
-          id: nextId(current.employees),
-          name,
-          email: employeeForm.email.trim(),
-          phone: formatPhoneNumberInput(employeeForm.phone),
-          accessLevel: employeeForm.accessLevel,
-          location: employeeForm.location,
-          role,
-          wage: formatWageInput(employeeForm.wage),
-          pin,
-          active: employeeForm.active,
-        },
-      ],
-    }));
+    setState((current) => {
+      if (editingEmployeeId !== null) {
+        return {
+          ...current,
+          employees: current.employees.map((employee) => (
+            employee.id === editingEmployeeId
+              ? {
+                  ...employee,
+                  name,
+                  email: employeeForm.email.trim(),
+                  phone: formatPhoneNumberInput(employeeForm.phone),
+                  accessLevel: employee.id === accountOwnerEmployeeId ? employee.accessLevel : employeeForm.accessLevel,
+                  location: employeeForm.location,
+                  role,
+                  wage: formatWageInput(employeeForm.wage),
+                  pin,
+                }
+              : employee
+          )),
+          shifts: current.shifts.map((shift) => (
+            shift.employeeId === editingEmployeeId ? { ...shift, role } : shift
+          )),
+          scheduleDraftsByManager: Object.fromEntries(
+            Object.entries(current.scheduleDraftsByManager ?? {}).map(([managerId, draft]) => [managerId, {
+              ...draft,
+              upsertedShifts: draft.upsertedShifts.map((shift) => (
+                shift.employeeId === editingEmployeeId ? { ...shift, role } : shift
+              )),
+            }]),
+          ),
+        };
+      }
+
+      return {
+        ...current,
+        employees: [
+          ...current.employees,
+          {
+            id: nextId(current.employees),
+            name,
+            email: employeeForm.email.trim(),
+            phone: formatPhoneNumberInput(employeeForm.phone),
+            accessLevel: employeeForm.accessLevel,
+            location: employeeForm.location,
+            role,
+            wage: formatWageInput(employeeForm.wage),
+            pin,
+            active: employeeForm.active,
+            terminated: false,
+            startDate: today,
+            payrollId: "",
+            payrollClassification: "W-2 Employee",
+            dateOfBirth: "",
+            socialSecurityNumber: "",
+            homeAddress: "",
+            homeCityStateZip: "",
+            emergencyContact: "",
+            emergencyContactPreference: "",
+            locationSettings: defaultEmployeeLocationSettings(),
+            employmentHistory: [],
+            certificates: [],
+            onboardingDocuments: {},
+            managerNotes: [],
+          },
+        ],
+      };
+    });
     setEmployeeForm(emptyEmployeeForm);
     setIsAddingEmployeeRole(false);
     setNewEmployeeRole("");
     setEmployeeMessage("");
     setIsAddingEmployee(false);
+    setEditingEmployeeId(null);
+  }
+
+  function openAddEmployeeModal() {
+    setEditingEmployeeId(null);
+    setEmployeeForm(emptyEmployeeForm);
+    setEmployeeMessage("");
+    setIsAddingEmployeeRole(false);
+    setNewEmployeeRole("");
+    setIsAddingEmployee(true);
+  }
+
+  function openEditEmployeeModal(employee: Employee) {
+    const [firstName = "", ...lastNameParts] = employee.name.trim().split(/\s+/);
+    setEditingEmployeeId(employee.id);
+    setEmployeeForm({
+      firstName,
+      lastName: lastNameParts.join(" "),
+      email: employee.email,
+      phone: employee.phone,
+      location: employee.location,
+      role: employee.role,
+      wage: employee.wage,
+      pin: employee.pin,
+      accessLevel: employee.accessLevel || "Employee",
+      active: employee.active,
+    });
+    setEmployeeMessage("");
+    setIsAddingEmployeeRole(false);
+    setNewEmployeeRole("");
+    setIsAddingEmployee(true);
   }
 
   function cancelAddingEmployee() {
@@ -1542,6 +1822,7 @@ export default function Home() {
     setNewEmployeeRole("");
     setEmployeeMessage("");
     setIsAddingEmployee(false);
+    setEditingEmployeeId(null);
   }
 
   function addRoleFromEmployeeForm() {
@@ -1714,51 +1995,7 @@ export default function Home() {
     }));
     setEmployeeMessage("");
     setEmployeePendingDeletion(null);
-  }
-
-  function updateRole(employeeId: number, role: string) {
-    setState((current) => ({
-      ...current,
-      employees: current.employees.map((employee) =>
-        employee.id === employeeId ? { ...employee, role } : employee,
-      ),
-      shifts: current.shifts.map((shift) =>
-        shift.employeeId === employeeId ? { ...shift, role } : shift,
-      ),
-      scheduleDraftsByManager: Object.fromEntries(
-        Object.entries(current.scheduleDraftsByManager ?? {}).map(([managerId, draft]) => [managerId, {
-          ...draft,
-          upsertedShifts: draft.upsertedShifts.map((shift) => (
-            shift.employeeId === employeeId ? { ...shift, role } : shift
-          )),
-        }]),
-      ),
-    }));
-  }
-
-  function updateEmployeeName(employeeId: number, name: string) {
-    if (hasEmployeeWithName(state.employees, name, employeeId)) {
-      setEmployeeMessage("Name already in use.");
-      return;
-    }
-
-    setState((current) => ({
-      ...current,
-      employees: current.employees.map((employee) =>
-        employee.id === employeeId ? { ...employee, name } : employee,
-      ),
-    }));
-    setEmployeeMessage("");
-  }
-
-  function updateEmployeePin(employeeId: number, pin: string) {
-    const numericPin = pin.replace(/\D/g, "").slice(0, 4);
-    setState((current) => ({
-      ...current,
-      employees: current.employees.map((employee) =>
-        employee.id === employeeId ? { ...employee, pin: numericPin } : employee,
-      ),
-    }));
+    setViewingRosterEmployeeId((current) => current === employeeId ? null : current);
   }
 
   function updateEmployeeStatus(employeeId: number, active: boolean) {
@@ -1770,18 +2007,228 @@ export default function Home() {
     }));
   }
 
-  function updateEmployeeDetail(
-    employeeId: number,
-    field: "email" | "phone" | "accessLevel" | "location" | "wage",
-    value: string,
-  ) {
-    const nextValue = field === "phone" ? formatPhoneNumberInput(value) : value;
+  function rehireRosterEmployee(employeeId: number) {
     setState((current) => ({
       ...current,
-      employees: current.employees.map((employee) =>
-        employee.id === employeeId ? { ...employee, [field]: nextValue } as Employee : employee,
-      ),
+      employees: current.employees.map((employee) => (
+        employee.id === employeeId
+          ? {
+              ...employee,
+              active: true,
+              terminated: false,
+              employmentHistory: [
+                ...(employee.employmentHistory ?? []),
+                { type: "rehired", date: today },
+              ],
+            }
+          : employee
+      )),
     }));
+  }
+
+  function openRosterEmployeeProfile(employeeId: number) {
+    setViewingRosterEmployeeId(employeeId);
+    setTeamMemberProfileTab("job");
+    setEditingEmployeeId(null);
+    setEditingPayrollEmployeeId(null);
+  }
+
+  function closeRosterEmployeeProfile() {
+    setViewingRosterEmployeeId(null);
+    setTeamMemberProfileTab("job");
+    setEditingPayrollEmployeeId(null);
+    setEditingPersonalPayrollEmployeeId(null);
+    setManagerNoteDraft("");
+  }
+
+  function editRosterEmployeeFromProfile(employeeId: number) {
+    const employee = state.employees.find((candidate) => candidate.id === employeeId);
+    if (employee) openEditEmployeeModal(employee);
+  }
+
+  function messageRosterEmployee(employeeId: number) {
+    if (employeeId === activeEmployeeId) return;
+
+    const directConversation = (state.conversations ?? []).find((conversation) => (
+      conversation.participantIds.length === 2
+      && conversation.participantIds.includes(activeEmployeeId)
+      && conversation.participantIds.includes(employeeId)
+    ));
+
+    setIsNotificationsOpen(false);
+    setIsAccountMenuOpen(false);
+    setIsMessagesOpen(true);
+    setMessageError("");
+
+    if (directConversation) {
+      setMessageDraft("");
+      openConversation(directConversation.id);
+      return;
+    }
+
+    setSelectedConversationId(null);
+    setIsCreatingConversation(true);
+    setPtoMessageEmployeeId(employeeId);
+    setNewConversationMemberIds([employeeId]);
+    setNewConversationMessage("");
+  }
+
+  function startEditingPayrollClassification(employee: Employee) {
+    setPayrollClassificationDraft(employee.payrollClassification);
+    setEditingPayrollEmployeeId(employee.id);
+  }
+
+  function savePayrollClassification(employeeId: number) {
+    setState((current) => ({
+      ...current,
+      employees: current.employees.map((employee) => (
+        employee.id === employeeId
+          ? { ...employee, payrollClassification: payrollClassificationDraft }
+          : employee
+      )),
+    }));
+    setEditingPayrollEmployeeId(null);
+  }
+
+  function startEditingPersonalPayroll(employee: Employee) {
+    setPersonalPayrollDraft({
+      dateOfBirth: employee.dateOfBirth,
+      socialSecurityNumber: employee.socialSecurityNumber,
+      homeAddress: employee.homeAddress,
+      homeCityStateZip: employee.homeCityStateZip,
+    });
+    setEditingPersonalPayrollEmployeeId(employee.id);
+  }
+
+  function savePersonalPayroll(employeeId: number) {
+    setState((current) => ({
+      ...current,
+      employees: current.employees.map((employee) => (
+        employee.id === employeeId
+          ? { ...employee, ...personalPayrollDraft }
+          : employee
+      )),
+    }));
+    setEditingPersonalPayrollEmployeeId(null);
+  }
+
+  function uploadEmployeeCertificate(employeeId: number, file: File | undefined) {
+    if (!file) return;
+    setState((current) => ({
+      ...current,
+      employees: current.employees.map((employee) => (
+        employee.id === employeeId
+          ? {
+              ...employee,
+              certificates: [
+                ...(employee.certificates ?? []),
+                { id: nextId(employee.certificates ?? []), name: file.name.replace(/\.[^.]+$/, ""), fileName: file.name },
+              ],
+            }
+          : employee
+      )),
+    }));
+  }
+
+  function uploadOnboardingDocument(employeeId: number, documentName: string, file: File | undefined) {
+    if (!file) return;
+    setState((current) => ({
+      ...current,
+      employees: current.employees.map((employee) => (
+        employee.id === employeeId
+          ? {
+              ...employee,
+              onboardingDocuments: {
+                ...(employee.onboardingDocuments ?? {}),
+                [documentName]: file.name,
+              },
+            }
+          : employee
+      )),
+    }));
+  }
+
+  function addManagerNote(employeeId: number) {
+    const text = managerNoteDraft.trim();
+    if (!text) return;
+    setState((current) => ({
+      ...current,
+      employees: current.employees.map((employee) => (
+        employee.id === employeeId
+          ? {
+              ...employee,
+              managerNotes: [
+                ...(employee.managerNotes ?? []),
+                { id: nextId(employee.managerNotes ?? []), text, createdAt: new Date(currentTime).toISOString() },
+              ],
+            }
+          : employee
+      )),
+    }));
+    setManagerNoteDraft("");
+  }
+
+  function updateEmployeeLocationSetting(
+    employeeId: number,
+    setting: keyof EmployeeLocationSettings,
+    checked: boolean,
+  ) {
+    setState((current) => ({
+      ...current,
+      employees: current.employees.map((employee) => (
+        employee.id === employeeId
+          ? {
+              ...employee,
+              locationSettings: { ...employee.locationSettings, [setting]: checked },
+            }
+          : employee
+      )),
+    }));
+  }
+
+  function openTerminationFlow(employeeId: number) {
+    setTerminatingEmployeeId(employeeId);
+    setTerminationStep("notice");
+    setTerminationReason("");
+    setTerminationDate(today);
+    setEligibleForRehire(true);
+    setTerminationNote("");
+  }
+
+  function closeTerminationFlow() {
+    setTerminatingEmployeeId(null);
+    setTerminationStep("notice");
+    setTerminationReason("");
+    setTerminationDate(today);
+    setEligibleForRehire(true);
+    setTerminationNote("");
+  }
+
+  function terminateRosterEmployee(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (terminatingEmployeeId === null || !terminationReason || !terminationDate) return;
+
+    setState((current) => ({
+      ...current,
+      employees: current.employees.map((employee) => (
+        employee.id === terminatingEmployeeId
+          ? {
+              ...employee,
+              active: false,
+              terminated: true,
+              terminationReason,
+              terminationDate,
+              eligibleForRehire,
+              terminationNote: terminationNote.trim(),
+              employmentHistory: [
+                ...(employee.employmentHistory ?? []),
+                { type: "terminated", date: terminationDate, reason: terminationReason },
+              ],
+            }
+          : employee
+      )),
+    }));
+    setTerminationStep("success");
   }
 
   function saveShift(event: FormEvent<HTMLFormElement>) {
@@ -1936,6 +2383,15 @@ export default function Home() {
 
   function moveHoursDate(direction: -1 | 1) {
     setHoursDate((date) => shiftDateByCalendarTab(date, activeHoursTab, direction));
+  }
+
+  function setHoursRoundingPolicy() {
+    if (!activeUserIsAdmin || hoursRounding === "actual") return;
+
+    setState((current) => ({
+      ...current,
+      hoursRoundingMinutes: hoursRounding,
+    }));
   }
 
   function editWorkedHours(employee: Employee, displayedHours: number) {
@@ -2659,11 +3115,10 @@ export default function Home() {
               <path d="M9 3v18" />
             </svg>
           </button>
-          <div className="brand-lockup" aria-label="DomBase workforce">
+          <div className="brand-lockup" aria-label={`${sidebarLocationName} location`}>
             <span className="brand-mark">D</span>
             <div>
-              <p className="eyebrow">Workforce</p>
-              <h1>DomBase</h1>
+              <h1>{sidebarLocationName}</h1>
             </div>
           </div>
 
@@ -3357,8 +3812,15 @@ export default function Home() {
                         <span aria-hidden="true">|</span>
                         <span>{formatCompanyLocation(basicInfo)}</span>
                       </p>
+                      {companyLocations.map((location) => (
+                        <p className="company-location-summary" key={`${location.name}-${location.zip}`}>
+                          <strong>{location.name.toUpperCase()}</strong>
+                          <span aria-hidden="true">|</span>
+                          <span>{location.zip}</span>
+                        </p>
+                      ))}
                     </div>
-                    <button type="button">Add a new location</button>
+                    <button type="button" onClick={openAddLocationModal}>Add a new location</button>
                   </section>
                 </section>
               ) : (
@@ -3640,15 +4102,18 @@ export default function Home() {
             </section>
           )}
 
-          {activeView === "employees" && mode === "manager" && (
-            <section className="panel feature-panel">
-              <div className="roster-heading">
+          {mode === "manager" && (
+            <section className={activeView === "employees"
+              ? viewingRosterEmployee ? "team-member-profile-view" : "panel feature-panel"
+              : "employee-modal-host"}
+            >
+              <div className="roster-heading" hidden={activeView !== "employees" || Boolean(viewingRosterEmployee)}>
                 <PanelHeading eyebrow="Team" title="Roster" />
                 <div className="roster-add-toolbar">
                   <button
                     type="button"
                     className="primary-action"
-                    onClick={() => setIsAddingEmployee(true)}
+                    onClick={openAddEmployeeModal}
                     aria-expanded={isAddingEmployee}
                     aria-controls="add-team-member-form"
                     hidden={isAddingEmployee}
@@ -3657,18 +4122,360 @@ export default function Home() {
                   </button>
                 </div>
               </div>
+              {activeView === "employees" && viewingRosterEmployee ? (
+                <div className="team-member-profile">
+                  <button type="button" className="team-member-profile-back" onClick={closeRosterEmployeeProfile}>
+                    <span aria-hidden="true">←</span><span className="team-member-profile-back-label">Back</span>
+                  </button>
+
+                  <section className="team-member-profile-summary">
+                    <span className="team-member-profile-avatar" aria-hidden="true">
+                      {employeeInitials(viewingRosterEmployee.name)}
+                    </span>
+                    <div className="team-member-profile-summary-copy">
+                      <h2>{viewingRosterEmployee.name}</h2>
+                      {viewingRosterEmployee.id === accountOwnerEmployeeId ? <strong>Account Owner</strong> : null}
+                      <p>
+                        {viewingRosterEmployee.accessLevel || "Employee"} at {viewingRosterEmployee.location || sidebarLocationName}
+                      </p>
+                      <p>
+                        {[viewingRosterEmployee.phone, viewingRosterEmployee.email].filter(Boolean).join(" · ") || "No contact information added"}
+                      </p>
+                    </div>
+                    <div className="team-member-profile-summary-actions">
+                      {viewingRosterEmployee.id !== activeEmployeeId ? (
+                        <button
+                          type="button"
+                          className={viewingRosterEmployee.terminated ? "team-member-rehire" : "team-member-terminate"}
+                          onClick={() => viewingRosterEmployee.terminated
+                            ? rehireRosterEmployee(viewingRosterEmployee.id)
+                            : openTerminationFlow(viewingRosterEmployee.id)}
+                        >
+                          {viewingRosterEmployee.terminated ? "Rehire" : "Terminate"}
+                        </button>
+                      ) : null}
+                      {viewingRosterEmployee.id !== activeEmployeeId && !viewingRosterEmployee.terminated ? (
+                        <button
+                          type="button"
+                          className="team-member-message"
+                          onClick={() => messageRosterEmployee(viewingRosterEmployee.id)}
+                        >
+                          Message
+                        </button>
+                      ) : null}
+                    </div>
+                  </section>
+
+                  <div className="team-member-profile-layout">
+                    <nav className="team-member-profile-tabs" aria-label="Team member profile sections">
+                      {([
+                        ["job", "▣", "Job details"],
+                        ["personal", "♙", "Personal information"],
+                        ["documents", "▤", "Documents"],
+                        ["performance", "⌁", "Performance"],
+                      ] as [TeamMemberProfileTab, string, string][]).map(([tab, icon, label]) => (
+                        <button
+                          type="button"
+                          key={tab}
+                          className={teamMemberProfileTab === tab ? "active" : ""}
+                          onClick={() => setTeamMemberProfileTab(tab)}
+                          aria-current={teamMemberProfileTab === tab ? "page" : undefined}
+                        >
+                          <span aria-hidden="true">{icon}</span>{label}
+                        </button>
+                      ))}
+                    </nav>
+
+                    <div className="team-member-profile-content">
+                      {teamMemberProfileTab === "job" ? (
+                        <>
+                          <section className="team-member-profile-card team-member-job-card">
+                            <div className="team-member-profile-card-heading">
+                              <h3>Access, roles &amp; wages</h3>
+                              <button type="button" onClick={() => editRosterEmployeeFromProfile(viewingRosterEmployee.id)}>✎ Edit</button>
+                            </div>
+                            <div className="team-member-location-heading">
+                              <label className="team-member-location-toggle">
+                                <input
+                                  type="checkbox"
+                                  role="switch"
+                                  checked={viewingRosterEmployee.active}
+                                  disabled={Boolean(viewingRosterEmployee.terminated)}
+                                  onChange={(event) => updateEmployeeStatus(viewingRosterEmployee.id, event.target.checked)}
+                                  aria-label={`Active at ${viewingRosterEmployee.location || sidebarLocationName}`}
+                                />
+                                <span aria-hidden="true" />
+                                <strong>{viewingRosterEmployee.location || sidebarLocationName}</strong>
+                              </label>
+                              <span className={viewingRosterEmployee.active ? "active" : "inactive"}>
+                                {viewingRosterEmployee.active ? "Active" : "Inactive"}
+                              </span>
+                            </div>
+                            <div className={viewingRosterEmployee.active ? "team-member-job-details" : "team-member-job-details inactive"}>
+                              <dl className="team-member-job-facts">
+                                <div><dt>Access:</dt><dd>{viewingRosterEmployee.accessLevel || "Employee"}</dd></div>
+                                <div><dt>PIN:</dt><dd>****</dd></div>
+                                <div><dt>Start date:</dt><dd>{formatShortDate(viewingRosterEmployee.startDate)}</dd></div>
+                                <div><dt>Payroll ID:</dt><dd>{viewingRosterEmployee.payrollId || "--"}</dd></div>
+                                <div><dt>Role(s) &amp; wage(s):</dt><dd>{viewingRosterEmployee.role || "--"}{viewingRosterEmployee.wage ? `, ${viewingRosterEmployee.wage}` : ""}</dd></div>
+                              </dl>
+                              <details className="team-member-location-settings" open>
+                                <summary>Location settings</summary>
+                                <label><input type="checkbox" disabled={!viewingRosterEmployee.active} checked={viewingRosterEmployee.locationSettings.showInSchedule} onChange={(event) => updateEmployeeLocationSetting(viewingRosterEmployee.id, "showInSchedule", event.target.checked)} /> Show in schedule</label>
+                                <label><input type="checkbox" disabled={!viewingRosterEmployee.active} checked={viewingRosterEmployee.locationSettings.sendLocationAlerts} onChange={(event) => updateEmployeeLocationSetting(viewingRosterEmployee.id, "sendLocationAlerts", event.target.checked)} /> Send location alerts</label>
+                                <label><input type="checkbox" disabled={!viewingRosterEmployee.active} checked={viewingRosterEmployee.locationSettings.includeInTimeClockErrors} onChange={(event) => updateEmployeeLocationSetting(viewingRosterEmployee.id, "includeInTimeClockErrors", event.target.checked)} /> Include in time clock errors</label>
+                                <label><input type="checkbox" disabled={!viewingRosterEmployee.active} checked={viewingRosterEmployee.locationSettings.eligibleForOpenShifts} onChange={(event) => updateEmployeeLocationSetting(viewingRosterEmployee.id, "eligibleForOpenShifts", event.target.checked)} /> Eligible for open shifts</label>
+                                <label><input type="checkbox" disabled={!viewingRosterEmployee.active} checked={viewingRosterEmployee.locationSettings.canWaiveMissedBreaks} onChange={(event) => updateEmployeeLocationSetting(viewingRosterEmployee.id, "canWaiveMissedBreaks", event.target.checked)} /> {viewingRosterEmployee.name.split(" ")[0]} can waive missed breaks</label>
+                              </details>
+                            </div>
+                          </section>
+
+                          <section className="team-member-profile-card">
+                            <div className="team-member-profile-card-heading">
+                              <h3>Payroll information</h3>
+                              {editingPayrollEmployeeId !== viewingRosterEmployee.id ? (
+                                <button type="button" onClick={() => startEditingPayrollClassification(viewingRosterEmployee)}>✎ Edit</button>
+                              ) : null}
+                            </div>
+                            {editingPayrollEmployeeId === viewingRosterEmployee.id ? (
+                              <div className="team-member-payroll-editor">
+                                <label>
+                                  <span>Payroll classification:</span>
+                                  <select
+                                    value={payrollClassificationDraft}
+                                    onChange={(event) => setPayrollClassificationDraft(event.target.value as PayrollClassification)}
+                                    aria-label="Payroll classification"
+                                  >
+                                    <option value="W-2 Employee">W-2 Employee</option>
+                                    <option value="1099 Contractor">1099 Contractor</option>
+                                  </select>
+                                </label>
+                                <div>
+                                  <button type="button" onClick={() => setEditingPayrollEmployeeId(null)}>Cancel</button>
+                                  <button type="button" className="primary-action" onClick={() => savePayrollClassification(viewingRosterEmployee.id)}>Save</button>
+                                </div>
+                              </div>
+                            ) : (
+                              <p><strong>Payroll classification:</strong> {viewingRosterEmployee.payrollClassification}</p>
+                            )}
+                          </section>
+
+                          <section className="team-member-profile-card">
+                            <div className="team-member-profile-card-heading"><h3>Recent job history</h3></div>
+                            <div className="team-member-job-history">
+                              {[...(viewingRosterEmployee.employmentHistory ?? [])].reverse().map((historyEvent, index) => (
+                                <p key={`${historyEvent.type}-${historyEvent.date}-${index}`}>
+                                  <span aria-hidden="true">●</span>
+                                  <strong>
+                                    {historyEvent.type === "terminated"
+                                      ? `Terminated from ${viewingRosterEmployee.location || sidebarLocationName}${historyEvent.reason ? ` — ${historyEvent.reason}` : ""}`
+                                      : `Rehired at ${viewingRosterEmployee.location || sidebarLocationName}`}
+                                  </strong>
+                                  <time>{formatShortDate(historyEvent.date)}</time>
+                                </p>
+                              ))}
+                              <p><span aria-hidden="true">●</span><strong>Started as {viewingRosterEmployee.role || "a team member"} at {viewingRosterEmployee.location || sidebarLocationName}{viewingRosterEmployee.wage ? ` (${viewingRosterEmployee.wage})` : ""}</strong><time>{formatShortDate(viewingRosterEmployee.startDate)}</time></p>
+                              <p><span aria-hidden="true">●</span><strong>Hired at {viewingRosterEmployee.location || sidebarLocationName}</strong><time>{formatShortDate(viewingRosterEmployee.startDate)}</time></p>
+                            </div>
+                          </section>
+
+                          <section className="team-member-profile-card">
+                            <div className="team-member-profile-card-heading"><h3>Time off balances</h3></div>
+                            <div className="team-member-time-off-table" role="table" aria-label={`${viewingRosterEmployee.name} time off balances`}>
+                              <div role="row"><span role="columnheader">Time Off Category</span><span role="columnheader">Policy Name</span><span role="columnheader">Balance</span></div>
+                              <div role="row"><span role="cell">Paid Time Off</span><span role="cell">{viewingRosterEmployeePtoPolicy?.name ?? "No policy"}</span><span role="cell">{formatPtoHours((viewingRosterEmployeePto?.ptoHours ?? 0) - (viewingRosterEmployeePto?.ptoUsed ?? 0))}</span></div>
+                            </div>
+                          </section>
+                        </>
+                      ) : teamMemberProfileTab === "personal" ? (
+                        <div className="team-member-personal-content">
+                          <section className="team-member-profile-card team-member-personal-card">
+                            <div className="team-member-profile-card-heading">
+                              <h3>Contact information</h3>
+                              <button type="button" onClick={() => openEditEmployeeModal(viewingRosterEmployee)}>✎ Edit</button>
+                            </div>
+                            <dl className="team-member-personal-details">
+                              <div><dt>Preferred name</dt><dd>{viewingRosterEmployee.name}</dd></div>
+                              <div>
+                                <dt>Personal email</dt>
+                                <dd>
+                                  <span>{viewingRosterEmployee.email || "Not added"}</span>
+                                  {viewingRosterEmployee.email ? <small className="personal-email-status">Not verified</small> : null}
+                                </dd>
+                              </div>
+                              <div><dt>Mobile number</dt><dd>{viewingRosterEmployee.phone || "Not added"}</dd></div>
+                              <div><dt>Emergency contact</dt><dd>{viewingRosterEmployee.emergencyContact || "Not added"}</dd></div>
+                              <div><dt>Emergency contact notification preference</dt><dd>{viewingRosterEmployee.emergencyContactPreference || "Not added"}</dd></div>
+                            </dl>
+                          </section>
+
+                          <section className="team-member-profile-card team-member-personal-card">
+                            <div className="team-member-profile-card-heading">
+                              <h3>Payroll information</h3>
+                              {editingPersonalPayrollEmployeeId !== viewingRosterEmployee.id ? (
+                                <button type="button" onClick={() => startEditingPersonalPayroll(viewingRosterEmployee)}>✎ Edit</button>
+                              ) : null}
+                            </div>
+                            {editingPersonalPayrollEmployeeId === viewingRosterEmployee.id ? (
+                              <div className="team-member-personal-payroll-editor">
+                                <label><span>Date of birth</span><input type="date" value={personalPayrollDraft.dateOfBirth} onChange={(event) => setPersonalPayrollDraft((draft) => ({ ...draft, dateOfBirth: event.target.value }))} /></label>
+                                <label><span>Social Security number</span><input value={personalPayrollDraft.socialSecurityNumber} onChange={(event) => setPersonalPayrollDraft((draft) => ({ ...draft, socialSecurityNumber: event.target.value }))} autoComplete="off" /></label>
+                                <label><span>Home address</span><input value={personalPayrollDraft.homeAddress} onChange={(event) => setPersonalPayrollDraft((draft) => ({ ...draft, homeAddress: event.target.value }))} /></label>
+                                <label><span>City, state and ZIP</span><input value={personalPayrollDraft.homeCityStateZip} onChange={(event) => setPersonalPayrollDraft((draft) => ({ ...draft, homeCityStateZip: event.target.value }))} /></label>
+                                <div>
+                                  <button type="button" onClick={() => setEditingPersonalPayrollEmployeeId(null)}>Cancel</button>
+                                  <button type="button" className="primary-action" onClick={() => savePersonalPayroll(viewingRosterEmployee.id)}>Save</button>
+                                </div>
+                              </div>
+                            ) : (
+                              <dl className="team-member-personal-details payroll-details">
+                                <div><dt>Legal name</dt><dd>{viewingRosterEmployee.name}</dd></div>
+                                <div><dt>Date of birth</dt><dd>{viewingRosterEmployee.dateOfBirth ? formatShortDate(viewingRosterEmployee.dateOfBirth) : "Not added"}</dd></div>
+                                <div><dt>Social Security number</dt><dd>{viewingRosterEmployee.socialSecurityNumber || "Not added"}</dd></div>
+                                <div className="personal-address-row"><dt>Home address</dt><dd><span>{viewingRosterEmployee.homeAddress || "Not added"}</span>{viewingRosterEmployee.homeCityStateZip ? <span>{viewingRosterEmployee.homeCityStateZip}</span> : null}</dd></div>
+                              </dl>
+                            )}
+                          </section>
+                        </div>
+                      ) : teamMemberProfileTab === "documents" ? (
+                        <div className="team-member-documents-content">
+                          <section className="team-member-profile-card certificate-card">
+                            <div className="team-member-profile-card-heading">
+                              <h3>Certificates ({viewingRosterEmployee.certificates?.length ?? 0})</h3>
+                              <label className="document-upload-button">
+                                Add a certificate
+                                <input
+                                  type="file"
+                                  onChange={(event) => {
+                                    uploadEmployeeCertificate(viewingRosterEmployee.id, event.target.files?.[0]);
+                                    event.target.value = "";
+                                  }}
+                                />
+                              </label>
+                            </div>
+                            {(viewingRosterEmployee.certificates?.length ?? 0) === 0 ? (
+                              <p className="documents-empty-message">No certificates added for {viewingRosterEmployee.name.split(" ")[0]} yet.</p>
+                            ) : (
+                              <div className="certificate-list">
+                                {viewingRosterEmployee.certificates?.map((certificate) => (
+                                  <div key={certificate.id}><strong>{certificate.name}</strong><span>{certificate.fileName}</span></div>
+                                ))}
+                              </div>
+                            )}
+                          </section>
+
+                          <section className="team-member-profile-card onboarding-card">
+                            <div className="team-member-profile-card-heading">
+                              <h3>Onboarding ({Object.keys(viewingRosterEmployee.onboardingDocuments ?? {}).length})</h3>
+                              <button type="button" disabled title="All onboarding document types are already listed">Add a document</button>
+                            </div>
+                            <div className="onboarding-documents-table" role="table" aria-label={`${viewingRosterEmployee.name} onboarding documents`}>
+                              <div className="onboarding-document-header" role="row">
+                                <span role="columnheader">Name</span>
+                                <span role="columnheader">Versions</span>
+                                <span role="columnheader">File</span>
+                              </div>
+                              {onboardingDocumentNames.map((documentName) => {
+                                const uploadedFileName = viewingRosterEmployee.onboardingDocuments?.[documentName];
+                                return (
+                                  <div className="onboarding-document-row" role="row" key={documentName}>
+                                    <span role="cell">{documentName}</span>
+                                    <span role="cell">{uploadedFileName ? 1 : 0}</span>
+                                    <span role="cell">
+                                      <label className={uploadedFileName ? "onboarding-file-action sent" : "onboarding-file-action"}>
+                                        <strong aria-hidden="true">+</strong>
+                                        <span>{uploadedFileName || "Not sent"}</span>
+                                        <input
+                                          type="file"
+                                          onChange={(event) => {
+                                            uploadOnboardingDocument(viewingRosterEmployee.id, documentName, event.target.files?.[0]);
+                                            event.target.value = "";
+                                          }}
+                                        />
+                                      </label>
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </section>
+                        </div>
+                      ) : (
+                        <div className="team-member-performance-content">
+                          <section className="team-member-profile-card performance-attendance-card">
+                            <h3>Attendance • this month</h3>
+                            <div className="performance-metric-grid">
+                              <div><span>On time rate</span><strong>{viewingRosterEmployeePerformance?.onTimeRate ?? 0}%</strong></div>
+                              <div><span>Average hours/week</span><strong>{(viewingRosterEmployeePerformance?.averageHoursPerWeek ?? 0).toFixed(2)}</strong></div>
+                              <div><span>Missed clock outs</span><strong>{viewingRosterEmployeePerformance?.missedClockOuts ?? 0}</strong></div>
+                              <div><span>No shows</span><strong>{viewingRosterEmployeePerformance?.noShows ?? 0}</strong></div>
+                              <div><span>Average shift rating</span><strong>0 <small aria-label="stars">★</small></strong></div>
+                              <div><span>Shifts worked</span><strong>{viewingRosterEmployeePerformance?.shiftsWorked ?? 0}</strong></div>
+                              <div><span>Missed breaks</span><strong>{viewingRosterEmployeePerformance?.missedBreaks ?? 0}</strong></div>
+                            </div>
+                          </section>
+
+                          <section className="team-member-profile-card performance-role-card">
+                            <h3>Role breakdown</h3>
+                            <div className="performance-role-list">
+                              {(viewingRosterEmployeePerformance?.roleHours.length ?? 0) > 0
+                                ? viewingRosterEmployeePerformance?.roleHours.map((roleHours) => (
+                                    <div key={roleHours.role}>
+                                      <strong>{roleHours.role}</strong>
+                                      <span>{roleHours.hours.toFixed(1)} hours ({roleHours.percentage}%)</span>
+                                    </div>
+                                  ))
+                                : (
+                                    <div>
+                                      <strong>{viewingRosterEmployee.role || "Unassigned"}</strong>
+                                      <span>0 hours (0%)</span>
+                                    </div>
+                                  )}
+                            </div>
+                          </section>
+
+                          <section className="team-member-profile-card performance-shoutouts-card">
+                            <h3>Shoutouts</h3>
+                            <div><strong>No shoutouts yet</strong><span>Shoutouts from team members will appear here</span></div>
+                          </section>
+
+                          <section className="team-member-profile-card performance-manager-notes-card">
+                            <h3>Manager notes</h3>
+                            <label>
+                              <span>Add new note</span>
+                              <textarea
+                                value={managerNoteDraft}
+                                onChange={(event) => setManagerNoteDraft(event.target.value)}
+                                placeholder="Add a note to this employee. Only managers can see this."
+                              />
+                            </label>
+                            <button type="button" onClick={() => addManagerNote(viewingRosterEmployee.id)} disabled={!managerNoteDraft.trim()}>Add note</button>
+                            {(viewingRosterEmployee.managerNotes?.length ?? 0) > 0 ? (
+                              <div className="manager-note-list">
+                                {[...(viewingRosterEmployee.managerNotes ?? [])].reverse().map((note) => (
+                                  <div key={note.id}><p>{note.text}</p><time>{formatShortDate(note.createdAt.slice(0, 10))}</time></div>
+                                ))}
+                              </div>
+                            ) : null}
+                          </section>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
               {isAddingEmployee ? (
                 <div className="modal-backdrop" role="presentation">
                   <form
                     id="add-team-member-form"
                     className="team-member-modal"
-                    onSubmit={addEmployee}
+                    onSubmit={saveEmployee}
                     role="dialog"
                     aria-modal="true"
                     aria-labelledby="add-team-member-title"
                   >
                     <div className="team-member-modal-heading">
-                      <h2 id="add-team-member-title">Add team member</h2>
+                      <h2 id="add-team-member-title">{editingEmployeeId === null ? "Add team member" : "Edit team member"}</h2>
                       <button type="button" onClick={cancelAddingEmployee} aria-label="Close add team member">×</button>
                     </div>
                     <div className="team-member-modal-body">
@@ -3691,7 +4498,7 @@ export default function Home() {
                               value={employeeForm.lastName}
                               onChange={(event) => setEmployeeForm((form) => ({ ...form, lastName: event.target.value }))}
                               autoComplete="family-name"
-                              required
+                              required={editingEmployeeId === null}
                             />
                           </label>
                           <label>
@@ -3790,7 +4597,10 @@ export default function Home() {
                             <span>Wage</span>
                             <input
                               value={employeeForm.wage}
-                              onChange={(event) => setEmployeeForm((form) => ({ ...form, wage: event.target.value }))}
+                              onChange={(event) => setEmployeeForm((form) => ({
+                                ...form,
+                                wage: sanitizeWageInput(event.target.value),
+                              }))}
                               onBlur={() => setEmployeeForm((form) => ({ ...form, wage: formatWageInput(form.wage) }))}
                               inputMode="decimal"
                               placeholder="$0.00/hr"
@@ -3799,7 +4609,7 @@ export default function Home() {
                           <label>
                             <span>Employee PIN <b aria-hidden="true">*</b></span>
                             <input
-                              type="password"
+                              type="text"
                               value={employeeForm.pin}
                               onChange={(event) => setEmployeeForm((form) => ({
                                 ...form,
@@ -3810,6 +4620,7 @@ export default function Home() {
                               minLength={4}
                               maxLength={4}
                               placeholder="****"
+                              aria-label="Employee PIN"
                               required
                             />
                           </label>
@@ -3819,7 +4630,7 @@ export default function Home() {
                             <legend>Access level</legend>
                             <div className="team-member-pill-options team-member-access-options">
                               {(["Admin", "Manager", "Employee"] as const).map((accessLevel) => (
-                                <label key={accessLevel}>
+                                <label className={`access-${accessLevel.toLocaleLowerCase()}`} key={accessLevel}>
                                   <input
                                     type="radio"
                                     name="new-team-member-access-level"
@@ -3832,35 +4643,37 @@ export default function Home() {
                               ))}
                             </div>
                           </fieldset>
-                          <fieldset className="team-member-option-group team-member-status">
-                            <legend>Status</legend>
-                            <div className="team-member-pill-options team-member-status-options">
-                              {([true, false] as const).map((isActive) => (
-                                <label className={isActive ? "active" : "inactive"} key={String(isActive)}>
-                                  <input
-                                    type="radio"
-                                    name="new-team-member-status"
-                                    value={isActive ? "active" : "inactive"}
-                                    checked={employeeForm.active === isActive}
-                                    onChange={() => setEmployeeForm((form) => ({ ...form, active: isActive }))}
-                                  />
-                                  <span>{isActive ? "Active" : "Inactive"}</span>
-                                </label>
-                              ))}
-                            </div>
-                          </fieldset>
+                          {editingEmployeeId === null ? (
+                            <fieldset className="team-member-option-group team-member-status">
+                              <legend>Status</legend>
+                              <div className="team-member-pill-options team-member-status-options">
+                                {([true, false] as const).map((isActive) => (
+                                  <label className={isActive ? "active" : "inactive"} key={String(isActive)}>
+                                    <input
+                                      type="radio"
+                                      name="new-team-member-status"
+                                      value={isActive ? "active" : "inactive"}
+                                      checked={employeeForm.active === isActive}
+                                      onChange={() => setEmployeeForm((form) => ({ ...form, active: isActive }))}
+                                    />
+                                    <span>{isActive ? "Active" : "Inactive"}</span>
+                                  </label>
+                                ))}
+                              </div>
+                            </fieldset>
+                          ) : null}
                         </div>
                       </section>
                     </div>
                     {employeeMessage ? <p className="form-message" role="alert">{employeeMessage}</p> : null}
                     <div className="team-member-modal-actions">
                       <button type="button" className="secondary-action" onClick={cancelAddingEmployee}>Cancel</button>
-                      <button type="submit">Add team member</button>
+                      <button type="submit">{editingEmployeeId === null ? "Add team member" : "Save changes"}</button>
                     </div>
                   </form>
                 </div>
               ) : null}
-              <div className="roster-table-wrap">
+              <div className="roster-table-wrap" hidden={activeView !== "employees" || Boolean(viewingRosterEmployee)}>
                 <div className="roster-table" role="table" aria-label="Team roster">
                   <div className="roster-header" role="row">
                     <span role="columnheader">Team member</span>
@@ -3872,148 +4685,46 @@ export default function Home() {
                     <span role="columnheader">Status</span>
                     <span role="columnheader" aria-label="Actions" />
                   </div>
-                  {state.employees.map((employee) => {
-                    const isEditing = editingEmployeeId === employee.id;
-                    return (
+                  {[...state.employees]
+                    .sort((first, second) => first.name.localeCompare(second.name, undefined, { sensitivity: "base" }))
+                    .map((employee) => (
                       <article
                         className="roster-row"
                         role="row"
                         key={employee.id}
-                        data-editing-employee-row={isEditing ? employee.id : undefined}
                       >
                         <div className="roster-member" role="cell">
                           <span className="schedule-avatar" aria-hidden="true">{employeeInitials(employee.name)}</span>
                           <div>
-                            {isEditing ? (
-                              <input
-                                value={employee.name}
-                                onChange={(event) => updateEmployeeName(employee.id, event.target.value)}
-                                aria-label={`Name for ${employee.name}`}
-                              />
-                            ) : <strong>{employee.name}</strong>}
-                            {isEditing ? (
-                              <input
-                                type="password"
-                                value={employee.pin}
-                                onChange={(event) => updateEmployeePin(employee.id, event.target.value)}
-                                aria-label={`PIN for ${employee.name}`}
-                                inputMode="numeric"
-                                pattern="[0-9]{4}"
-                                minLength={4}
-                                maxLength={4}
-                                placeholder="****"
-                              />
-                            ) : <small>PIN: {employee.pin}</small>}
+                            <button type="button" className="roster-name-link" onClick={() => openRosterEmployeeProfile(employee.id)}>
+                              {employee.name}
+                            </button>
+                            {employee.id === accountOwnerEmployeeId ? <span className="roster-account-owner">Account Owner</span> : null}
+                            <small>PIN: {employee.pin}</small>
                           </div>
                         </div>
                         <div className="roster-contact" role="cell">
-                          {isEditing ? (
-                            <>
-                              <input
-                                type="email"
-                                value={rosterInputValue(employee.email)}
-                                onChange={(event) => updateEmployeeDetail(employee.id, "email", event.target.value)}
-                                aria-label={`Email for ${employee.name}`}
-                                placeholder="Email"
-                              />
-                              <input
-                                type="tel"
-                                inputMode="tel"
-                                maxLength={14}
-                                value={rosterInputValue(employee.phone)}
-                                onChange={(event) => updateEmployeeDetail(employee.id, "phone", event.target.value)}
-                                aria-label={`Phone number for ${employee.name}`}
-                                placeholder="Phone number"
-                              />
-                            </>
-                          ) : (
-                            <><span>{employee.email}</span><span>{employee.phone}</span></>
-                          )}
+                          <span>{employee.email}</span><span>{employee.phone}</span>
                         </div>
                         <div role="cell">
-                          {employee.id === 1 ? (
-                            <span>Admin</span>
-                          ) : isEditing ? (
-                            <select
-                              value={employee.accessLevel}
-                              onChange={(event) => updateEmployeeDetail(employee.id, "accessLevel", event.target.value)}
-                              aria-label={`Access level for ${employee.name}`}
-                            >
-                              <option value="">Select</option>
-                              <option value="Admin">Admin</option>
-                              <option value="Manager">Manager</option>
-                              <option value="Employee">Employee</option>
-                            </select>
-                          ) : employee.accessLevel}
+                          {employee.id === 1 ? <span>Admin</span> : employee.accessLevel}
                         </div>
-                        <div role="cell">
-                          {isEditing ? (
-                            <select
-                              value={employee.location}
-                              onChange={(event) => updateEmployeeDetail(employee.id, "location", event.target.value)}
-                              aria-label={`Location for ${employee.name}`}
-                            >
-                              <option value="">Select</option>
-                              {availableLocations.map((location) => (
-                                <option value={location} key={location}>{location}</option>
-                              ))}
-                            </select>
-                          ) : employee.location}
-                        </div>
-                        <div role="cell">
-                          {isEditing ? (
-                            <select
-                              value={employee.role}
-                              onChange={(event) => updateRole(employee.id, event.target.value)}
-                              aria-label={`Role for ${employee.name}`}
-                            >
-                              <option value="">Select</option>
-                              {availableRoles.map((role) => (
-                                <option value={role} key={role}>{role}</option>
-                              ))}
-                            </select>
-                          ) : employee.role}
-                        </div>
-                        <div role="cell">
-                          {isEditing ? (
-                            <input
-                              value={rosterInputValue(employee.wage)}
-                              onFocus={() => updateEmployeeDetail(employee.id, "wage", "")}
-                              onChange={(event) => updateEmployeeDetail(
-                                employee.id,
-                                "wage",
-                                event.target.value.replace(/\D/g, ""),
-                              )}
-                              onBlur={(event) => updateEmployeeDetail(employee.id, "wage", formatWageInput(event.target.value))}
-                              aria-label={`Wage for ${employee.name}`}
-                              inputMode="numeric"
-                              pattern="[0-9]*"
-                              placeholder="$0.00/hr"
-                            />
-                          ) : employee.wage}
-                        </div>
+                        <div role="cell">{employee.location}</div>
+                        <div role="cell">{employee.role}</div>
+                        <div role="cell">{employee.wage}</div>
                         <div
                           role="cell"
-                          className={isEditing ? "roster-status-editor" : employee.active ? "roster-status active" : "roster-status"}
+                          className={employee.active ? "roster-status active" : "roster-status"}
                         >
-                          {isEditing ? (
-                            <select
-                              value={employee.active ? "active" : "inactive"}
-                              onChange={(event) => updateEmployeeStatus(employee.id, event.target.value === "active")}
-                              aria-label={`Status for ${employee.name}`}
-                            >
-                              <option value="active">Active</option>
-                              <option value="inactive">Inactive</option>
-                            </select>
-                          ) : employee.active ? "Active" : "Inactive"}
+                          {employee.active ? "Active" : "Inactive"}
                         </div>
                         <div className="roster-actions" role="cell">
                           <button
                             type="button"
                             className="employee-edit-button"
-                            onClick={() => setEditingEmployeeId((current) => (current === employee.id ? null : employee.id))}
-                            aria-label={isEditing ? `Finish editing ${employee.name}` : `Edit ${employee.name}`}
-                            title={isEditing ? "Finish editing" : "Edit employee"}
+                            onClick={() => openEditEmployeeModal(employee)}
+                            aria-label={`Edit ${employee.name}`}
+                            title="Edit employee"
                           >
                             <svg viewBox="0 0 24 24" aria-hidden="true">
                               <path d="m4 20 4.5-1 10-10-3.5-3.5-10 10L4 20ZM13.5 7l3.5 3.5" />
@@ -4030,15 +4741,15 @@ export default function Home() {
                           >×</button>
                         ) : null}
                       </article>
-                    );
-                  })}
+                    ))}
                 </div>
               </div>
             </section>
           )}
 
           {activeView === "schedule" && (
-            <section className="panel feature-panel shift-planner-panel">
+            <div className="shift-planner-layout">
+              <section className="panel feature-panel shift-planner-panel">
               <div className="shift-planner-topbar">
                 <button type="button" className="shift-today-button" onClick={() => setScheduleDate(today)}>Today</button>
                 <div className="shift-date-navigation">
@@ -4199,7 +4910,7 @@ export default function Home() {
                                 <div className="schedule-track">
                                   {employeeShifts.map((shift) => (
                                     <div
-                                      className={`${mode === "employee" && shift.employeeId === activeEmployeeId ? "schedule-bar mine" : "schedule-bar"}${mode === "manager" ? " editable" : ""}${draftShiftIds.has(shift.id) ? " draft" : ""}`}
+                                      className={`${shift.employeeId === activeEmployeeId ? "schedule-bar mine" : "schedule-bar"}${mode === "manager" ? " editable" : ""}${draftShiftIds.has(shift.id) ? " draft" : ""}`}
                                       key={shift.id}
                                       style={scheduleBarStyle(shift)}
                                       title={`${employee.name}: ${formatTimeRange(shift)} ${shift.role}`}
@@ -4276,7 +4987,7 @@ export default function Home() {
                                     {dayShifts.map((shift) => (
                                       <button
                                         type="button"
-                                        className={`shift-week-card${mode === "employee" && shift.employeeId === activeEmployeeId ? " mine" : ""}${mode === "manager" ? " editable" : ""}${draftShiftIds.has(shift.id) ? " draft" : ""}`}
+                                        className={`shift-week-card${shift.employeeId === activeEmployeeId ? " mine" : ""}${mode === "manager" ? " editable" : ""}${draftShiftIds.has(shift.id) ? " draft" : ""}`}
                                         key={shift.id}
                                         onClick={() => openShiftEditor(shift)}
                                       >
@@ -4329,7 +5040,7 @@ export default function Home() {
                               {visibleDayShifts.map((shift) => {
                                 const employee = employeeById(state.employees, shift.employeeId);
                                 return (
-                                  <button type="button" className={`shift-month-card${mode === "employee" && shift.employeeId === activeEmployeeId ? " mine" : ""}${draftShiftIds.has(shift.id) ? " draft" : ""}`} key={shift.id} onClick={() => openShiftEditor(shift)}>
+                                  <button type="button" className={`shift-month-card${shift.employeeId === activeEmployeeId ? " mine" : ""}${draftShiftIds.has(shift.id) ? " draft" : ""}`} key={shift.id} onClick={() => openShiftEditor(shift)}>
                                     <strong>{formatCompactTimeRange(shift)}</strong>
                                     <span>{employee?.name ?? "Open shift"} {shift.role ? `(${shift.role})` : ""}</span>
                                   </button>
@@ -4360,7 +5071,20 @@ export default function Home() {
                   </div>
                 </div>
               )}
-            </section>
+              </section>
+              {mode === "manager" ? (
+                <button
+                  type="button"
+                  className="shift-add-employees-button"
+                  onClick={openAddEmployeeModal}
+                  aria-expanded={isAddingEmployee}
+                  aria-controls="add-team-member-form"
+                >
+                  <span aria-hidden="true">+</span>
+                  Add Employees
+                </button>
+              ) : null}
+            </div>
           )}
 
           {activeView === "clockins" && mode === "manager" && (
@@ -4475,24 +5199,46 @@ export default function Home() {
                       </button>
                     ))}
                   </div>
-                  {mode === "manager" ? (
+                  {activeUserIsAdmin && mode === "manager" ? (
+                    <div className="hours-rounding-actions">
+                      <label className="hours-rounding-control">
+                        <span>Round</span>
+                        <select
+                          value={hoursRounding}
+                          onChange={(event) => {
+                            const value = event.target.value;
+                            setHoursRounding(value === "actual" ? "actual" : Number(value) as HoursRounding);
+                          }}
+                          aria-label="Preview rounded time worked"
+                        >
+                          <option value="actual">Actual</option>
+                          <option value={5}>5 min</option>
+                          <option value={10}>10 min</option>
+                          <option value={15}>15 min</option>
+                        </select>
+                      </label>
+                      <button
+                        type="button"
+                        className="hours-rounding-set-button"
+                        onClick={setHoursRoundingPolicy}
+                        disabled={hoursRounding === "actual" || hoursRounding === state.hoursRoundingMinutes}
+                      >
+                        Set
+                      </button>
+                    </div>
+                  ) : (
                     <label className="hours-rounding-control">
-                      <span>Round</span>
+                      <span>View</span>
                       <select
-                        value={hoursRounding}
-                        onChange={(event) => {
-                          const value = event.target.value;
-                          setHoursRounding(value === "actual" ? "actual" : Number(value) as HoursRounding);
-                        }}
-                        aria-label="Round time worked"
+                        value={hoursDisplay}
+                        onChange={(event) => setHoursDisplay(event.target.value as HoursDisplay)}
+                        aria-label="View actual or rounded time worked"
                       >
                         <option value="actual">Actual</option>
-                        <option value={5}>5 min</option>
-                        <option value={10}>10 min</option>
-                        <option value={15}>15 min</option>
+                        <option value="rounded">Rounded ({state.hoursRoundingMinutes} min)</option>
                       </select>
                     </label>
-                  ) : null}
+                  )}
                 </div>
               </div>
               <div className="hours-list">
@@ -4858,6 +5604,215 @@ export default function Home() {
           </button>
         ))}
       </nav>
+
+      {mode === "manager" && isAddingLocation ? (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onClick={(event) => dismissModalFromBackdrop(event, closeAddLocationModal)}
+        >
+          <form
+            className="add-location-modal"
+            onSubmit={addCompanyLocations}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="add-location-title"
+          >
+            <div className="add-location-modal-heading">
+              <h2 id="add-location-title">We&apos;re glad you&apos;re adding a new location!</h2>
+              <button type="button" onClick={closeAddLocationModal} aria-label="Close add location">
+                <span aria-hidden="true">&times;</span>
+              </button>
+            </div>
+            <div className="add-location-fields">
+              {newLocationDrafts.map((location, index) => (
+                <div className="add-location-row" key={index}>
+                  <label>
+                    <span>New Location Name</span>
+                    <input
+                      value={location.name}
+                      onChange={(event) => updateNewLocationDraft(index, "name", event.target.value)}
+                      aria-label={`New Location Name ${index + 1}`}
+                      required
+                    />
+                  </label>
+                  <label>
+                    <span>New Location Zip</span>
+                    <input
+                      value={location.zip}
+                      onChange={(event) => updateNewLocationDraft(
+                        index,
+                        "zip",
+                        event.target.value.replace(/\D/g, "").slice(0, 5),
+                      )}
+                      aria-label={`New Location Zip ${index + 1}`}
+                      inputMode="numeric"
+                      autoComplete="postal-code"
+                      pattern="[0-9]{5}"
+                      minLength={5}
+                      maxLength={5}
+                      required
+                    />
+                  </label>
+                </div>
+              ))}
+            </div>
+            {newLocationDrafts.length < maximumNewLocations ? (
+              <button type="button" className="add-another-location-button" onClick={addAnotherLocationDraft}>
+                <span aria-hidden="true">+</span> Add Another Location
+              </button>
+            ) : null}
+            {newLocationError ? <p className="add-location-error" role="alert">{newLocationError}</p> : null}
+            <button type="submit" className="add-location-submit" disabled={!canAddNewLocations}>Add Location</button>
+          </form>
+        </div>
+      ) : null}
+
+      {mode === "manager" && terminatingEmployee && terminationStep === "notice" ? (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onClick={(event) => dismissModalFromBackdrop(event, closeTerminationFlow)}
+        >
+          <section
+            className="termination-modal termination-notice-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="termination-notice-title"
+          >
+            <div className="termination-modal-heading">
+              <h2 id="termination-notice-title">Terminate {terminatingEmployee.name}</h2>
+              <button type="button" onClick={closeTerminationFlow} aria-label="Close termination confirmation">
+                <span aria-hidden="true">&times;</span>
+              </button>
+            </div>
+            <p>Before terminating {terminatingEmployee.name} please note that:</p>
+            <ul>
+              <li>They&apos;ll lose access to all activity, such as schedules and messages</li>
+              <li>All scheduled shifts assigned to them will become open shifts</li>
+              <li>They&apos;ll still be able to access their time cards and time-off history</li>
+            </ul>
+            <div className="termination-modal-actions">
+              <button type="button" onClick={closeTerminationFlow}>Cancel</button>
+              <button type="button" className="primary-action" onClick={() => setTerminationStep("details")}>Next</button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {mode === "manager" && terminatingEmployee && terminationStep === "details" ? (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onClick={(event) => dismissModalFromBackdrop(event, closeTerminationFlow)}
+        >
+          <form
+            className="termination-modal termination-details-modal"
+            onSubmit={terminateRosterEmployee}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="termination-details-title"
+          >
+            <div className="termination-modal-heading">
+              <h2 id="termination-details-title">Terminate {terminatingEmployee.name}</h2>
+              <button type="button" onClick={closeTerminationFlow} aria-label="Close termination details">
+                <span aria-hidden="true">&times;</span>
+              </button>
+            </div>
+            <div className="termination-fields">
+              <label>
+                <span>Reason for termination: <b aria-hidden="true">*</b></span>
+                <select
+                  value={terminationReason}
+                  onChange={(event) => setTerminationReason(event.target.value)}
+                  aria-label="Reason for termination"
+                  required
+                >
+                  <option value="">Select a reason</option>
+                  <option value="Absenteeism / Late">Absenteeism / Late</option>
+                  <option value="Admin Error / Accidental Account">Admin Error / Accidental Account</option>
+                  <option value="Availability Change">Availability Change</option>
+                  <option value="Business Conditions">Business Conditions</option>
+                  <option value="Contractor">Contractor</option>
+                  <option value="Inadequate Job Performance">Inadequate Job Performance</option>
+                  <option value="Poor Fit - Culture">Poor Fit - Culture</option>
+                  <option value="Poor Fit - Experience">Poor Fit - Experience</option>
+                  <option value="Project Completed">Project Completed</option>
+                  <option value="Requested via Clover">Requested via Clover</option>
+                  <option value="Seasonal">Seasonal</option>
+                  <option value="Unacceptable Behavior">Unacceptable Behavior</option>
+                  <option value="Voluntary Resignation">Voluntary Resignation</option>
+                </select>
+              </label>
+              <label>
+                <span>Termination date: <b aria-hidden="true">*</b></span>
+                <input
+                  type="date"
+                  value={terminationDate}
+                  onChange={(event) => setTerminationDate(event.target.value)}
+                  aria-label="Termination date"
+                  required
+                />
+              </label>
+            </div>
+            <label className="termination-rehire">
+              <input
+                type="checkbox"
+                checked={eligibleForRehire}
+                onChange={(event) => setEligibleForRehire(event.target.checked)}
+              />
+              <span>Eligible for re-hire</span>
+            </label>
+            <label className="termination-note">
+              <span>Note</span>
+              <textarea
+                value={terminationNote}
+                onChange={(event) => setTerminationNote(event.target.value)}
+                placeholder="Add an optional note..."
+              />
+            </label>
+            <p className="termination-summary">
+              {terminatingEmployee.name} will be removed from {terminatingEmployee.location || sidebarLocationName}.
+              {eligibleForRehire ? " If they are eligible for rehire, you can rehire them from this profile." : ""}
+            </p>
+            <div className="termination-modal-actions">
+              <button type="button" onClick={closeTerminationFlow}>Cancel</button>
+              <button
+                type="submit"
+                className="termination-submit"
+                disabled={!terminationReason || !terminationDate}
+              >
+                Terminate
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
+
+      {mode === "manager" && terminatingEmployee && terminationStep === "success" ? (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onClick={(event) => dismissModalFromBackdrop(event, closeTerminationFlow)}
+        >
+          <section
+            className="termination-modal termination-success-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="termination-success-title"
+          >
+            <button type="button" className="termination-success-close" onClick={closeTerminationFlow} aria-label="Close termination confirmation">
+              <span aria-hidden="true">&times;</span>
+            </button>
+            <span className="termination-success-check" aria-hidden="true">✓</span>
+            <h2 id="termination-success-title">
+              {terminatingEmployee.name.split(" ")[0]} was successfully terminated.
+            </h2>
+            <p>{terminatingEmployee.name} is now inactive and their job information has been disabled.</p>
+            <button type="button" className="primary-action termination-success-done" onClick={closeTerminationFlow}>Done</button>
+          </section>
+        </div>
+      ) : null}
 
       {mode === "manager" && activeUserIsAdmin && employeePendingDeletion && employeePendingDeletion.id !== activeEmployeeId ? (
         <div
@@ -5742,6 +6697,35 @@ function isManagerEmployee(employee: Employee) {
   return employee.accessLevel === "Admin" || employee.accessLevel === "Manager";
 }
 
+function applyAutomaticClockOuts(state: StaffState, currentTime: number): StaffState {
+  let clockEventId = nextId(state.clockEvents);
+  const automaticClockOuts = state.employees.flatMap((employee) => {
+    const latestWorkEvent = lastWorkClockEvent(state.clockEvents, employee.id);
+    if (!latestWorkEvent || latestWorkEvent.type !== "in") return [];
+
+    const shift = shiftForClockEvent(latestWorkEvent, state.shifts);
+    if (!shift) return [];
+
+    const automaticClockOutTime = shiftEndDateTime(shift).getTime() + automaticClockOutDelayMs;
+    if (currentTime < automaticClockOutTime) return [];
+
+    return [{
+      id: clockEventId++,
+      employeeId: employee.id,
+      type: "out" as const,
+      at: new Date(automaticClockOutTime).toISOString(),
+      explanation: automaticClockOutExplanation,
+    }];
+  });
+
+  if (automaticClockOuts.length === 0) return state;
+
+  return {
+    ...state,
+    clockEvents: [...automaticClockOuts, ...state.clockEvents],
+  };
+}
+
 function hasClockInForShift(shift: Shift, events: ClockEvent[], shifts: Shift[]) {
   return events.some((event) => (
     event.type === "in" && shiftForClockEvent(event, shifts)?.id === shift.id
@@ -5811,7 +6795,23 @@ function operationalAlertsFor(
       }
 
       const scheduledTime = event.type === "in" ? shiftStartDateTime(shift) : shiftEndDateTime(shift);
-      if (isWithinScheduledMinute(eventTime, scheduledTime.getTime())) return;
+      if (event.type === "out" && event.explanation === automaticClockOutExplanation) {
+        alerts.push({
+          id: `automatic-clock-out-${event.id}`,
+          employeeId: event.employeeId,
+          title: "Automatic clock-out",
+          detail: `${employeeName} was automatically clocked out at ${formatClockTime(event.at)} after missing the scheduled ${formatClockTime(scheduledTime.toISOString())} clock-out.`,
+          at: event.at,
+          severity: "danger",
+          eventTargetId: `clock-${event.id}`,
+        });
+        return;
+      }
+
+      const isWithinAllowedWindow = event.type === "in"
+        ? isWithinClockInGrace(eventTime, scheduledTime.getTime())
+        : isWithinScheduledMinute(eventTime, scheduledTime.getTime());
+      if (isWithinAllowedWindow) return;
 
       const timing = eventTime < scheduledTime.getTime() ? "Early" : "Late";
       alerts.push({
@@ -5937,6 +6937,10 @@ function breakEndTime(event: ClockEvent) {
 
 function clockEventLabel(event: ClockEvent, shifts: Shift[]) {
   if (event.type === "in" || event.type === "out") {
+    if (event.type === "out" && event.explanation === automaticClockOutExplanation) {
+      return "Automatic clock-out";
+    }
+
     const action = event.type === "in" ? "Clock in" : "Clock out";
     const pastAction = event.type === "in" ? "Clocked in" : "Clocked out";
     const shift = shiftForClockEvent(event, shifts);
@@ -5946,7 +6950,10 @@ function clockEventLabel(event: ClockEvent, shifts: Shift[]) {
       ? shiftStartDateTime(shift).getTime()
       : shiftEndDateTime(shift).getTime();
     const eventTime = new Date(event.at).getTime();
-    if (isWithinScheduledMinute(eventTime, scheduledTime)) return action;
+    const isWithinAllowedWindow = event.type === "in"
+      ? isWithinClockInGrace(eventTime, scheduledTime)
+      : isWithinScheduledMinute(eventTime, scheduledTime);
+    if (isWithinAllowedWindow) return action;
 
     return `${pastAction} ${eventTime < scheduledTime ? "early" : "late"}`;
   }
@@ -6012,7 +7019,15 @@ function needsTimeException(
   if (!shift) return true;
 
   const scheduledTime = action === "in" ? shiftStartDateTime(shift) : shiftEndDateTime(shift);
-  return !isWithinScheduledMinute(currentTime, scheduledTime.getTime());
+  return action === "in"
+    ? !isWithinClockInGrace(currentTime, scheduledTime.getTime())
+    : !isWithinScheduledMinute(currentTime, scheduledTime.getTime());
+}
+
+function isWithinClockInGrace(currentTime: number, scheduledTime: number) {
+  const scheduledMinuteEnd = Math.floor(scheduledTime / 60000) * 60000 + 60000;
+  return currentTime >= scheduledTime - earlyClockInGraceMs
+    && currentTime < scheduledMinuteEnd;
 }
 
 function isWithinScheduledMinute(currentTime: number, scheduledTime: number) {
@@ -6168,6 +7183,30 @@ function readStoredBasicInfo(): BasicInfo {
   }
 }
 
+function readStoredCompanyLocations(): CompanyLocation[] {
+  if (typeof window === "undefined") return [];
+
+  const stored = window.localStorage.getItem(companyLocationsStorageKey);
+  if (!stored) return [];
+
+  try {
+    const parsed = JSON.parse(stored) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((location): location is CompanyLocation => (
+        typeof location === "object"
+        && location !== null
+        && typeof (location as CompanyLocation).name === "string"
+        && typeof (location as CompanyLocation).zip === "string"
+      ))
+      .map((location) => ({ name: location.name.trim(), zip: location.zip.trim() }))
+      .filter((location) => location.name && location.zip);
+  } catch {
+    window.localStorage.removeItem(companyLocationsStorageKey);
+    return [];
+  }
+}
+
 function formatPhoneNumberInput(value: string) {
   const digits = value.replace(/\D/g, "").slice(0, 10);
   if (digits.length <= 3) return digits;
@@ -6184,8 +7223,12 @@ function formatWageInput(value: string) {
   return `$${amount.toFixed(2)}/hr`;
 }
 
-function rosterInputValue(value: string) {
-  return value === "To be added" ? "" : value;
+function sanitizeWageInput(value: string) {
+  const numericValue = value.replace(/[^\d.]/g, "");
+  const [wholeNumber = "", ...decimalParts] = numericValue.split(".");
+  if (decimalParts.length === 0) return wholeNumber;
+
+  return `${wholeNumber || "0"}.${decimalParts.join("").slice(0, 2)}`;
 }
 
 function clearRosterPlaceholder(value?: string) {
@@ -6246,6 +7289,55 @@ function readStoredState() {
           location: clearRosterPlaceholder(normalizedEmployee.location),
           role: clearRosterPlaceholder(normalizedEmployee.role),
           wage: formatWageInput(clearRosterPlaceholder(normalizedEmployee.wage)),
+          startDate: normalizedEmployee.startDate || getLocalDateValue(),
+          payrollId: normalizedEmployee.payrollId ?? "",
+          payrollClassification: normalizedEmployee.payrollClassification === "1099 Contractor"
+            ? "1099 Contractor"
+            : "W-2 Employee",
+          dateOfBirth: normalizedEmployee.dateOfBirth ?? "",
+          socialSecurityNumber: normalizedEmployee.socialSecurityNumber ?? "",
+          homeAddress: normalizedEmployee.homeAddress ?? "",
+          homeCityStateZip: normalizedEmployee.homeCityStateZip ?? "",
+          emergencyContact: normalizedEmployee.emergencyContact ?? "",
+          emergencyContactPreference: normalizedEmployee.emergencyContactPreference ?? "",
+          locationSettings: {
+            ...defaultEmployeeLocationSettings(),
+            ...(normalizedEmployee.locationSettings ?? {}),
+          },
+          terminated: Boolean(normalizedEmployee.terminated),
+          employmentHistory: Array.isArray(normalizedEmployee.employmentHistory)
+            ? normalizedEmployee.employmentHistory.filter((historyEvent): historyEvent is EmploymentHistoryEvent => (
+                Boolean(historyEvent)
+                && (historyEvent.type === "terminated" || historyEvent.type === "rehired")
+                && typeof historyEvent.date === "string"
+              ))
+            : normalizedEmployee.terminationDate
+              ? [{
+                  type: "terminated" as const,
+                  date: normalizedEmployee.terminationDate,
+                  reason: normalizedEmployee.terminationReason,
+              }]
+              : [],
+          certificates: Array.isArray(normalizedEmployee.certificates)
+            ? normalizedEmployee.certificates.filter((certificate) => (
+                certificate
+                && Number.isInteger(certificate.id)
+                && typeof certificate.name === "string"
+                && typeof certificate.fileName === "string"
+              ))
+            : [],
+          onboardingDocuments: normalizedEmployee.onboardingDocuments
+            && typeof normalizedEmployee.onboardingDocuments === "object"
+            ? normalizedEmployee.onboardingDocuments
+            : {},
+          managerNotes: Array.isArray(normalizedEmployee.managerNotes)
+            ? normalizedEmployee.managerNotes.filter((note) => (
+                note
+                && Number.isInteger(note.id)
+                && typeof note.text === "string"
+                && typeof note.createdAt === "string"
+              ))
+            : [],
         };
       })
       .filter((employee) => !isStarterPlaceholderEmployee(employee));
@@ -6365,6 +7457,9 @@ function readStoredState() {
       pendingScheduleUpdateEmployeeIds: (parsed.pendingScheduleUpdateEmployeeIds ?? [])
         .filter((employeeId) => employeeIds.has(employeeId)),
       scheduleDraftsByManager,
+      hoursRoundingMinutes: ([5, 10, 15] as HoursRoundingMinutes[]).includes(Number(parsed.hoursRoundingMinutes) as HoursRoundingMinutes)
+        ? Number(parsed.hoursRoundingMinutes) as HoursRoundingMinutes
+        : 15,
       availabilityRequests: (parsed.availabilityRequests ?? [])
         .filter((request) => employeeIds.has(request.employeeId))
         .map((request) => ({
@@ -6957,6 +8052,104 @@ function workedHoursForRange(
   }, 0);
 
   return workedMs / (60 * 60 * 1000);
+}
+
+function employeePerformanceFor(
+  state: StaffState,
+  employeeId: number,
+  currentTime: number,
+): EmployeePerformance {
+  const now = new Date(currentTime);
+  const monthStart = startOfDay(new Date(now.getFullYear(), now.getMonth(), 1));
+  const rangeEnd = startOfDay(now);
+  const monthStartValue = toDateInputValue(monthStart);
+  const rangeEndValue = toDateInputValue(rangeEnd);
+  const employeeShifts = state.shifts.filter((shift) => (
+    shift.employeeId === employeeId
+    && shift.date >= monthStartValue
+    && shift.date <= rangeEndValue
+  ));
+  const employeeEvents = state.clockEvents.filter((event) => (
+    event.employeeId === employeeId
+    && new Date(event.at).getTime() >= monthStart.getTime()
+    && new Date(event.at).getTime() <= currentTime
+  ));
+  const eventsByShift = new Map<number, ClockEvent[]>();
+
+  employeeEvents.forEach((event) => {
+    const shift = shiftForClockEvent(event, employeeShifts);
+    if (!shift) return;
+    eventsByShift.set(shift.id, [...(eventsByShift.get(shift.id) ?? []), event]);
+  });
+
+  const shiftsStarted = employeeShifts.filter((shift) => shiftStartDateTime(shift).getTime() <= currentTime);
+  const completedShifts = employeeShifts.filter((shift) => shiftEndDateTime(shift).getTime() <= currentTime);
+  const workedShifts = shiftsStarted.filter((shift) => (
+    (eventsByShift.get(shift.id) ?? []).some((event) => event.type === "in")
+  ));
+  const completedWorkedShifts = completedShifts.filter((shift) => (
+    (eventsByShift.get(shift.id) ?? []).some((event) => event.type === "in")
+  ));
+  const onTimeShifts = workedShifts.filter((shift) => {
+    const firstClockIn = (eventsByShift.get(shift.id) ?? [])
+      .filter((event) => event.type === "in")
+      .sort((first, second) => first.at.localeCompare(second.at))[0];
+    return Boolean(firstClockIn) && isWithinClockInGrace(
+      new Date(firstClockIn.at).getTime(),
+      shiftStartDateTime(shift).getTime(),
+    );
+  });
+  const missedClockOuts = completedWorkedShifts.filter((shift) => {
+    const clockOuts = (eventsByShift.get(shift.id) ?? []).filter((event) => event.type === "out");
+    return clockOuts.length === 0
+      || clockOuts.some((event) => event.explanation === automaticClockOutExplanation);
+  }).length;
+  const missedBreaks = completedWorkedShifts.filter((shift) => {
+    const scheduledDuration = shiftEndDateTime(shift).getTime() - shiftStartDateTime(shift).getTime();
+    return scheduledDuration >= missedBreakThresholdMs
+      && !(eventsByShift.get(shift.id) ?? []).some((event) => event.type === "break");
+  }).length;
+  const roleTotals = new Map<string, number>();
+
+  workedShifts.forEach((shift) => {
+    const startMinutes = timeToMinutes(shift.start);
+    const endMinutes = timeToMinutes(shift.end);
+    if (startMinutes === null || endMinutes === null) return;
+    const durationHours = ((endMinutes >= startMinutes ? endMinutes : endMinutes + 24 * 60) - startMinutes) / 60;
+    const role = shift.role.trim() || "Unassigned";
+    roleTotals.set(role, (roleTotals.get(role) ?? 0) + durationHours);
+  });
+
+  const totalRoleHours = [...roleTotals.values()].reduce((total, hours) => total + hours, 0);
+  const elapsedWeeks = Math.max(
+    1,
+    Math.ceil((currentTime - monthStart.getTime() + 1) / (7 * 24 * 60 * 60 * 1000)),
+  );
+  const workedHours = adjustedWorkedHoursForRange(
+    state.clockEvents,
+    state.hoursAdjustments,
+    employeeId,
+    { start: monthStart, end: rangeEnd },
+    currentTime,
+  );
+
+  return {
+    onTimeRate: workedShifts.length === 0 ? 0 : Math.round((onTimeShifts.length / workedShifts.length) * 100),
+    averageHoursPerWeek: workedHours / elapsedWeeks,
+    missedClockOuts,
+    noShows: completedShifts.filter((shift) => (
+      !(eventsByShift.get(shift.id) ?? []).some((event) => event.type === "in")
+    )).length,
+    shiftsWorked: workedShifts.length,
+    missedBreaks,
+    roleHours: [...roleTotals.entries()]
+      .map(([role, hours]) => ({
+        role,
+        hours,
+        percentage: totalRoleHours === 0 ? 0 : Math.round((hours / totalRoleHours) * 100),
+      }))
+      .sort((first, second) => second.hours - first.hours || first.role.localeCompare(second.role)),
+  };
 }
 
 function employeeLastName(name: string) {
@@ -7882,7 +9075,11 @@ function TeamAvailabilityBoard({
   const [availabilityStartTime, setAvailabilityStartTime] = useState("9:00 am");
   const [availabilityEndTime, setAvailabilityEndTime] = useState("6:00 pm");
   const [availabilityLocation, setAvailabilityLocation] = useState("all");
+  const [isWeekCalendarOpen, setIsWeekCalendarOpen] = useState(false);
+  const [pendingWeekDate, setPendingWeekDate] = useState(initialDate);
+  const [weekCalendarMonth, setWeekCalendarMonth] = useState(() => `${initialDate.slice(0, 7)}-01`);
   const weekDays = mondayWeekCalendarDays(weekDate);
+  const pendingWeekDays = mondayWeekCalendarDays(pendingWeekDate);
   const orderedEmployees = [...employees].sort((first, second) => first.name.localeCompare(second.name));
   const editingEmployee = editingAvailability ? employees.find((employee) => employee.id === editingAvailability.employeeId) : undefined;
   const editingAvailabilityKey = editingAvailability ? `${editingAvailability.employeeId}-${editingAvailability.date}` : null;
@@ -7892,11 +9089,51 @@ function TeamAvailabilityBoard({
   const visibleRequests = requests.filter((request) => request.status !== "rejected");
   const rejectingRequest = requests.find((request) => request.id === rejectingRequestId);
   const reviewer = employees.find((employee) => employee.id === reviewerId);
+  const weekCalendarMonthDate = parseLocalDate(weekCalendarMonth);
+  const weekCalendarYear = weekCalendarMonthDate.getFullYear();
+  const weekCalendarMonthIndex = weekCalendarMonthDate.getMonth();
+  const weekCalendarMonthLabel = new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric" }).format(weekCalendarMonthDate);
+  const weekCalendarLeadingDays = (new Date(weekCalendarYear, weekCalendarMonthIndex, 1).getDay() + 6) % 7;
+  const weekCalendarDaysInMonth = new Date(weekCalendarYear, weekCalendarMonthIndex + 1, 0).getDate();
+  const weekCalendarCellCount = Math.ceil((weekCalendarLeadingDays + weekCalendarDaysInMonth) / 7) * 7;
+  const weekCalendarDays = Array.from({ length: weekCalendarCellCount }, (_, index) => {
+    const dayNumber = index - weekCalendarLeadingDays + 1;
+    if (dayNumber < 1 || dayNumber > weekCalendarDaysInMonth) return null;
+    return toDateInputValue(new Date(weekCalendarYear, weekCalendarMonthIndex, dayNumber));
+  });
+  const pendingWeekStart = pendingWeekDays[0].date;
+  const pendingWeekEnd = pendingWeekDays[6].date;
 
   function moveWeek(offset: number) {
     const nextDate = parseLocalDate(weekDate);
     nextDate.setDate(nextDate.getDate() + offset * 7);
     setWeekDate(toDateInputValue(nextDate));
+  }
+
+  function openWeekCalendar() {
+    setPendingWeekDate(weekDate);
+    setWeekCalendarMonth(`${weekDate.slice(0, 7)}-01`);
+    setIsWeekCalendarOpen((current) => !current);
+  }
+
+  function moveWeekCalendarMonth(offset: number) {
+    const nextMonth = parseLocalDate(weekCalendarMonth);
+    nextMonth.setMonth(nextMonth.getMonth() + offset, 1);
+    setWeekCalendarMonth(toDateInputValue(nextMonth));
+  }
+
+  function chooseAvailabilityWeek(date: string) {
+    setPendingWeekDate(mondayWeekCalendarDays(date)[0].date);
+  }
+
+  function cancelWeekCalendar() {
+    setPendingWeekDate(weekDate);
+    setIsWeekCalendarOpen(false);
+  }
+
+  function applyAvailabilityWeek() {
+    setWeekDate(pendingWeekDate);
+    setIsWeekCalendarOpen(false);
   }
 
   function openAvailabilityEditor(employeeId: number, date: string) {
@@ -7963,15 +9200,55 @@ function TeamAvailabilityBoard({
       <div className="team-availability-toolbar">
         <h2 id="team-availability-title">Team Availability</h2>
         <div className="team-availability-week-controls">
+          <div className="team-availability-date-picker">
+            <button
+              type="button"
+              className="team-availability-date-control"
+              onClick={openWeekCalendar}
+              aria-label="Choose team availability week"
+              aria-haspopup="dialog"
+              aria-expanded={isWeekCalendarOpen}
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="3" y="5" width="18" height="16" rx="2" />
+                <path d="M7 3v4M17 3v4M3 10h18" />
+              </svg>
+              <span>{weekRangeLabel}</span>
+            </button>
+            {isWeekCalendarOpen ? (
+              <div className="team-availability-week-calendar" role="dialog" aria-label="Choose team availability week">
+                <div className="team-availability-week-calendar-header">
+                  <strong>{weekCalendarMonthLabel}</strong>
+                  <div>
+                    <button type="button" onClick={() => moveWeekCalendarMonth(-1)} aria-label="Previous month"><span aria-hidden="true">‹</span></button>
+                    <button type="button" onClick={() => moveWeekCalendarMonth(1)} aria-label="Next month"><span aria-hidden="true">›</span></button>
+                  </div>
+                </div>
+                <div className="team-availability-week-calendar-weekdays" aria-hidden="true">
+                  {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day) => <span key={day}>{day}</span>)}
+                </div>
+                <div className="team-availability-week-calendar-days">
+                  {weekCalendarDays.map((date, index) => date ? (
+                    <button
+                      type="button"
+                      className={`${date >= pendingWeekStart && date <= pendingWeekEnd ? "in-range" : ""}${date === pendingWeekStart ? " range-start" : ""}${date === pendingWeekEnd ? " range-end" : ""}`.trim()}
+                      onClick={() => chooseAvailabilityWeek(date)}
+                      aria-label={`Week of ${formatLongDate(mondayWeekCalendarDays(date)[0].date)}`}
+                      aria-pressed={date >= pendingWeekStart && date <= pendingWeekEnd}
+                      key={date}
+                    >
+                      {parseLocalDate(date).getDate()}
+                    </button>
+                  ) : <span aria-hidden="true" key={`empty-${index}`} />)}
+                </div>
+                <div className="team-availability-week-calendar-actions">
+                  <button type="button" onClick={cancelWeekCalendar}>Cancel</button>
+                  <button type="button" className="apply" onClick={applyAvailabilityWeek} disabled={pendingWeekDate === weekDate}>Apply</button>
+                </div>
+              </div>
+            ) : null}
+          </div>
           <button type="button" onClick={() => moveWeek(-1)} aria-label="Previous week"><span aria-hidden="true">‹</span></button>
-          <label className="team-availability-date-control">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <rect x="3" y="5" width="18" height="16" rx="2" />
-              <path d="M7 3v4M17 3v4M3 10h18" />
-            </svg>
-            <input type="date" value={weekDate} onChange={(event) => setWeekDate(event.target.value)} aria-label="Team availability week" />
-            <span>{weekRangeLabel}</span>
-          </label>
           <button type="button" onClick={() => moveWeek(1)} aria-label="Next week"><span aria-hidden="true">›</span></button>
         </div>
       </div>
