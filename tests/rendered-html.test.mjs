@@ -2,6 +2,37 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
+async function rosterExportModule() {
+  const { transpileModule, ModuleKind } = await import("typescript");
+  const source = await readFile(new URL("../app/roster-export.ts", import.meta.url), "utf8");
+  const { outputText } = transpileModule(source, { compilerOptions: { module: ModuleKind.ESNext } });
+  return import(`data:text/javascript;base64,${Buffer.from(outputText).toString("base64")}`);
+}
+
+test("roster copies contain visible roster fields and omit employee credentials", async () => {
+  const { rosterCopyRows } = await rosterExportModule();
+  const rows = rosterCopyRows([
+    { id: 1, name: "Owner", email: "owner@example.com", phone: "", accessLevel: "", location: "Main", role: "", wage: "", active: true, pin: "1234", socialSecurityNumber: "secret" },
+    { id: 2, name: "Former member", email: "", phone: "", accessLevel: "Employee", location: "Main", role: "Sales", wage: "$25/hr", active: false, terminated: true },
+    { id: 3, name: "Inactive member", email: "", phone: "", accessLevel: "Manager", location: "Main", role: "Sales", wage: "", active: false },
+  ]);
+  assert.equal(rows[0][3], "Admin");
+  assert.equal(rows[0][7], "Active");
+  assert.equal(rows[1][7], "Terminated");
+  assert.equal(rows[2][7], "Inactive");
+  assert.equal(rows[0].length, 8);
+  assert.equal(rows.flat().includes("1234"), false);
+  assert.equal(rows.flat().includes("secret"), false);
+});
+
+test("roster CSV preserves punctuation and Unicode and protects spreadsheet formulas", async () => {
+  const { rosterCsv } = await rosterExportModule();
+  const csv = rosterCsv([["Zoë, \"Z\"", "Line 1\nLine 2", "=1+1", " +123", "@SUM(A1)", "-1", "", "Active"]]);
+  assert.ok(csv.startsWith("\uFEFF"));
+  assert.ok(csv.endsWith('\r\n"Zoë, ""Z""","Line 1\nLine 2","\'=1+1","\' +123","\'@SUM(A1)","\'-1","","Active"\r\n'));
+  assert.equal(rosterCsv([]).split("\r\n").length, 2);
+});
+
 async function render() {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
   workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
@@ -210,7 +241,7 @@ test("shift editor uses clear time labels and available role options", async () 
   assert.match(page, /request\.employeeId === employeeId\s*&& request\.status === "approved"\s*&& request\.startDate <= date\s*&& request\.endDate >= date/);
   assert.equal((page.match(/!employeeHasApprovedTimeOffOnDate\(state\.ptoRequests \?\? \[\], shift\.employeeId, shift\.date\)/g) ?? []).length, 3);
   assert.match(page, /mode === "manager" && dayShifts\.length === 0 && !timeOff/);
-  assert.match(page, /\{timeOff \? \(\s*<div className="shift-time-off">/);
+  assert.match(page, /\{timeOff \? \(\s*<button type="button" className="shift-time-off schedule-time-off-button"/);
   assert.doesNotMatch(page, /\{dayShifts\.length === 0 && timeOff \? \(/);
   assert.match(page, /onClick=\{\(\) => openShiftCreator\(employee, day\.date\)\}/);
   assert.match(page, /className="shift-cell-add schedule-track-add"/);
@@ -360,21 +391,17 @@ test("Roster includes complete team fields without placeholders for contact, loc
   assert.match(page, /function cancelAddingEmployee/);
   assert.match(page, /function openEditEmployeeModal\(employee: Employee\)/);
   assert.match(page, /setEditingEmployeeId\(employee\.id\)/);
-  assert.match(page, /onClick=\{\(\) => openEditEmployeeModal\(employee\)\}/);
+  assert.match(page, /openEditEmployeeModal\(rosterActionEmployee\)/);
   assert.match(page, /editingEmployeeId === null \? "Add team member" : "Edit team member"/);
   assert.match(page, /editingEmployeeId === null \? "Add team member" : "Save changes"/);
   assert.match(page, /findEmployeeWithPin\(state\.employees, pin, editingEmployeeId \?\? undefined\)/);
   assert.match(page, /hasEmployeeWithName\(state\.employees, name, editingEmployeeId \?\? undefined\)/);
   assert.match(page, /employee\.id === editingEmployeeId[\s\S]*?name,[\s\S]*?email: employeeForm\.email\.trim\(\)/);
-  assert.match(page, /className="employee-edit-button"/);
-  assert.match(page, /className="roster-row-remove"/);
+  assert.match(page, /className="roster-action-button"/);
+  assert.match(page, /aria-haspopup="menu"/);
+  assert.match(page, /role="menuitem"[^]*?>Edit<\/button>/);
+  assert.doesNotMatch(page, /roster-row-remove|employeePendingDeletion/);
   assert.match(page, /const activeUserIsAdmin = activeEmployee\?\.accessLevel === "Admin"/);
-  assert.match(page, /activeUserIsAdmin && employee\.id !== activeEmployeeId/);
-  assert.match(page, /if \(!activeUserIsAdmin \|\| employeeId === activeEmployeeId\)/);
-  assert.match(page, /mode === "manager" && activeUserIsAdmin && employeePendingDeletion/);
-  assert.match(page, /setEmployeePendingDeletion\(employee\)/);
-  assert.match(page, /className="employee-delete-modal"/);
-  assert.match(page, />Delete employee<\/button>/);
   assert.doesNotMatch(page, /window\.confirm\("Are you sure you want to remove this employee\?"\)/);
   assert.doesNotMatch(page, /data-editing-employee-row/);
   assert.doesNotMatch(page, /function finishRosterEditing/);
@@ -407,7 +434,8 @@ test("Roster includes complete team fields without placeholders for contact, loc
   assert.match(page, /checked=\{employeeForm\.active === isActive\}/);
   assert.match(page, /active: employeeForm\.active/);
   assert.match(page, /employee\.active \? "Active" : "Inactive"/);
-  assert.match(page, /\{\[\.\.\.state\.employees\][\s\S]*?\.sort\(\(first, second\) => first\.name\.localeCompare\(second\.name, undefined, \{ sensitivity: "base" \}\)\)[\s\S]*?\.map\(\(employee\) => \{/);
+  assert.match(page, /const filteredRosterEmployees = useMemo\([\s\S]*?\.sort\(\(first, second\) => first\.name\.localeCompare\(second\.name, undefined, \{ sensitivity: "base" \}\)\)/);
+  assert.match(page, /filteredRosterEmployees\.map\(\(employee\) => \(/);
   assert.match(page, /className="roster-name-link" onClick=\{\(\) => openRosterEmployeeProfile\(employee\.id\)\}/);
   assert.match(page, /const accountOwnerEmployeeId = state\.employees\.find/);
   assert.match(page, /employee\.id === accountOwnerEmployeeId \? <span className="roster-account-owner">Account Owner<\/span>/);
@@ -424,7 +452,7 @@ test("Roster includes complete team fields without placeholders for contact, loc
   assert.match(page, /<h3>Contact information<\/h3>/);
   assert.match(page, /<dt>Preferred name<\/dt>/);
   assert.match(page, /<dt>Personal email<\/dt>/);
-  assert.match(page, /className="personal-email-status">Not verified<\/small>/);
+  assert.doesNotMatch(page, /personal-email-status|Not verified/);
   assert.match(page, /<dt>Mobile number<\/dt>/);
   assert.match(page, /<dt>Emergency contact<\/dt>/);
   assert.match(page, /Emergency contact notification preference/);
@@ -469,9 +497,9 @@ test("Roster includes complete team fields without placeholders for contact, loc
     "Shifts worked",
     "Missed breaks",
     "Role breakdown",
-    "Shoutouts",
     "Manager notes",
   ].forEach((performanceLabel) => assert.match(page, new RegExp(performanceLabel)));
+  assert.doesNotMatch(page, /shoutouts/i);
   assert.match(page, /function employeePerformanceFor/);
   assert.match(page, /function addManagerNote/);
   assert.match(page, /managerNotes: \[/);
@@ -532,7 +560,6 @@ test("Roster includes complete team fields without placeholders for contact, loc
   assert.match(styles, /\.team-member-profile-summary,[\s\S]*?\.team-member-profile-tabs \{[^}]*background: #ffffff;/s);
   assert.match(styles, /\.team-member-personal-content \{[^}]*display: grid;[^}]*gap: 18px;/s);
   assert.match(styles, /\.team-member-personal-details div \{[^}]*grid-template-columns: minmax\(190px, 280px\) minmax\(0, 1fr\);/s);
-  assert.match(styles, /\.personal-email-status \{[^}]*background: #fff0e9;[^}]*color: #c34c24;/s);
   assert.match(styles, /\.team-member-documents-content \{[^}]*display: grid;[^}]*gap: 18px;/s);
   assert.match(styles, /\.onboarding-document-header,[\s\S]*?\.onboarding-document-row \{[^}]*grid-template-columns: 1fr 1fr 1\.1fr;/s);
   assert.match(styles, /\.team-member-profile-back \{[^}]*text-decoration: none;/s);
@@ -549,12 +576,12 @@ test("Roster includes complete team fields without placeholders for contact, loc
   assert.match(page, /className=\{employee\.active \? "roster-status active" : "roster-status"\}/);
   assert.doesNotMatch(page, /aria-label=\{`Status for \$\{employee\.name\}`\}/);
   assert.doesNotMatch(page, /updateEmployeeStatus\(employee\.id, event\.target\.value === "active"\)/);
-  assert.match(styles, /\.roster-actions \{[^}]*justify-content: center;[^}]*padding-right: 28px;/s);
+  assert.match(styles, /\.roster-actions \{[^}]*justify-content: center;/s);
   assert.match(styles, /\.roster-header > span:nth-child\(n \+ 2\) \{\s*text-align: center;/);
   assert.match(styles, /\.roster-row > div\[role="cell"\]:nth-child\(n \+ 2\) \{\s*text-align: center;/);
   assert.match(styles, /\.roster-row > div\[role="cell"\]:nth-child\(n \+ 2\) input,[^}]*text-align-last: center;/s);
   assert.match(styles, /\.roster-status \{\s*justify-self: center;/);
-  assert.doesNotMatch(styles, /\.roster-actions \.employee-edit-button[^}]*transform:/s);
+  assert.match(styles, /\.roster-action-menu \{[^}]*position: fixed;/s);
   assert.match(styles, /\[role="columnheader"\] \{[^}]*font-size: calc\(1em \+ 2px\);[^}]*font-weight: 600;/s);
 });
 
@@ -1070,7 +1097,6 @@ test("dismissible popups close from the backdrop while required forms stay prote
   assert.match(page, /if \(event\.target === event\.currentTarget\) dismiss\(\)/);
   assert.match(styles, /\.modal-backdrop \{[^}]*overscroll-behavior: contain;/s);
   assert.match(styles, /body:has\(\.modal-backdrop\) \{\s*overflow: hidden;/);
-  assert.match(page, /dismissModalFromBackdrop\(event, \(\) => setEmployeePendingDeletion\(null\)\)/);
   assert.match(page, /dismissModalFromBackdrop\(event, \(\) => setIsViewingPtoPolicies\(false\)\)/);
   assert.match(page, /dismissModalFromBackdrop\(event, \(\) => setReviewingPtoRequestId\(null\)\)/);
   assert.match(page, /\{ptoRequestForm \? \(\s*<div className="modal-backdrop" role="presentation">/);

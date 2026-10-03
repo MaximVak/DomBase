@@ -2,6 +2,9 @@
 
 import { FormEvent, MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
+import { createPortal } from "react-dom";
+import { readCertificateFile, storeCertificateFile } from "./certificate-files";
+import { rosterCopyHeaders, rosterCopyRows, rosterCsv } from "./roster-export";
 
 type Mode = "manager" | "employee";
 type ViewId = "dashboard" | "employees" | "departments_roles" | "schedule" | "time_off" | "my_availability" | "team_availability" | "clockins" | "hours" | "settings" | "profile" | "team_members";
@@ -75,6 +78,8 @@ type EmployeeCertificate = {
   id: number;
   name: string;
   fileName: string;
+  expirationDate?: string;
+  fileId?: string;
 };
 type ManagerNote = {
   id: number;
@@ -107,11 +112,20 @@ type Employee = {
   startDate: string;
   payrollId: string;
   payrollClassification: PayrollClassification;
+  legalFirstName?: string;
+  legalMiddleName?: string;
+  legalLastName?: string;
   dateOfBirth: string;
   socialSecurityNumber: string;
   homeAddress: string;
   homeCityStateZip: string;
+  homeAddressLine2?: string;
+  homeCity?: string;
+  homeStateProvince?: string;
+  homePostalCode?: string;
   emergencyContact: string;
+  emergencyContactRelationship?: string;
+  emergencyContactPhone?: string;
   emergencyContactPreference: string;
   locationSettings: EmployeeLocationSettings;
   terminationReason?: string;
@@ -195,6 +209,8 @@ type PtoRequest = {
   compensation: "paid" | "unpaid";
   startDate: string;
   endDate: string;
+  startTime?: string;
+  endTime?: string;
   reason: "sick_emergency" | "vacation";
   explanation: string;
   status: "pending" | "approved" | "denied" | "cancelled";
@@ -439,6 +455,60 @@ const starterState: StaffState = {
   hoursRoundingMinutes: 15,
 };
 
+const emergencyContactNotificationLabel = "Notify my emergency contact in case of arrest or detention while at work";
+
+const payrollStates = [
+  ["AL", "Alabama"], ["AK", "Alaska"], ["AZ", "Arizona"], ["AR", "Arkansas"], ["CA", "California"],
+  ["CO", "Colorado"], ["CT", "Connecticut"], ["DE", "Delaware"], ["DC", "District of Columbia"], ["FL", "Florida"],
+  ["GA", "Georgia"], ["HI", "Hawaii"], ["ID", "Idaho"], ["IL", "Illinois"], ["IN", "Indiana"],
+  ["IA", "Iowa"], ["KS", "Kansas"], ["KY", "Kentucky"], ["LA", "Louisiana"], ["ME", "Maine"],
+  ["MD", "Maryland"], ["MA", "Massachusetts"], ["MI", "Michigan"], ["MN", "Minnesota"], ["MS", "Mississippi"],
+  ["MO", "Missouri"], ["MT", "Montana"], ["NE", "Nebraska"], ["NV", "Nevada"], ["NH", "New Hampshire"],
+  ["NJ", "New Jersey"], ["NM", "New Mexico"], ["NY", "New York"], ["NC", "North Carolina"], ["ND", "North Dakota"],
+  ["OH", "Ohio"], ["OK", "Oklahoma"], ["OR", "Oregon"], ["PA", "Pennsylvania"], ["RI", "Rhode Island"],
+  ["SC", "South Carolina"], ["SD", "South Dakota"], ["TN", "Tennessee"], ["TX", "Texas"], ["UT", "Utah"],
+  ["VT", "Vermont"], ["VA", "Virginia"], ["WA", "Washington"], ["WV", "West Virginia"], ["WI", "Wisconsin"],
+  ["WY", "Wyoming"], ["AS", "American Samoa"], ["GU", "Guam"], ["MP", "Northern Mariana Islands"],
+  ["PR", "Puerto Rico"], ["VI", "U.S. Virgin Islands"],
+];
+
+function personalPayrollForm(employee: Employee) {
+  const [firstName = "", ...remainingName] = employee.name.trim().split(/\s+/);
+  const legacyAddress = employee.homeCityStateZip.match(/^(.+?),\s*(.+?),?\s+(\d{5}(?:-\d{4})?)$/);
+  const savedState = employee.homeStateProvince ?? legacyAddress?.[2]?.replace(/,$/, "") ?? "";
+  return {
+    legalFirstName: employee.legalFirstName ?? firstName,
+    legalMiddleName: employee.legalMiddleName ?? "",
+    legalLastName: employee.legalLastName ?? remainingName.join(" "),
+    dateOfBirth: employee.dateOfBirth,
+    socialSecurityNumber: employee.socialSecurityNumber,
+    homeAddress: employee.homeAddress,
+    homeAddressLine2: employee.homeAddressLine2 ?? "",
+    homeCity: employee.homeCity ?? legacyAddress?.[1] ?? employee.homeCityStateZip,
+    homeStateProvince: payrollStates.find(([abbreviation, name]) => abbreviation === savedState || name === savedState)?.[1] ?? savedState,
+    homePostalCode: employee.homePostalCode ?? legacyAddress?.[3] ?? "",
+  };
+}
+
+function employeeLegalName(employee: Employee) {
+  const payroll = personalPayrollForm(employee);
+  return [payroll.legalFirstName, payroll.legalMiddleName, payroll.legalLastName].filter(Boolean).join(" ");
+}
+
+function personalContactForm(employee: Employee) {
+  const [firstName = "", ...lastName] = employee.name.trim().split(/\s+/);
+  return {
+    firstName,
+    lastName: lastName.join(" "),
+    email: employee.email,
+    phone: employee.phone,
+    emergencyContact: employee.emergencyContact,
+    emergencyContactRelationship: employee.emergencyContactRelationship ?? "",
+    emergencyContactPhone: employee.emergencyContactPhone ?? "",
+    notifyEmergencyContact: employee.emergencyContactPreference === emergencyContactNotificationLabel,
+  };
+}
+
 export default function Home() {
   const today = getLocalDateValue();
   const [state, setState] = useState<StaffState>(() => readStoredState());
@@ -496,6 +566,9 @@ export default function Home() {
   const [activeHoursSectionTab, setActiveHoursSectionTab] = useState<HoursSectionTab>("hours");
   const [hoursRounding, setHoursRounding] = useState<HoursRounding>("actual");
   const [hoursDisplay, setHoursDisplay] = useState<HoursDisplay>("actual");
+  const [hoursSortBy, setHoursSortBy] = useState<"name" | "hours">("name");
+  const [hoursSortDirections, setHoursSortDirections] = useState<Record<"name" | "hours", "asc" | "desc">>({ name: "asc", hours: "asc" });
+  const hoursSortDirection = hoursSortDirections[hoursSortBy];
   const [authMessage, setAuthMessage] = useState("");
   const [employeeForm, setEmployeeForm] = useState(emptyEmployeeForm);
   const [employeeMessage, setEmployeeMessage] = useState("");
@@ -505,24 +578,42 @@ export default function Home() {
   const employeeRoleInputRef = useRef<HTMLInputElement>(null);
   const [editingEmployeeId, setEditingEmployeeId] = useState<number | null>(null);
   const [viewingRosterEmployeeId, setViewingRosterEmployeeId] = useState<number | null>(null);
+  const [rosterSearch, setRosterSearch] = useState("");
+  const [showTerminatedEmployees, setShowTerminatedEmployees] = useState(false);
+  const [isRosterFilterOpen, setIsRosterFilterOpen] = useState(false);
+  const [rosterAccessFilter, setRosterAccessFilter] = useState("");
+  const [rosterRoleFilter, setRosterRoleFilter] = useState("");
+  const [rosterMissingFilter, setRosterMissingFilter] = useState("");
+  const [rosterActionEmployeeId, setRosterActionEmployeeId] = useState<number | null>(null);
+  const [rosterActionPosition, setRosterActionPosition] = useState({ top: 0, left: 0 });
+  const rosterActionButtonRef = useRef<HTMLButtonElement | null>(null);
+  const rosterActionMenuRef = useRef<HTMLDivElement>(null);
   const [teamMemberProfileTab, setTeamMemberProfileTab] = useState<TeamMemberProfileTab>("job");
   const [editingPayrollEmployeeId, setEditingPayrollEmployeeId] = useState<number | null>(null);
   const [payrollClassificationDraft, setPayrollClassificationDraft] = useState<PayrollClassification>("W-2 Employee");
   const [editingPersonalPayrollEmployeeId, setEditingPersonalPayrollEmployeeId] = useState<number | null>(null);
-  const [personalPayrollDraft, setPersonalPayrollDraft] = useState({
-    dateOfBirth: "",
-    socialSecurityNumber: "",
-    homeAddress: "",
-    homeCityStateZip: "",
-  });
+  const [personalPayrollDraft, setPersonalPayrollDraft] = useState(() => personalPayrollForm(starterState.employees[0]));
+  const personalPayrollFirstNameRef = useRef<HTMLInputElement>(null);
+  const [editingPersonalContactEmployeeId, setEditingPersonalContactEmployeeId] = useState<number | null>(null);
+  const [personalContactDraft, setPersonalContactDraft] = useState(() => personalContactForm(starterState.employees[0]));
+  const [personalContactError, setPersonalContactError] = useState("");
+  const personalContactFirstNameRef = useRef<HTMLInputElement>(null);
   const [managerNoteDraft, setManagerNoteDraft] = useState("");
+  const [certificateEmployeeId, setCertificateEmployeeId] = useState<number | null>(null);
+  const [certificateDraft, setCertificateDraft] = useState({ name: "", expirationDate: "" });
+  const [certificateFile, setCertificateFile] = useState<File | null>(null);
+  const [certificateError, setCertificateError] = useState("");
+  const [certificateDownloadError, setCertificateDownloadError] = useState("");
+  const [isSavingCertificate, setIsSavingCertificate] = useState(false);
+  const [isDraggingCertificate, setIsDraggingCertificate] = useState(false);
+  const certificateNameRef = useRef<HTMLInputElement>(null);
+  const addCertificateButtonRef = useRef<HTMLButtonElement>(null);
   const [terminatingEmployeeId, setTerminatingEmployeeId] = useState<number | null>(null);
   const [terminationStep, setTerminationStep] = useState<"notice" | "details" | "success">("notice");
   const [terminationReason, setTerminationReason] = useState("");
   const [terminationDate, setTerminationDate] = useState(today);
   const [eligibleForRehire, setEligibleForRehire] = useState(true);
   const [terminationNote, setTerminationNote] = useState("");
-  const [employeePendingDeletion, setEmployeePendingDeletion] = useState<Employee | null>(null);
   const [isAddingDepartment, setIsAddingDepartment] = useState(false);
   const [newDepartmentName, setNewDepartmentName] = useState("");
   const [departmentRoleDrafts, setDepartmentRoleDrafts] = useState<Record<number, string>>({});
@@ -545,6 +636,10 @@ export default function Home() {
   } | null>(null);
   const [ptoRequestError, setPtoRequestError] = useState("");
   const [reviewingPtoRequestId, setReviewingPtoRequestId] = useState<number | null>(null);
+  const [scheduleTimeOffRequestId, setScheduleTimeOffRequestId] = useState<number | null>(null);
+  const [scheduleTimeOffPosition, setScheduleTimeOffPosition] = useState({ top: 0, left: 0 });
+  const scheduleTimeOffTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const scheduleTimeOffPopoverRef = useRef<HTMLDivElement>(null);
   const [highlightedPtoRequestId, setHighlightedPtoRequestId] = useState<number | null>(null);
   const [highlightedEventTargetId, setHighlightedEventTargetId] = useState<string | null>(null);
   const [ptoReviewError, setPtoReviewError] = useState("");
@@ -616,6 +711,36 @@ export default function Home() {
 
     return () => window.clearTimeout(timer);
   }, [currentTime]);
+
+  useEffect(() => {
+    if (rosterActionEmployeeId === null) return;
+    const dismissOutside = (event: Event) => {
+      if (event.target instanceof Node && !rosterActionMenuRef.current?.contains(event.target) && !rosterActionButtonRef.current?.contains(event.target)) {
+        setRosterActionEmployeeId(null);
+      }
+    };
+    const dismissOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setRosterActionEmployeeId(null);
+        rosterActionButtonRef.current?.focus();
+      }
+    };
+    const dismissOnLayoutChange = (event: Event) => {
+      if (!(event.target instanceof Node && rosterActionMenuRef.current?.contains(event.target))) setRosterActionEmployeeId(null);
+    };
+    document.addEventListener("pointerdown", dismissOutside);
+    document.addEventListener("focusin", dismissOutside);
+    document.addEventListener("keydown", dismissOnEscape);
+    document.addEventListener("scroll", dismissOnLayoutChange, true);
+    window.addEventListener("resize", dismissOnLayoutChange);
+    return () => {
+      document.removeEventListener("pointerdown", dismissOutside);
+      document.removeEventListener("focusin", dismissOutside);
+      document.removeEventListener("keydown", dismissOnEscape);
+      document.removeEventListener("scroll", dismissOnLayoutChange, true);
+      window.removeEventListener("resize", dismissOnLayoutChange);
+    };
+  }, [rosterActionEmployeeId]);
 
   useEffect(() => {
     if (!isAccountMenuOpen) return;
@@ -827,6 +952,49 @@ export default function Home() {
     && !hasClockInForShift(savedEditingShift, state.clockEvents, state.shifts),
   );
   const reviewingPtoRequest = (state.ptoRequests ?? []).find((request) => request.id === reviewingPtoRequestId);
+  const scheduleTimeOffRequest = activeView === "schedule" && !isPublicSchedule
+    ? (state.ptoRequests ?? []).find((request) => request.id === scheduleTimeOffRequestId && (mode === "manager" || request.employeeId === activeEmployeeId))
+    : undefined;
+  const scheduleTimeOffEmployee = scheduleTimeOffRequest ? employeeById(state.employees, scheduleTimeOffRequest.employeeId) : undefined;
+
+  useEffect(() => {
+    if (!scheduleTimeOffRequest) return;
+    function dismiss(restoreFocus = false) {
+      setScheduleTimeOffRequestId(null);
+      if (restoreFocus) scheduleTimeOffTriggerRef.current?.focus();
+    }
+    function closeOutside(event: PointerEvent | FocusEvent) {
+      const target = event.target as Node;
+      if (!scheduleTimeOffPopoverRef.current?.contains(target) && !scheduleTimeOffTriggerRef.current?.contains(target)) dismiss();
+    }
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") { event.preventDefault(); dismiss(true); }
+    }
+    function closeOnLayoutChange(event: Event) {
+      if (event.target instanceof Node && scheduleTimeOffPopoverRef.current?.contains(event.target)) return;
+      dismiss();
+    }
+    const frame = window.requestAnimationFrame(() => {
+      const popover = scheduleTimeOffPopoverRef.current;
+      if (!popover) return;
+      const bounds = popover.getBoundingClientRect();
+      setScheduleTimeOffPosition((position) => ({ ...position, top: Math.max(12, Math.min(position.top, window.innerHeight - bounds.height - 12)) }));
+      popover.querySelector<HTMLButtonElement>("button")?.focus({ preventScroll: true });
+    });
+    document.addEventListener("pointerdown", closeOutside);
+    document.addEventListener("focusin", closeOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    window.addEventListener("scroll", closeOnLayoutChange, true);
+    window.addEventListener("resize", closeOnLayoutChange);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      document.removeEventListener("pointerdown", closeOutside);
+      document.removeEventListener("focusin", closeOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+      window.removeEventListener("scroll", closeOnLayoutChange, true);
+      window.removeEventListener("resize", closeOnLayoutChange);
+    };
+  }, [scheduleTimeOffRequest, scheduleTimeOffRequestId]);
   const reviewingOwnPtoRequest = reviewingPtoRequest?.employeeId === activeEmployeeId;
   const activeUserCanManage = Boolean(activeEmployee && isManagerEmployee(activeEmployee));
   const notificationRequests = activeUserCanManage ? [...(state.ptoRequests ?? [])]
@@ -971,12 +1139,42 @@ export default function Home() {
     [...state.departments.flatMap((department) => department.roles), ...rosterRoles],
   )).sort((first, second) => first.localeCompare(second));
   const availableManagers = activeEmployees.filter((employee) => isManagerEmployee(employee));
+  const rosterFilterRoles = Array.from(new Set([
+    ...availableRoles,
+    ...state.employees.map((employee) => employee.role.trim()).filter(Boolean),
+  ])).sort((first, second) => first.localeCompare(second));
+  const filteredRosterEmployees = useMemo(() => {
+    const search = rosterSearch.trim().toLocaleLowerCase();
+    return state.employees.filter((employee) => {
+      if (!showTerminatedEmployees && employee.terminated) return false;
+      if (search && !employee.name.toLocaleLowerCase().includes(search)) return false;
+      if (rosterAccessFilter && (employee.id === 1 ? "Admin" : employee.accessLevel) !== rosterAccessFilter) return false;
+      if (rosterRoleFilter && employee.role.trim() !== rosterRoleFilter) return false;
+      switch (rosterMissingFilter) {
+        case "wage": return !employee.wage.trim();
+        case "contact": return !employee.email.trim() || !employee.phone.trim();
+        case "role": return !employee.role.trim();
+        case "birth": return !employee.dateOfBirth?.trim();
+        default: return true;
+      }
+    }).sort((first, second) => first.name.localeCompare(second.name, undefined, { sensitivity: "base" }));
+  }, [state.employees, rosterSearch, showTerminatedEmployees, rosterAccessFilter, rosterRoleFilter, rosterMissingFilter]);
+  const rosterRowsForCopy = rosterCopyRows(filteredRosterEmployees);
+
+  function downloadRoster() {
+    const url = URL.createObjectURL(new Blob([rosterCsv(rosterRowsForCopy)], { type: "text/csv;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `team-roster-${today}.csv`;
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
   const shiftEmployees = useMemo(
     () => activeEmployees,
     [activeEmployees],
   );
   const hoursEmployees = useMemo(
-    () => activeEmployees.filter((employee) => !isManagerEmployee(employee)),
+    () => [...activeEmployees].sort((first, second) => first.name.localeCompare(second.name, undefined, { sensitivity: "base" })),
     [activeEmployees],
   );
   const shiftEmployeeIds = useMemo(
@@ -1050,7 +1248,7 @@ export default function Home() {
   const clockedInIds = useMemo(() => {
     return new Set(
       state.employees
-        .filter((employee) => employee.active && !isManagerEmployee(employee))
+        .filter((employee) => employee.active)
         .filter((employee) => lastWorkClockEvent(state.clockEvents, employee.id)?.type === "in")
         .map((employee) => employee.id),
     );
@@ -1075,7 +1273,7 @@ export default function Home() {
     : "";
   const hoursRows = useMemo(
     () => {
-      const range = dateRangeForCalendarTab(parseLocalDate(hoursDate), activeHoursTab);
+      const range = hoursDateRange(hoursDate, activeHoursTab);
       const selectedRounding = activeUserIsAdmin && mode === "manager"
         ? hoursRounding
         : hoursDisplay === "rounded"
@@ -1098,6 +1296,14 @@ export default function Home() {
     },
     [activeHoursTab, activeUserIsAdmin, currentTime, hoursDate, hoursDisplay, hoursEmployees, hoursRounding, mode, state.clockEvents, state.hoursAdjustments, state.hoursRoundingMinutes],
   );
+  const sortedHoursRows = useMemo(() => [...hoursRows].sort((first, second) => {
+    const nameOrder = first.employee.name.localeCompare(second.employee.name, undefined, { sensitivity: "base" });
+    if (hoursSortBy === "hours") {
+      const hoursOrder = first.hours - second.hours;
+      return (hoursSortDirection === "asc" ? hoursOrder : -hoursOrder) || nameOrder;
+    }
+    return hoursSortDirection === "asc" ? nameOrder : -nameOrder;
+  }), [hoursRows, hoursSortBy, hoursSortDirection]);
   const ptoRows = useMemo(() => {
     const yearToDate = yearToDateRange(new Date(currentTime));
     const ptoPolicyByEmployeeId = new Map<number, PtoPolicy>();
@@ -1136,6 +1342,13 @@ export default function Home() {
   }, [currentTime, state.clockEvents, state.employees, state.hoursAdjustments, state.ptoPolicies, state.ptoRequests]);
   const activeEmployeePto = ptoRows.find((row) => row.employee.id === activeEmployeeId);
   const viewingRosterEmployee = state.employees.find((employee) => employee.id === viewingRosterEmployeeId);
+  const rosterActionEmployee = state.employees.find((employee) => employee.id === rosterActionEmployeeId);
+  const savedPersonalPayroll = viewingRosterEmployee ? personalPayrollForm(viewingRosterEmployee) : null;
+  const personalPayrollHasChanges = savedPersonalPayroll !== null && Object.entries(personalPayrollDraft)
+    .some(([field, value]) => value !== savedPersonalPayroll[field as keyof typeof personalPayrollDraft]);
+  const savedPersonalContact = viewingRosterEmployee ? personalContactForm(viewingRosterEmployee) : null;
+  const personalContactHasChanges = savedPersonalContact !== null && Object.entries(personalContactDraft)
+    .some(([field, value]) => value !== savedPersonalContact[field as keyof typeof personalContactDraft]);
   const terminatingEmployee = state.employees.find((employee) => employee.id === terminatingEmployeeId);
   const viewingRosterEmployeePto = ptoRows.find((row) => row.employee.id === viewingRosterEmployeeId);
   const viewingRosterEmployeePtoPolicy = (state.ptoPolicies ?? []).find(
@@ -1646,6 +1859,15 @@ export default function Home() {
   }
 
   function navigateToView(view: ViewId) {
+    if (view !== activeView) {
+      setRosterSearch("");
+      setShowTerminatedEmployees(false);
+      setIsRosterFilterOpen(false);
+      setRosterAccessFilter("");
+      setRosterRoleFilter("");
+      setRosterMissingFilter("");
+    }
+    setScheduleTimeOffRequestId(null);
     setIsViewingPtoHistory(false);
     setIsPtoHistoryEmployeeFilterOpen(false);
     setArePtoRequestsExpanded(false);
@@ -1972,42 +2194,6 @@ export default function Home() {
     }));
   }
 
-  function removeEmployee(employeeId: number) {
-    if (!activeUserIsAdmin || employeeId === activeEmployeeId) {
-      setEmployeePendingDeletion(null);
-      return;
-    }
-
-    setState((current) => ({
-      ...current,
-      employees: current.employees.filter((employee) => employee.id !== employeeId),
-      departments: current.departments.map((department) => ({
-        ...department,
-        managerIds: department.managerIds.filter((managerId) => managerId !== employeeId),
-      })),
-      shifts: current.shifts.filter((shift) => shift.employeeId !== employeeId),
-      clockEvents: current.clockEvents.filter((event) => event.employeeId !== employeeId),
-      hoursAdjustments: (current.hoursAdjustments ?? []).filter((adjustment) => adjustment.employeeId !== employeeId),
-      ptoRequests: (current.ptoRequests ?? []).filter((request) => request.employeeId !== employeeId),
-      ptoPolicies: (current.ptoPolicies ?? []).map((policy) => ({
-        ...policy,
-        employeeIds: policy.employeeIds.filter((id) => id !== employeeId),
-      })),
-      scheduleDraftsByManager: Object.fromEntries(
-        Object.entries(current.scheduleDraftsByManager ?? {})
-          .filter(([managerId]) => Number(managerId) !== employeeId)
-          .map(([managerId, draft]) => [managerId, {
-            ...draft,
-            upsertedShifts: draft.upsertedShifts.filter((shift) => shift.employeeId !== employeeId),
-            affectedEmployeeIds: draft.affectedEmployeeIds.filter((id) => id !== employeeId),
-          }]),
-      ),
-    }));
-    setEmployeeMessage("");
-    setEmployeePendingDeletion(null);
-    setViewingRosterEmployeeId((current) => current === employeeId ? null : current);
-  }
-
   function updateEmployeeStatus(employeeId: number, active: boolean) {
     setState((current) => ({
       ...current,
@@ -2037,10 +2223,41 @@ export default function Home() {
   }
 
   function openRosterEmployeeProfile(employeeId: number) {
+    setRosterActionEmployeeId(null);
     setViewingRosterEmployeeId(employeeId);
     setTeamMemberProfileTab("job");
     setEditingEmployeeId(null);
     setEditingPayrollEmployeeId(null);
+    setEditingPersonalContactEmployeeId(null);
+    setEditingPersonalPayrollEmployeeId(null);
+  }
+
+  function toggleRosterActions(event: ReactMouseEvent<HTMLButtonElement>, employeeId: number) {
+    if (rosterActionEmployeeId === employeeId) {
+      setRosterActionEmployeeId(null);
+      return;
+    }
+    const button = event.currentTarget;
+    const bounds = button.getBoundingClientRect();
+    const menuHeight = 312;
+    setRosterActionPosition({
+      top: Math.max(8, bounds.bottom + menuHeight + 6 <= window.innerHeight ? bounds.bottom + 6 : bounds.top - menuHeight - 6),
+      left: Math.max(8, Math.min(bounds.right - 280, window.innerWidth - 288)),
+    });
+    rosterActionButtonRef.current = button;
+    setRosterActionEmployeeId(employeeId);
+    window.requestAnimationFrame(() => rosterActionMenuRef.current?.querySelector<HTMLButtonElement>("button")?.focus());
+  }
+
+  function viewRosterEmployeeSection(employeeId: number, tab: TeamMemberProfileTab) {
+    openRosterEmployeeProfile(employeeId);
+    setTeamMemberProfileTab(tab);
+  }
+
+  function openScheduleEmployeeProfile(employeeId: number) {
+    if (mode !== "manager") return;
+    navigateToView("employees");
+    viewRosterEmployeeSection(employeeId, "personal");
   }
 
   function closeRosterEmployeeProfile() {
@@ -2048,6 +2265,7 @@ export default function Home() {
     setTeamMemberProfileTab("job");
     setEditingPayrollEmployeeId(null);
     setEditingPersonalPayrollEmployeeId(null);
+    setEditingPersonalContactEmployeeId(null);
     setManagerNoteDraft("");
   }
 
@@ -2100,44 +2318,135 @@ export default function Home() {
     setEditingPayrollEmployeeId(null);
   }
 
-  function startEditingPersonalPayroll(employee: Employee) {
-    setPersonalPayrollDraft({
-      dateOfBirth: employee.dateOfBirth,
-      socialSecurityNumber: employee.socialSecurityNumber,
-      homeAddress: employee.homeAddress,
-      homeCityStateZip: employee.homeCityStateZip,
-    });
-    setEditingPersonalPayrollEmployeeId(employee.id);
+  function startEditingPersonalContact(employee: Employee) {
+    setPersonalContactDraft(personalContactForm(employee));
+    setPersonalContactError("");
+    setEditingPersonalContactEmployeeId(employee.id);
+    window.requestAnimationFrame(() => personalContactFirstNameRef.current?.focus());
   }
 
-  function savePersonalPayroll(employeeId: number) {
+  function savePersonalContact(event: FormEvent<HTMLFormElement>, employeeId: number) {
+    event.preventDefault();
+    if (!personalContactHasChanges || !personalContactDraft.firstName.trim()) return;
+    const name = [personalContactDraft.firstName.trim(), personalContactDraft.lastName.trim()].filter(Boolean).join(" ");
+    if (hasEmployeeWithName(state.employees, name, employeeId)) {
+      setPersonalContactError("Name already in use.");
+      return;
+    }
+    setState((current) => ({
+      ...current,
+      employees: current.employees.map((employee) => employee.id === employeeId ? {
+        ...employee,
+        name,
+        email: personalContactDraft.email.trim(),
+        phone: formatPhoneNumberInput(personalContactDraft.phone),
+        emergencyContact: personalContactDraft.emergencyContact.trim(),
+        emergencyContactRelationship: personalContactDraft.emergencyContactRelationship.trim(),
+        emergencyContactPhone: formatPhoneNumberInput(personalContactDraft.emergencyContactPhone),
+        emergencyContactPreference: personalContactDraft.notifyEmergencyContact === personalContactForm(employee).notifyEmergencyContact
+          ? employee.emergencyContactPreference
+          : personalContactDraft.notifyEmergencyContact ? emergencyContactNotificationLabel : "Do not notify my emergency contact",
+      } : employee),
+    }));
+    setEditingPersonalContactEmployeeId(null);
+    setPersonalContactError("");
+  }
+
+  function startEditingPersonalPayroll(employee: Employee) {
+    setPersonalPayrollDraft(personalPayrollForm(employee));
+    setEditingPersonalPayrollEmployeeId(employee.id);
+    window.requestAnimationFrame(() => personalPayrollFirstNameRef.current?.focus());
+  }
+
+  function savePersonalPayroll(event: FormEvent<HTMLFormElement>, employeeId: number) {
+    event.preventDefault();
+    if (!personalPayrollHasChanges || !personalPayrollDraft.legalFirstName.trim() || !personalPayrollDraft.homePostalCode.trim()) return;
+    const payroll = Object.fromEntries(Object.entries(personalPayrollDraft).map(([field, value]) => [field, value.trim()])) as typeof personalPayrollDraft;
+    const cityState = [payroll.homeCity, payroll.homeStateProvince].filter(Boolean).join(", ");
     setState((current) => ({
       ...current,
       employees: current.employees.map((employee) => (
         employee.id === employeeId
-          ? { ...employee, ...personalPayrollDraft }
+          ? { ...employee, ...payroll, homeCityStateZip: [cityState, payroll.homePostalCode].filter(Boolean).join(" ") }
           : employee
       )),
     }));
     setEditingPersonalPayrollEmployeeId(null);
   }
 
-  function uploadEmployeeCertificate(employeeId: number, file: File | undefined) {
+  function openCertificateModal(employeeId: number) {
+    setCertificateDraft({ name: "", expirationDate: "" });
+    setCertificateFile(null);
+    setCertificateError("");
+    setIsDraggingCertificate(false);
+    setCertificateEmployeeId(employeeId);
+    window.requestAnimationFrame(() => certificateNameRef.current?.focus());
+  }
+
+  function closeCertificateModal() {
+    if (isSavingCertificate) return;
+    setCertificateEmployeeId(null);
+    window.requestAnimationFrame(() => addCertificateButtonRef.current?.focus());
+  }
+
+  function chooseCertificateFile(file: File | undefined) {
     if (!file) return;
-    setState((current) => ({
-      ...current,
-      employees: current.employees.map((employee) => (
-        employee.id === employeeId
-          ? {
-              ...employee,
-              certificates: [
-                ...(employee.certificates ?? []),
-                { id: nextId(employee.certificates ?? []), name: file.name.replace(/\.[^.]+$/, ""), fileName: file.name },
-              ],
-            }
-          : employee
-      )),
-    }));
+    setIsDraggingCertificate(false);
+    if (!/\.(gif|png|pdf|jpe?g)$/i.test(file.name)) {
+      setCertificateError("Choose a GIF, PNG, PDF, or JPG/JPEG file.");
+      return;
+    }
+    setCertificateFile(file);
+    setCertificateError("");
+  }
+
+  async function uploadEmployeeCertificate(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const name = certificateDraft.name.trim();
+    if (certificateEmployeeId === null || !name || !certificateDraft.expirationDate || isSavingCertificate) return;
+    setIsSavingCertificate(true);
+    setCertificateError("");
+    const fileId = certificateFile ? crypto.randomUUID() : undefined;
+    try {
+      if (fileId && certificateFile) await storeCertificateFile(fileId, certificateFile);
+      setState((current) => ({
+        ...current,
+        employees: current.employees.map((employee) => (
+          employee.id === certificateEmployeeId
+            ? {
+                ...employee,
+                certificates: [
+                  ...(employee.certificates ?? []),
+                  { id: nextId(employee.certificates ?? []), name, expirationDate: certificateDraft.expirationDate, fileName: certificateFile?.name ?? "", fileId },
+                ],
+              }
+            : employee
+        )),
+      }));
+      setCertificateEmployeeId(null);
+      window.requestAnimationFrame(() => addCertificateButtonRef.current?.focus());
+    } catch {
+      setCertificateError("The attachment could not be saved. Try again or remove the attachment.");
+    } finally {
+      setIsSavingCertificate(false);
+    }
+  }
+
+  async function downloadCertificate(certificate: EmployeeCertificate) {
+    if (!certificate.fileId) return;
+    setCertificateDownloadError("");
+    try {
+      const file = await readCertificateFile(certificate.fileId);
+      if (!file) throw new Error("Attachment missing");
+      const url = URL.createObjectURL(file);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = certificate.fileName;
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch {
+      setCertificateDownloadError("This attachment is unavailable in this browser.");
+    }
   }
 
   function uploadOnboardingDocument(employeeId: number, documentName: string, file: File | undefined) {
@@ -2714,6 +3023,24 @@ export default function Home() {
       ptoRequests: (current.ptoRequests ?? []).filter((request) => request.id !== requestId),
     }));
     if (reviewingPtoRequestId === requestId) setReviewingPtoRequestId(null);
+    if (scheduleTimeOffRequestId === requestId) setScheduleTimeOffRequestId(null);
+  }
+
+  function openScheduleTimeOff(event: ReactMouseEvent<HTMLButtonElement>, request: PtoRequest) {
+    if (isPublicSchedule || (mode !== "manager" && request.employeeId !== activeEmployeeId)) return;
+    if (scheduleTimeOffRequestId === request.id) { setScheduleTimeOffRequestId(null); return; }
+    const button = event.currentTarget;
+    const bounds = button.getBoundingClientRect();
+    const width = Math.min(500, window.innerWidth - 24);
+    const left = bounds.left >= width + 24 ? bounds.left - width - 12 : bounds.right + width + 24 <= window.innerWidth ? bounds.right + 12 : Math.max(12, Math.min(bounds.left, window.innerWidth - width - 12));
+    scheduleTimeOffTriggerRef.current = button;
+    setScheduleTimeOffPosition({ left, top: Math.max(12, bounds.top - 100) });
+    setScheduleTimeOffRequestId(request.id);
+  }
+
+  function closeScheduleTimeOff() {
+    setScheduleTimeOffRequestId(null);
+    scheduleTimeOffTriggerRef.current?.focus({ preventScroll: true });
   }
 
   function saveWorkedHours(event: FormEvent<HTMLFormElement>) {
@@ -2737,7 +3064,7 @@ export default function Home() {
 
     const requestedHours = enteredHours + enteredMinutes / 60;
 
-    const range = dateRangeForCalendarTab(parseLocalDate(hoursDate), activeHoursTab);
+    const range = hoursDateRange(hoursDate, activeHoursTab);
     const currentHours = adjustedWorkedHoursForRange(
       state.clockEvents,
       state.hoursAdjustments ?? [],
@@ -3843,9 +4170,8 @@ export default function Home() {
             </div>
           ) : null}
 
-          {activeView === "dashboard" && (
+          {activeView === "dashboard" && !isPublicSchedule && (
             <div className="content-grid">
-              {mode === "employee" ? (
                 <section className="panel main-panel">
                   <PanelHeading eyebrow="Clock" title="Time clock" />
                   <div className="clock-card">
@@ -3903,8 +4229,8 @@ export default function Home() {
                   <PanelHeading eyebrow="Own shift" title="My shift today" />
                   {myShift ? <ShiftRow shift={myShift} employee={activeEmployee} /> : <EmptyState text="No shift assigned today." />}
                 </section>
-              ) : (
-                <section className="panel main-panel">
+              {mode === "manager" ? (
+                <section className="panel">
                   <PanelHeading eyebrow="Manager" title="Manager overview" />
                   <div className="manager-summary">
                     <Metric label="Scheduled today" value={todaysShifts.length.toString()} />
@@ -3920,7 +4246,7 @@ export default function Home() {
                     }}>View PTO</button>
                   </div>
                 </section>
-              )}
+              ) : null}
 
               <section className="panel">
                 <div className="panel-heading calendar-heading">
@@ -4131,6 +4457,12 @@ export default function Home() {
               <div className="roster-heading" hidden={activeView !== "employees" || Boolean(viewingRosterEmployee)}>
                 <PanelHeading eyebrow="Team" title="Roster" />
                 <div className="roster-add-toolbar">
+                  <button type="button" className="roster-copy-button" onClick={() => window.print()} aria-label="Print team roster" title="Print team roster">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 8V3h10v5M7 17H4V9h16v8h-3M7 14h10v7H7z" /><path d="M17 11h.01" /></svg>
+                  </button>
+                  <button type="button" className="roster-copy-button" onClick={downloadRoster} aria-label="Download team roster" title="Download team roster (CSV)">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5" /></svg>
+                  </button>
                   <button
                     type="button"
                     className="primary-action"
@@ -4313,21 +4645,62 @@ export default function Home() {
                           <section className="team-member-profile-card team-member-personal-card">
                             <div className="team-member-profile-card-heading">
                               <h3>Contact information</h3>
-                              <button type="button" onClick={() => openEditEmployeeModal(viewingRosterEmployee)}>✎ Edit</button>
+                              {editingPersonalContactEmployeeId !== viewingRosterEmployee.id ? (
+                                <button type="button" onClick={() => startEditingPersonalContact(viewingRosterEmployee)}>✎ Edit</button>
+                              ) : null}
                             </div>
+                            {editingPersonalContactEmployeeId === viewingRosterEmployee.id ? (
+                              <form className="team-member-contact-editor" onSubmit={(event) => savePersonalContact(event, viewingRosterEmployee.id)}>
+                                <div className="contact-editor-row">
+                                  <label htmlFor="contact-first-name">Preferred name</label>
+                                  <div className="contact-name-fields">
+                                    <input id="contact-first-name" aria-label="Preferred first name" autoComplete="given-name" ref={personalContactFirstNameRef} required value={personalContactDraft.firstName} onChange={(event) => setPersonalContactDraft((draft) => ({ ...draft, firstName: event.target.value }))} />
+                                    <input aria-label="Preferred last name" autoComplete="family-name" value={personalContactDraft.lastName} onChange={(event) => setPersonalContactDraft((draft) => ({ ...draft, lastName: event.target.value }))} />
+                                  </div>
+                                </div>
+                                <div className="contact-editor-row">
+                                  <label htmlFor="contact-email">Personal email</label>
+                                  <input id="contact-email" className="contact-email-field" type="email" autoComplete="email" value={personalContactDraft.email} onChange={(event) => setPersonalContactDraft((draft) => ({ ...draft, email: event.target.value }))} />
+                                </div>
+                                <div className="contact-editor-row">
+                                  <label htmlFor="contact-mobile">Mobile number</label>
+                                  <input id="contact-mobile" className="contact-mobile-field" type="tel" autoComplete="tel" value={personalContactDraft.phone} onChange={(event) => setPersonalContactDraft((draft) => ({ ...draft, phone: formatPhoneNumberInput(event.target.value) }))} />
+                                </div>
+                                <div className="contact-editor-row">
+                                  <label htmlFor="contact-emergency-name">Emergency contact</label>
+                                  <div className="contact-emergency-fields">
+                                    <input id="contact-emergency-name" aria-label="Emergency contact name" placeholder="Name" value={personalContactDraft.emergencyContact} onChange={(event) => setPersonalContactDraft((draft) => ({ ...draft, emergencyContact: event.target.value }))} />
+                                    <input aria-label="Emergency contact relationship" placeholder="Relationship" value={personalContactDraft.emergencyContactRelationship} onChange={(event) => setPersonalContactDraft((draft) => ({ ...draft, emergencyContactRelationship: event.target.value }))} />
+                                    <input aria-label="Emergency contact phone number" type="tel" placeholder="Phone number" value={personalContactDraft.emergencyContactPhone} onChange={(event) => setPersonalContactDraft((draft) => ({ ...draft, emergencyContactPhone: formatPhoneNumberInput(event.target.value) }))} />
+                                  </div>
+                                </div>
+                                <div className="contact-editor-row">
+                                  <label htmlFor="contact-emergency-notification">Emergency contact notification preference</label>
+                                  <label className="contact-notification-option">
+                                    <input id="contact-emergency-notification" type="checkbox" checked={personalContactDraft.notifyEmergencyContact} onChange={(event) => setPersonalContactDraft((draft) => ({ ...draft, notifyEmergencyContact: event.target.checked }))} />
+                                    <span>{emergencyContactNotificationLabel}</span>
+                                  </label>
+                                </div>
+                                {personalContactError ? <p className="form-message" role="alert">{personalContactError}</p> : null}
+                                <div className="contact-editor-actions">
+                                  <button type="button" onClick={() => setEditingPersonalContactEmployeeId(null)}>Cancel</button>
+                                  <button type="submit" className="primary-action" disabled={!personalContactHasChanges || !personalContactDraft.firstName.trim()}>Save</button>
+                                </div>
+                              </form>
+                            ) : (
                             <dl className="team-member-personal-details">
                               <div><dt>Preferred name</dt><dd>{viewingRosterEmployee.name}</dd></div>
                               <div>
                                 <dt>Personal email</dt>
                                 <dd>
                                   <span>{viewingRosterEmployee.email || "Not added"}</span>
-                                  {viewingRosterEmployee.email ? <small className="personal-email-status">Not verified</small> : null}
                                 </dd>
                               </div>
                               <div><dt>Mobile number</dt><dd>{viewingRosterEmployee.phone || "Not added"}</dd></div>
-                              <div><dt>Emergency contact</dt><dd>{viewingRosterEmployee.emergencyContact || "Not added"}</dd></div>
+                              <div><dt>Emergency contact</dt><dd>{[viewingRosterEmployee.emergencyContact, viewingRosterEmployee.emergencyContactRelationship, viewingRosterEmployee.emergencyContactPhone].filter(Boolean).join(", ") || "Not added"}</dd></div>
                               <div><dt>Emergency contact notification preference</dt><dd>{viewingRosterEmployee.emergencyContactPreference || "Not added"}</dd></div>
                             </dl>
+                            )}
                           </section>
 
                           <section className="team-member-profile-card team-member-personal-card">
@@ -4338,22 +4711,61 @@ export default function Home() {
                               ) : null}
                             </div>
                             {editingPersonalPayrollEmployeeId === viewingRosterEmployee.id ? (
-                              <div className="team-member-personal-payroll-editor">
-                                <label><span>Date of birth</span><input type="date" value={personalPayrollDraft.dateOfBirth} onChange={(event) => setPersonalPayrollDraft((draft) => ({ ...draft, dateOfBirth: event.target.value }))} /></label>
-                                <label><span>Social Security number</span><input value={personalPayrollDraft.socialSecurityNumber} onChange={(event) => setPersonalPayrollDraft((draft) => ({ ...draft, socialSecurityNumber: event.target.value }))} autoComplete="off" /></label>
-                                <label><span>Home address</span><input value={personalPayrollDraft.homeAddress} onChange={(event) => setPersonalPayrollDraft((draft) => ({ ...draft, homeAddress: event.target.value }))} /></label>
-                                <label><span>City, state and ZIP</span><input value={personalPayrollDraft.homeCityStateZip} onChange={(event) => setPersonalPayrollDraft((draft) => ({ ...draft, homeCityStateZip: event.target.value }))} /></label>
-                                <div>
-                                  <button type="button" onClick={() => setEditingPersonalPayrollEmployeeId(null)}>Cancel</button>
-                                  <button type="button" className="primary-action" onClick={() => savePersonalPayroll(viewingRosterEmployee.id)}>Save</button>
+                              <form className="team-member-personal-payroll-editor" onSubmit={(event) => savePersonalPayroll(event, viewingRosterEmployee.id)}>
+                                <div className="contact-editor-row">
+                                  <label htmlFor="payroll-first-name">Legal name</label>
+                                  <div className="payroll-name-fields">
+                                    <input id="payroll-first-name" aria-label="Legal first name" placeholder="First name" ref={personalPayrollFirstNameRef} required autoComplete="given-name" value={personalPayrollDraft.legalFirstName} onChange={(event) => setPersonalPayrollDraft((draft) => ({ ...draft, legalFirstName: event.target.value }))} />
+                                    <input aria-label="Legal middle name" placeholder="Middle name" autoComplete="additional-name" value={personalPayrollDraft.legalMiddleName} onChange={(event) => setPersonalPayrollDraft((draft) => ({ ...draft, legalMiddleName: event.target.value }))} />
+                                    <input aria-label="Legal last name" placeholder="Last name" autoComplete="family-name" value={personalPayrollDraft.legalLastName} onChange={(event) => setPersonalPayrollDraft((draft) => ({ ...draft, legalLastName: event.target.value }))} />
+                                  </div>
                                 </div>
-                              </div>
+                                <div className="contact-editor-row">
+                                  <label htmlFor="payroll-date-of-birth">Date of birth</label>
+                                  <input id="payroll-date-of-birth" className="payroll-short-field" type="date" autoComplete="bday" value={personalPayrollDraft.dateOfBirth} onInput={(event) => { const dateOfBirth = event.currentTarget.value; setPersonalPayrollDraft((draft) => ({ ...draft, dateOfBirth })); }} />
+                                </div>
+                                <div className="contact-editor-row">
+                                  <label htmlFor="payroll-social-security-number">Social Security number</label>
+                                  <input id="payroll-social-security-number" className="payroll-short-field" placeholder="xxx-xx-xxxx" inputMode="numeric" maxLength={11} pattern="[0-9]{3}-[0-9]{2}-[0-9]{4}" title="Enter a nine-digit Social Security number" value={personalPayrollDraft.socialSecurityNumber} onChange={(event) => {
+                                  const digits = event.target.value.replace(/\D/g, "").slice(0, 9);
+                                  setPersonalPayrollDraft((draft) => ({ ...draft, socialSecurityNumber: [digits.slice(0, 3), digits.slice(3, 5), digits.slice(5)].filter(Boolean).join("-") }));
+                                }} autoComplete="off" />
+                                </div>
+                                <div className="contact-editor-row">
+                                  <label htmlFor="payroll-address-line1">Address line 1</label>
+                                  <input id="payroll-address-line1" placeholder="Address line 1" autoComplete="address-line1" value={personalPayrollDraft.homeAddress} onChange={(event) => setPersonalPayrollDraft((draft) => ({ ...draft, homeAddress: event.target.value }))} />
+                                </div>
+                                <div className="contact-editor-row">
+                                  <label htmlFor="payroll-address-line2">Address line 2</label>
+                                  <input id="payroll-address-line2" placeholder="Address line 2" autoComplete="address-line2" value={personalPayrollDraft.homeAddressLine2} onChange={(event) => setPersonalPayrollDraft((draft) => ({ ...draft, homeAddressLine2: event.target.value }))} />
+                                </div>
+                                <div className="contact-editor-row">
+                                  <label htmlFor="payroll-city">City</label>
+                                  <input id="payroll-city" className="payroll-short-field" placeholder="City" autoComplete="address-level2" value={personalPayrollDraft.homeCity} onChange={(event) => setPersonalPayrollDraft((draft) => ({ ...draft, homeCity: event.target.value }))} />
+                                </div>
+                                <div className="contact-editor-row">
+                                  <label htmlFor="payroll-state">State/Province</label>
+                                  <select id="payroll-state" className="payroll-short-field" autoComplete="address-level1" value={personalPayrollDraft.homeStateProvince} onChange={(event) => setPersonalPayrollDraft((draft) => ({ ...draft, homeStateProvince: event.target.value }))}>
+                                    <option value="">Select state</option>
+                                    {personalPayrollDraft.homeStateProvince && !payrollStates.some(([, name]) => name === personalPayrollDraft.homeStateProvince) ? <option value={personalPayrollDraft.homeStateProvince}>{personalPayrollDraft.homeStateProvince}</option> : null}
+                                    {payrollStates.map(([abbreviation, name]) => <option key={abbreviation} value={name}>{name}</option>)}
+                                  </select>
+                                </div>
+                                <div className="contact-editor-row">
+                                  <label htmlFor="payroll-zip">ZIP code <span className="payroll-required" aria-hidden="true">*</span></label>
+                                  <input id="payroll-zip" className="payroll-zip-field" placeholder="ZIP code" required autoComplete="postal-code" inputMode="numeric" maxLength={10} pattern="[0-9]{5}(-[0-9]{4})?" title="Enter a five-digit ZIP code or ZIP+4" value={personalPayrollDraft.homePostalCode} onChange={(event) => setPersonalPayrollDraft((draft) => ({ ...draft, homePostalCode: event.target.value }))} />
+                                </div>
+                                <div className="payroll-editor-actions contact-editor-actions">
+                                  <button type="button" onClick={() => setEditingPersonalPayrollEmployeeId(null)}>Cancel</button>
+                                  <button type="submit" className="primary-action" disabled={!personalPayrollHasChanges || !personalPayrollDraft.legalFirstName.trim() || !personalPayrollDraft.homePostalCode.trim()}>Save</button>
+                                </div>
+                              </form>
                             ) : (
                               <dl className="team-member-personal-details payroll-details">
-                                <div><dt>Legal name</dt><dd>{viewingRosterEmployee.name}</dd></div>
-                                <div><dt>Date of birth</dt><dd>{viewingRosterEmployee.dateOfBirth ? formatShortDate(viewingRosterEmployee.dateOfBirth) : "Not added"}</dd></div>
+                                <div><dt>Legal name</dt><dd>{employeeLegalName(viewingRosterEmployee)}</dd></div>
+                                <div><dt>Date of birth</dt><dd>{viewingRosterEmployee.dateOfBirth ? formatNumericDate(`${viewingRosterEmployee.dateOfBirth}T12:00:00`) : "Not added"}</dd></div>
                                 <div><dt>Social Security number</dt><dd>{viewingRosterEmployee.socialSecurityNumber || "Not added"}</dd></div>
-                                <div className="personal-address-row"><dt>Home address</dt><dd><span>{viewingRosterEmployee.homeAddress || "Not added"}</span>{viewingRosterEmployee.homeCityStateZip ? <span>{viewingRosterEmployee.homeCityStateZip}</span> : null}</dd></div>
+                                <div className="personal-address-row"><dt>Home address</dt><dd><span>{viewingRosterEmployee.homeAddress || "Not added"}</span>{viewingRosterEmployee.homeAddressLine2 ? <span>{viewingRosterEmployee.homeAddressLine2}</span> : null}{viewingRosterEmployee.homeCityStateZip ? <span>{viewingRosterEmployee.homeCityStateZip}</span> : null}</dd></div>
                               </dl>
                             )}
                           </section>
@@ -4363,26 +4775,23 @@ export default function Home() {
                           <section className="team-member-profile-card certificate-card">
                             <div className="team-member-profile-card-heading">
                               <h3>Certificates ({viewingRosterEmployee.certificates?.length ?? 0})</h3>
-                              <label className="document-upload-button">
+                              <button type="button" className="document-upload-button" ref={addCertificateButtonRef} onClick={() => openCertificateModal(viewingRosterEmployee.id)}>
                                 Add a certificate
-                                <input
-                                  type="file"
-                                  onChange={(event) => {
-                                    uploadEmployeeCertificate(viewingRosterEmployee.id, event.target.files?.[0]);
-                                    event.target.value = "";
-                                  }}
-                                />
-                              </label>
+                              </button>
                             </div>
                             {(viewingRosterEmployee.certificates?.length ?? 0) === 0 ? (
                               <p className="documents-empty-message">No certificates added for {viewingRosterEmployee.name.split(" ")[0]} yet.</p>
                             ) : (
                               <div className="certificate-list">
                                 {viewingRosterEmployee.certificates?.map((certificate) => (
-                                  <div key={certificate.id}><strong>{certificate.name}</strong><span>{certificate.fileName}</span></div>
+                                  <div key={certificate.id}>
+                                    <div className="certificate-details"><strong>{certificate.name}</strong>{certificate.expirationDate ? <span>Expires {formatNumericDate(`${certificate.expirationDate}T12:00:00`)}</span> : null}</div>
+                                    {certificate.fileId ? <button type="button" className="certificate-download" onClick={() => downloadCertificate(certificate)} aria-label={`Download ${certificate.fileName}`}>{certificate.fileName}</button> : <span>{certificate.fileName || "No attachment"}</span>}
+                                  </div>
                                 ))}
                               </div>
                             )}
+                            {certificateDownloadError ? <p className="form-message" role="alert">{certificateDownloadError}</p> : null}
                           </section>
 
                           <section className="team-member-profile-card onboarding-card">
@@ -4453,11 +4862,6 @@ export default function Home() {
                                     </div>
                                   )}
                             </div>
-                          </section>
-
-                          <section className="team-member-profile-card performance-shoutouts-card">
-                            <h3>Shoutouts</h3>
-                            <div><strong>No shoutouts yet</strong><span>Shoutouts from team members will appear here</span></div>
                           </section>
 
                           <section className="team-member-profile-card performance-manager-notes-card">
@@ -4694,7 +5098,71 @@ export default function Home() {
                   </form>
                 </div>
               ) : null}
-              <div className="roster-table-wrap" hidden={activeView !== "employees" || Boolean(viewingRosterEmployee)}>
+              <div className="roster-list" hidden={activeView !== "employees" || Boolean(viewingRosterEmployee)}>
+                <div className="roster-toolbar">
+                  <label className="roster-search">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 5 5" /></svg>
+                    <input
+                      type="search"
+                      aria-label="Search team members by name"
+                      placeholder="Search team members…"
+                      value={rosterSearch}
+                      onChange={(event) => { setRosterSearch(event.target.value); setRosterActionEmployeeId(null); }}
+                    />
+                  </label>
+                  <span className="roster-member-count" role="status">{filteredRosterEmployees.length} team {filteredRosterEmployees.length === 1 ? "member" : "members"}</span>
+                  <div className="roster-toolbar-actions">
+                    <label className="roster-terminated-toggle">
+                      <input
+                        type="checkbox"
+                        role="switch"
+                        checked={showTerminatedEmployees}
+                        onChange={(event) => { setShowTerminatedEmployees(event.target.checked); setRosterActionEmployeeId(null); }}
+                      />
+                      <span className="roster-switch-track" aria-hidden="true" />
+                      <span>Show terminated</span>
+                    </label>
+                    <button
+                      type="button"
+                      className="roster-filter-button"
+                      aria-expanded={isRosterFilterOpen}
+                      aria-controls="roster-filters"
+                      onClick={() => { setIsRosterFilterOpen((open) => !open); setRosterActionEmployeeId(null); }}
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h18l-7 8v7l-4 2V12z" /></svg>
+                      Filter
+                    </button>
+                  </div>
+                </div>
+                <div className="roster-filters" id="roster-filters" hidden={!isRosterFilterOpen}>
+                  <label>
+                    <span>Access</span>
+                    <select value={rosterAccessFilter} onChange={(event) => { setRosterAccessFilter(event.target.value); setRosterActionEmployeeId(null); }}>
+                      <option value="">All access</option>
+                      <option value="Admin">Admin</option>
+                      <option value="Manager">Manager</option>
+                      <option value="Employee">Employee</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>Role</span>
+                    <select value={rosterRoleFilter} onChange={(event) => { setRosterRoleFilter(event.target.value); setRosterActionEmployeeId(null); }}>
+                      <option value="">All roles</option>
+                      {rosterFilterRoles.map((role) => <option key={role} value={role}>{role}</option>)}
+                    </select>
+                  </label>
+                  <label>
+                    <span>Missing information</span>
+                    <select value={rosterMissingFilter} onChange={(event) => { setRosterMissingFilter(event.target.value); setRosterActionEmployeeId(null); }}>
+                      <option value="">--</option>
+                      <option value="wage">Wage rates</option>
+                      <option value="contact">Contact information</option>
+                      <option value="role">Role</option>
+                      <option value="birth">Date of birth</option>
+                    </select>
+                  </label>
+                </div>
+              <div className="roster-table-wrap">
                 <div className="roster-table" role="table" aria-label="Team roster">
                   <div className="roster-header" role="row">
                     <span role="columnheader">Team member</span>
@@ -4706,9 +5174,7 @@ export default function Home() {
                     <span role="columnheader">Status</span>
                     <span role="columnheader" aria-label="Actions" />
                   </div>
-                  {[...state.employees]
-                    .sort((first, second) => first.name.localeCompare(second.name, undefined, { sensitivity: "base" }))
-                    .map((employee) => (
+                  {filteredRosterEmployees.map((employee) => (
                       <article
                         className="roster-row"
                         role="row"
@@ -4737,33 +5203,29 @@ export default function Home() {
                           role="cell"
                           className={employee.active ? "roster-status active" : "roster-status"}
                         >
-                          {employee.active ? "Active" : "Inactive"}
+                          {employee.terminated ? "Terminated" : employee.active ? "Active" : "Inactive"}
                         </div>
                         <div className="roster-actions" role="cell">
                           <button
                             type="button"
-                            className="employee-edit-button"
-                            onClick={() => openEditEmployeeModal(employee)}
-                            aria-label={`Edit ${employee.name}`}
-                            title="Edit employee"
+                            className="roster-action-button"
+                            onClick={(event) => toggleRosterActions(event, employee.id)}
+                            aria-label={`Actions for ${employee.name}`}
+                            aria-haspopup="menu"
+                            aria-expanded={rosterActionEmployeeId === employee.id}
+                            aria-controls={rosterActionEmployeeId === employee.id ? "roster-action-menu" : undefined}
+                            title="Team member actions"
                           >
                             <svg viewBox="0 0 24 24" aria-hidden="true">
-                              <path d="m4 20 4.5-1 10-10-3.5-3.5-10 10L4 20ZM13.5 7l3.5 3.5" />
+                              <circle cx="12" cy="5" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="12" cy="19" r="1.8" />
                             </svg>
                           </button>
                         </div>
-                        {activeUserIsAdmin && employee.id !== activeEmployeeId ? (
-                          <button
-                            type="button"
-                            className="roster-row-remove"
-                            onClick={() => setEmployeePendingDeletion(employee)}
-                            aria-label={`Delete ${employee.name}`}
-                            title="Delete employee"
-                          >×</button>
-                        ) : null}
                       </article>
                     ))}
                 </div>
+              </div>
+                {filteredRosterEmployees.length === 0 ? <p className="roster-empty" role="status">No team members match your search or filters.</p> : null}
               </div>
             </section>
           )}
@@ -4921,7 +5383,12 @@ export default function Home() {
                             return (
                               <div className="schedule-chart-row" key={employee.id}>
                                 <div className={`schedule-member${isLastEditedEmployee ? " saved" : ""}`}>
-                                  <div><strong>{employee.name}</strong><span>{dailyHours.toFixed(2)} hrs</span></div>
+                                  <div>
+                                    {mode === "manager" ? (
+                                      <button type="button" className="shift-member-name-link" onClick={() => openScheduleEmployeeProfile(employee.id)}>{employee.name}</button>
+                                    ) : <strong>{employee.name}</strong>}
+                                    <span>{dailyHours.toFixed(2)} hrs</span>
+                                  </div>
                                   {employeeLastEditedAt ? (
                                     <small>Last edited at {formatSavedTime(employeeLastEditedAt)}</small>
                                   ) : employeeLastCreatedAt ? (
@@ -4950,9 +5417,9 @@ export default function Home() {
                                     </div>
                                   ))}
                                   {employeeShifts.length === 0 && timeOff ? (
-                                    <div className="schedule-bar time-off" style={{ "--shift-left": "0%", "--shift-width": "100%" } as CSSProperties}>
+                                    <button type="button" className="schedule-bar time-off schedule-time-off-button" style={{ "--shift-left": "0%", "--shift-width": "100%" } as CSSProperties} onClick={(event) => openScheduleTimeOff(event, timeOff)} disabled={isPublicSchedule || (mode !== "manager" && timeOff.employeeId !== activeEmployeeId)} aria-label={`View time off for ${employee.name} on ${formatLongDate(scheduleDate)}`} aria-haspopup="dialog" aria-expanded={scheduleTimeOffRequestId === timeOff.id}>
                                       <strong>Time off</strong><span>{timeOff.startTime && timeOff.endTime ? `${formatTime12(timeOff.startTime)}–${formatTime12(timeOff.endTime)}` : "All day"}</span>
-                                    </div>
+                                    </button>
                                   ) : null}
                                   {mode === "manager" && employeeShifts.length === 0 && !timeOff ? (
                                     <button
@@ -4981,7 +5448,8 @@ export default function Home() {
                             type="button"
                             className={day.date === today ? "shift-week-day today" : "shift-week-day"}
                             key={day.date}
-                            onClick={() => setScheduleDate(day.date)}
+                            onClick={() => { setScheduleDate(day.date); setEmployeeScheduleTab("day"); }}
+                            title={`View ${formatLongDate(day.date)} in Day view`}
                             role="columnheader"
                           >
                             {weekday(day.date).slice(0, 3)}, {parseLocalDate(day.date).getDate()}
@@ -4995,7 +5463,12 @@ export default function Home() {
                           return (
                             <div className="shift-week-row" role="row" key={employee.id}>
                               <div className="shift-week-member" role="rowheader">
-                                <div><strong>{employee.name}</strong><span>{weeklyHours.toFixed(2)} hrs</span></div>
+                                <div>
+                                  {mode === "manager" ? (
+                                    <button type="button" className="shift-member-name-link" onClick={() => openScheduleEmployeeProfile(employee.id)}>{employee.name}</button>
+                                  ) : <strong>{employee.name}</strong>}
+                                  <span>{weeklyHours.toFixed(2)} hrs</span>
+                                </div>
                               </div>
                               {scheduleWeekDays.map((day) => {
                                 const dayShifts = day.shifts.filter((shift) => shift.employeeId === employee.id);
@@ -5017,7 +5490,7 @@ export default function Home() {
                                       </button>
                                     ))}
                                     {timeOff ? (
-                                      <div className="shift-time-off"><strong>⊘ Time off</strong><span>▣ {timeOff.startTime && timeOff.endTime ? `${formatTime12(timeOff.startTime)}–${formatTime12(timeOff.endTime)}` : "All day"}</span></div>
+                                      <button type="button" className="shift-time-off schedule-time-off-button" onClick={(event) => openScheduleTimeOff(event, timeOff)} disabled={isPublicSchedule || (mode !== "manager" && timeOff.employeeId !== activeEmployeeId)} aria-label={`View time off for ${employee.name} on ${formatLongDate(day.date)}`} aria-haspopup="dialog" aria-expanded={scheduleTimeOffRequestId === timeOff.id}><strong>⊘ Time off</strong><span>▣ {timeOff.startTime && timeOff.endTime ? `${formatTime12(timeOff.startTime)}–${formatTime12(timeOff.endTime)}` : "All day"}</span></button>
                                     ) : null}
                                     {mode === "manager" && dayShifts.length === 0 && !timeOff ? (
                                       <button
@@ -5068,10 +5541,10 @@ export default function Home() {
                                 );
                               })}
                               {timeOffRequests.map((request) => (
-                                <div className="shift-month-time-off" key={request.id}>
+                                <button type="button" className="shift-month-time-off schedule-time-off-button" key={request.id} onClick={(event) => openScheduleTimeOff(event, request)} disabled={isPublicSchedule || (mode !== "manager" && request.employeeId !== activeEmployeeId)} aria-label={`View time off for ${employeeById(state.employees, request.employeeId)?.name ?? "Team member"} on ${formatLongDate(day.date)}`} aria-haspopup="dialog" aria-expanded={scheduleTimeOffRequestId === request.id}>
                                   <strong>⊘ Time off {request.startTime && request.endTime ? `(${formatTime12(request.startTime)}–${formatTime12(request.endTime)})` : "(all day)"}</strong>
                                   <span>{employeeById(state.employees, request.employeeId)?.name ?? "Team member"}</span>
-                                </div>
+                                </button>
                               ))}
                               {mode === "manager" ? (
                                 <button
@@ -5092,8 +5565,8 @@ export default function Home() {
                   </div>
                 </div>
               )}
-              </section>
-              {mode === "manager" ? (
+                </section>
+                {mode === "manager" ? (
                 <button
                   type="button"
                   className="shift-add-employees-button"
@@ -5195,30 +5668,57 @@ export default function Home() {
 
           {activeView === "hours" && activeHoursSectionTab === "hours" && !isPublicSchedule && (
             <section className="panel feature-panel">
-              <div className="panel-heading calendar-heading">
-                <div className="hours-date-toolbar">
-                  <button type="button" onClick={() => moveHoursDate(-1)} aria-label={`Previous ${hoursTabControlLabel(activeHoursTab)}`}>
-                    <span aria-hidden="true">&lt;</span>
-                  </button>
-                  <strong>{hoursDateLabel(activeHoursTab, hoursDate)}</strong>
-                  <button type="button" onClick={() => moveHoursDate(1)} aria-label={`Next ${hoursTabControlLabel(activeHoursTab)}`}>
-                    <span aria-hidden="true">&gt;</span>
-                  </button>
+              <div className="panel-heading calendar-heading hours-calendar-heading">
+                <div className="hours-date-and-sort">
+                <div className="hours-date-controls">
+                  <button type="button" className="shift-today-button" onClick={() => setHoursDate(today)}>Today</button>
+                  <div className="shift-date-navigation">
+                    <button type="button" className="shift-arrow-button" onClick={() => moveHoursDate(-1)} aria-label={`Previous ${hoursTabControlLabel(activeHoursTab)}`}>
+                      <span aria-hidden="true">‹</span>
+                    </button>
+                    <label className="shift-date-control">
+                      <input type="date" value={hoursDate} onClick={openNativeDatePicker} onInput={(event) => { const date = event.currentTarget.value; if (date) setHoursDate(date); }} aria-label="Hours date" />
+                      <strong>{hoursDateLabel(activeHoursTab, hoursDate)}</strong>
+                    </label>
+                    <button type="button" className="shift-arrow-button" onClick={() => moveHoursDate(1)} aria-label={`Next ${hoursTabControlLabel(activeHoursTab)}`}>
+                      <span aria-hidden="true">›</span>
+                    </button>
+                  </div>
+                </div>
+                {mode === "manager" ? (
+                  <div className="hours-sort-toolbar" role="group" aria-label="Sort hours">
+                    {(["name", "hours"] as const).map((sortBy) => {
+                      const active = hoursSortBy === sortBy;
+                      const label = sortBy === "name" ? "Name" : "Hours";
+                      const direction = hoursSortDirections[sortBy];
+                      const order = sortBy === "name" ? (direction === "asc" ? "A–Z" : "Z–A") : (direction === "desc" ? "Most hours first" : "Least hours first");
+                      return (
+                        <button
+                          type="button"
+                          key={sortBy}
+                          className="hours-sort-button"
+                          aria-pressed={active}
+                          title={active ? `${label}: ${order}. Click to reverse order.` : `Sort by ${label.toLowerCase()}`}
+                          onClick={() => {
+                            setHoursSortBy(sortBy);
+                            setHoursSortDirections((directions) => ({ ...directions, [sortBy]: active && directions[sortBy] === "asc" ? "desc" : "asc" }));
+                          }}
+                        >
+                          {label} <span aria-hidden="true">{direction === "asc" ? "↑" : "↓"}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : null}
                 </div>
                 <div className="hours-controls">
-                  <div className="tab-list" role="tablist" aria-label="Hours range">
-                    {(["today", "week", "month"] as CalendarTab[]).map((tab) => (
-                      <button
-                        type="button"
-                        key={tab}
-                        className={activeHoursTab === tab ? "tab-button active" : "tab-button"}
-                        onClick={() => setActiveHoursTab(tab)}
-                        role="tab"
-                        aria-selected={activeHoursTab === tab}
-                      >
-                        {tab === "today" ? "Day" : capitalize(tab)}
-                      </button>
-                    ))}
+                  <div className="shift-view-control">
+                    <select className="shift-view-select" value={activeHoursTab} onChange={(event) => setActiveHoursTab(event.target.value as CalendarTab)} aria-label="Hours view">
+                      <option value="today">Day</option>
+                      <option value="week">Week</option>
+                      <option value="month">Month</option>
+                    </select>
+                    <span aria-hidden="true">▾</span>
                   </div>
                   {activeUserIsAdmin && mode === "manager" ? (
                     <div className="hours-rounding-actions">
@@ -5263,7 +5763,7 @@ export default function Home() {
                 </div>
               </div>
               <div className="hours-list">
-                {hoursRows
+                {sortedHoursRows
                   .filter(({ employee }) => mode === "manager" || employee.id === activeEmployeeId)
                   .map(({ employee, hours }) => (
                   <article className="hours-row" key={employee.id}>
@@ -5626,6 +6126,110 @@ export default function Home() {
         ))}
       </nav>
 
+      {mode === "manager" && activeView === "employees" && !viewingRosterEmployee && typeof document !== "undefined" ? createPortal(
+        <section className="roster-print-sheet" aria-hidden="true">
+          <h1>Team roster</h1>
+          <p>{sidebarLocationName} · {filteredRosterEmployees.length} team {filteredRosterEmployees.length === 1 ? "member" : "members"} · {formatNumericDate(`${today}T12:00:00`)}</p>
+          <table>
+            <thead><tr>{rosterCopyHeaders.map((header) => <th key={header} scope="col">{header}</th>)}</tr></thead>
+            <tbody>{rosterRowsForCopy.map((row, index) => <tr key={filteredRosterEmployees[index].id}>{row.map((value, column) => <td key={column}>{value}</td>)}</tr>)}</tbody>
+          </table>
+          {filteredRosterEmployees.length === 0 ? <p>No team members match your search or filters.</p> : null}
+        </section>, document.body,
+      ) : null}
+
+      {scheduleTimeOffRequest ? createPortal(
+        <div className="schedule-time-off-popover" ref={scheduleTimeOffPopoverRef} role="dialog" aria-labelledby="schedule-time-off-title" style={scheduleTimeOffPosition}>
+          <div className="schedule-time-off-heading">
+            <span className="schedule-avatar" aria-hidden="true">{employeeInitials(scheduleTimeOffEmployee?.name ?? "Employee")}</span>
+            <div>
+              <h2 id="schedule-time-off-title">{scheduleTimeOffEmployee?.name ?? "Employee"}</h2>
+              <p>{scheduleTimeOffRequest.compensation === "unpaid" ? "Unpaid time off" : "Paid time off"} | {scheduleTimeOffRequest.reason === "vacation" ? "Vacation" : scheduleTimeOffRequest.reason === "sick_emergency" ? "Sick / Emergency" : "Other"}</p>
+              <span className={`pto-request-status ${scheduleTimeOffRequest.status}`}>{scheduleTimeOffRequest.status}</span>
+            </div>
+            <button type="button" className="schedule-time-off-close" onClick={closeScheduleTimeOff} aria-label="Close time off details">×</button>
+          </div>
+          <div className="schedule-time-off-body">
+            <div className="schedule-time-off-dates">
+              {[scheduleTimeOffRequest.startDate, scheduleTimeOffRequest.endDate].map((date, index) => (
+                <div key={index}>
+                  <span>{parseLocalDate(date).toLocaleDateString("en-US", { weekday: "long" })}</span>
+                  <time dateTime={date} title={formatLongDate(date)}>{parseLocalDate(date).toLocaleDateString("en-US", { month: "short", day: "numeric", ...(scheduleTimeOffRequest.startDate.slice(0, 4) !== scheduleTimeOffRequest.endDate.slice(0, 4) ? { year: "numeric" } : {}) })}</time>
+                </div>
+              ))}
+            </div>
+            <dl className="schedule-time-off-hours"><dt>Hours Requested</dt><dd>{scheduleTimeOffRequest.startTime && scheduleTimeOffRequest.endTime ? `${formatTime12(scheduleTimeOffRequest.startTime)} – ${formatTime12(scheduleTimeOffRequest.endTime)}` : "All day"}</dd></dl>
+            <p className="schedule-time-off-note">{scheduleTimeOffRequest.explanation ? `“${scheduleTimeOffRequest.explanation}”` : "No explanation provided."}</p>
+            <p className="schedule-time-off-requested">Requested {new Date(scheduleTimeOffRequest.requestedAt).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" })}</p>
+          </div>
+          {mode === "manager" ? <div className="schedule-time-off-actions"><button type="button" onClick={() => deletePtoRequest(scheduleTimeOffRequest.id)}>Delete</button></div> : null}
+        </div>, document.body,
+      ) : null}
+
+      {rosterActionEmployee ? createPortal(
+        <div className="roster-action-menu" id="roster-action-menu" ref={rosterActionMenuRef} role="menu" tabIndex={-1} aria-label={`Actions for ${rosterActionEmployee.name}`} style={rosterActionPosition} onKeyDown={(event) => {
+          const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));
+          const index = items.indexOf(document.activeElement as HTMLButtonElement);
+          if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+            event.preventDefault();
+            const nextIndex = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1 : (index + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+            items[nextIndex]?.focus();
+          }
+          if (event.key === "Tab") {
+            event.preventDefault();
+            setRosterActionEmployeeId(null);
+            rosterActionButtonRef.current?.focus();
+          }
+        }}>
+          <button type="button" role="menuitem" tabIndex={-1} onClick={() => { setRosterActionEmployeeId(null); openEditEmployeeModal(rosterActionEmployee); }}>Edit</button>
+          <button type="button" role="menuitem" tabIndex={-1} onClick={() => viewRosterEmployeeSection(rosterActionEmployee.id, "performance")}>View performance</button>
+          <button type="button" role="menuitem" tabIndex={-1} onClick={() => viewRosterEmployeeSection(rosterActionEmployee.id, "job")}>View job details</button>
+          <button type="button" role="menuitem" tabIndex={-1} onClick={() => viewRosterEmployeeSection(rosterActionEmployee.id, "documents")}>View documents</button>
+          <button type="button" role="menuitem" tabIndex={-1} onClick={() => viewRosterEmployeeSection(rosterActionEmployee.id, "personal")}>View personal information</button>
+          <button type="button" role="menuitem" tabIndex={-1} className="roster-action-terminate" disabled={rosterActionEmployee.id === activeEmployeeId} onClick={() => {
+            setRosterActionEmployeeId(null);
+            if (rosterActionEmployee.terminated) rehireRosterEmployee(rosterActionEmployee.id);
+            else openTerminationFlow(rosterActionEmployee.id);
+          }}>{rosterActionEmployee.terminated ? "Rehire team member" : "Terminate team member"}</button>
+        </div>, document.body,
+      ) : null}
+
+      {certificateEmployeeId !== null ? (
+        <div className="modal-backdrop certificate-modal-backdrop" role="presentation" onClick={(event) => dismissModalFromBackdrop(event, closeCertificateModal)} onKeyDown={(event) => {
+            if (event.key === "Escape") { event.preventDefault(); closeCertificateModal(); }
+            if (event.key === "Tab") {
+              const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled)'));
+              const first = controls[0];
+              const last = controls[controls.length - 1];
+              if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+              if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+            }
+          }}>
+          <form className="certificate-modal" onSubmit={uploadEmployeeCertificate} role="dialog" tabIndex={-1} aria-modal="true" aria-labelledby="certificate-modal-title" aria-busy={isSavingCertificate}>
+            <button type="button" className="certificate-modal-close" aria-label="Close certificate dialog" disabled={isSavingCertificate} onClick={closeCertificateModal}>×</button>
+            <h2 id="certificate-modal-title">Add a certificate</h2>
+            <div className="certificate-modal-fields">
+              <label><span>Name:</span><input ref={certificateNameRef} required value={certificateDraft.name} disabled={isSavingCertificate} onChange={(event) => setCertificateDraft((draft) => ({ ...draft, name: event.target.value }))} /></label>
+              <label><span>Expiration date:</span><span className="certificate-date-field">
+                <input type="date" required className={certificateDraft.expirationDate ? "" : "empty"} aria-label="Expiration date" value={certificateDraft.expirationDate} disabled={isSavingCertificate} onClick={openNativeDatePicker} onInput={(event) => { const expirationDate = event.currentTarget.value; setCertificateDraft((draft) => ({ ...draft, expirationDate })); }} />
+                {!certificateDraft.expirationDate ? <span className="certificate-date-placeholder" aria-hidden="true">▦ Choose a date</span> : null}
+              </span></label>
+            </div>
+            <label className={`certificate-upload-zone${isDraggingCertificate ? " dragging" : ""}`} onDragOver={(event) => { event.preventDefault(); if (!isSavingCertificate) setIsDraggingCertificate(true); }} onDragLeave={() => setIsDraggingCertificate(false)} onDrop={(event) => { event.preventDefault(); if (!isSavingCertificate) chooseCertificateFile(event.dataTransfer.files[0]); }}>
+              <input type="file" aria-label="Certificate attachment" accept=".gif,.png,.pdf,.jpg,.jpeg,image/gif,image/png,application/pdf,image/jpeg" disabled={isSavingCertificate} onChange={(event) => { chooseCertificateFile(event.target.files?.[0]); event.target.value = ""; }} />
+              <strong>{certificateFile ? certificateFile.name : "Click or drop an image here to upload (OPTIONAL)"}</strong>
+              <span>{certificateFile ? "Click or drop a file to replace this attachment" : "GIF, PNG, PDF, and JPG/JPEG supported"}</span>
+            </label>
+            {certificateFile ? <button type="button" className="certificate-remove-file" disabled={isSavingCertificate} onClick={() => { setCertificateFile(null); setCertificateError(""); }}>Remove attachment</button> : null}
+            {certificateError ? <p className="form-message" role="alert">{certificateError}</p> : null}
+            <div className="certificate-modal-actions">
+              <button type="button" disabled={isSavingCertificate} onClick={closeCertificateModal}>Cancel</button>
+              <button type="submit" className="primary-action" disabled={isSavingCertificate || !certificateDraft.name.trim() || !certificateDraft.expirationDate}>{isSavingCertificate ? "Saving…" : "Save changes"}</button>
+            </div>
+          </form>
+        </div>
+      ) : null}
+
       {mode === "manager" && isAddingLocation ? (
         <div
           className="modal-backdrop"
@@ -5832,31 +6436,6 @@ export default function Home() {
             <p>{terminatingEmployee.name} is now inactive and their job information has been disabled.</p>
             <button type="button" className="primary-action termination-success-done" onClick={closeTerminationFlow}>Done</button>
           </section>
-        </div>
-      ) : null}
-
-      {mode === "manager" && activeUserIsAdmin && employeePendingDeletion && employeePendingDeletion.id !== activeEmployeeId ? (
-        <div
-          className="modal-backdrop"
-          role="presentation"
-          onClick={(event) => dismissModalFromBackdrop(event, () => setEmployeePendingDeletion(null))}
-        >
-          <div className="employee-delete-modal" role="dialog" aria-modal="true" aria-labelledby="employee-delete-title">
-            <div className="modal-heading">
-              <div>
-                <p className="eyebrow">Delete team member</p>
-                <h2 id="employee-delete-title">Delete {employeePendingDeletion.name}?</h2>
-              </div>
-              <button type="button" onClick={() => setEmployeePendingDeletion(null)} aria-label="Close delete confirmation">
-                <span aria-hidden="true">&times;</span>
-              </button>
-            </div>
-            <p>This will remove the employee and their saved shifts, hours, and PTO records. Are you sure you want to continue?</p>
-            <div className="employee-delete-actions">
-              <button type="button" onClick={() => setEmployeePendingDeletion(null)}>Cancel</button>
-              <button type="button" onClick={() => removeEmployee(employeePendingDeletion.id)}>Delete employee</button>
-            </div>
-          </div>
         </div>
       ) : null}
 
@@ -7728,9 +8307,20 @@ function shiftDateByCalendarTab(date: string, tab: CalendarTab, direction: -1 | 
   return toDateInputValue(selectedDate);
 }
 
+function hoursDateRange(date: string, tab: CalendarTab) {
+  if (tab === "week") {
+    const days = mondayWeekCalendarDays(date);
+    return { start: parseLocalDate(days[0].date), end: parseLocalDate(days[6].date) };
+  }
+  return dateRangeForCalendarTab(parseLocalDate(date), tab);
+}
+
 function hoursDateLabel(tab: CalendarTab, date: string) {
-  if (tab === "today") return formatShortDate(date);
-  if (tab === "week") return `Week of ${formatShortDate(weekCalendarDays(date)[0].date)}`;
+  if (tab === "today") return formatLongDate(date);
+  if (tab === "week") {
+    const days = mondayWeekCalendarDays(date);
+    return `${formatShortDate(days[0].date)} – ${formatShortDate(days[6].date)}`;
+  }
   return formatMonthYear(date);
 }
 
