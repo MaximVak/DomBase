@@ -521,10 +521,6 @@ h1 {
   margin-top: 16px;
 }
 
-.availability-hidden-topbar {
-  display: none;
-}
-
 .availability-section {
   width: 100%;
   color: #17142f;
@@ -549,6 +545,7 @@ h1 {
   display: flex;
   align-items: center;
   gap: 14px;
+  margin-left: auto;
 }
 
 .availability-actions button,
@@ -556,7 +553,7 @@ h1 {
   min-height: 52px;
   border: 0;
   border-radius: 14px;
-  background: #eeedf2;
+  background: #ffffff;
   color: #19172c;
   font-size: 1rem;
   font-weight: 700;
@@ -688,7 +685,7 @@ h1 {
   border-radius: 999px;
   background: #e6e5e9;
   padding: 7px 15px;
-  font-size: 0.82rem;
+  font-size: calc(0.82rem + 2pt);
 }
 
 .availability-status-pill.approved {
@@ -762,7 +759,7 @@ h1 {
   display: grid;
   place-items: center;
   color: #19142e;
-  font-size: 0.78rem;
+  font-size: calc(0.78rem + 2pt);
 }
 
 .availability-day {
@@ -840,7 +837,7 @@ h1 {
   border: 1px solid #9bc8e8;
   background: #e7f2fc;
   color: #102c4d;
-  font-size: 0.76rem;
+  font-size: calc(0.76rem + 2pt);
   line-height: 1.15;
   padding: 7px 10px;
   pointer-events: none;
@@ -850,7 +847,7 @@ h1 {
 
 .availability-slot-block strong {
   color: #0b3d75;
-  font-size: 0.78rem;
+  font-size: calc(0.78rem + 2pt);
 }
 
 .availability-slot-block.unavailable {
@@ -1088,7 +1085,7 @@ h1 {
 .availability-new-calendar-weekdays {
   margin-top: 8px;
   color: #667085;
-  font-size: 0.78rem;
+  font-size: calc(0.78rem + 2pt);
   text-align: center;
 }
 
@@ -1355,43 +1352,37 @@ h1 {
 
 .team-availability-week-controls {
   display: grid;
-  grid-template-columns: minmax(355px, auto) 42px 42px;
+  grid-template-columns: 42px minmax(250px, auto) 42px;
   align-items: center;
   gap: 6px;
+  margin-left: auto;
 }
 
 .team-availability-date-picker { position: relative; }
 
 .team-availability-date-control {
+  position: relative;
   display: flex;
   width: 100%;
   align-items: center;
-  min-width: 355px;
-  min-height: 52px;
-  gap: 13px;
-  border: 1px solid #d8d6df;
-  border-radius: 14px;
+  min-width: 250px;
+  min-height: 42px;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: 10px;
   background: #ffffff;
-  color: #19172c;
+  color: var(--ink);
   cursor: pointer;
   font: inherit;
-  padding: 0 16px;
-  text-align: left;
-}
-
-.team-availability-date-control svg {
-  width: 24px;
-  height: 24px;
-  flex: 0 0 auto;
-  fill: #9895a6;
-  stroke: #9895a6;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 1.5;
+  font-weight: 800;
+  padding: 0 14px;
+  text-align: center;
 }
 
 .team-availability-date-control span {
-  font-size: 1rem;
+  width: 100%;
+  font-size: .88rem;
+  text-align: center;
   white-space: nowrap;
 }
 
@@ -1540,6 +1531,7 @@ h1 {
   align-items: center;
   justify-content: center;
   line-height: 1;
+  transform: translateY(-2px);
 }
 
 .team-availability-week-controls > button:hover,
@@ -1602,7 +1594,7 @@ h1 {
   min-height: 31px;
   place-items: center;
   color: #18132f;
-  font-size: clamp(0.7rem, 0.9vw, 0.9rem);
+  font-size: calc(clamp(0.7rem, 0.9vw, 0.9rem) + 2pt);
   line-height: 1;
   overflow: hidden;
 }
@@ -1628,7 +1620,7 @@ h1 {
   border-radius: 50%;
   background: #f0eafd;
   color: #6636ad;
-  font-size: 0.8rem;
+  font-size: calc(0.8rem + 2pt);
 }
 
 .team-availability-member > div {
@@ -1639,14 +1631,14 @@ h1 {
 
 .team-availability-member strong {
   overflow: hidden;
-  font-size: clamp(0.76rem, 0.95vw, 0.9rem);
+  font-size: calc(clamp(0.76rem, 0.95vw, 0.9rem) + 2pt);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .team-availability-update-date {
   color: #302b39;
-  font-size: 0.68rem;
+  font-size: calc(0.68rem + 2pt);
 }
 
 .team-availability-requests {
@@ -1770,7 +1762,7 @@ h1 {
   gap: 7px;
   padding: 10px;
   color: #17142f;
-  font-size: 0.78rem;
+  font-size: calc(0.78rem + 2pt);
 }
 
 .team-availability-request-row.approved .team-availability-request-summary {
@@ -1781,7 +1773,7 @@ h1 {
   max-width: 100%;
   overflow: hidden;
   color: #686270;
-  font-size: 0.72rem;
+  font-size: calc(0.72rem + 2pt);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1824,7 +1816,7 @@ h1 {
   gap: 3px;
   background: #f0eafd;
   color: #1c1531;
-  font-size: 0.78rem;
+  font-size: calc(0.78rem + 2pt);
   text-align: center;
 }
 
@@ -2239,7 +2231,7 @@ h1 {
 .settings-navigation p {
   margin: 0 0 4px;
   color: var(--ink);
-  font-size: 0.72rem;
+  font-size: calc(0.72rem + 2pt);
   font-weight: 900;
   text-transform: uppercase;
 }
@@ -2498,11 +2490,13 @@ h1 {
 }
 
 .department-roles-panel {
-  overflow-x: auto;
+  overflow: visible;
 }
 
 .department-roles-table {
-  min-width: 830px;
+  width: 100%;
+  min-width: 0;
+  overflow: visible;
   border: 1px solid var(--line);
 }
 
@@ -2518,7 +2512,7 @@ h1 {
 .department-roles-header {
   border-bottom: 1px solid var(--line);
   color: var(--ink);
-  font-size: 0.78rem;
+  font-size: calc(0.78rem + 2pt);
   font-weight: 900;
 }
 
@@ -2527,11 +2521,16 @@ h1 {
   min-height: 125px;
   border-bottom: 1px solid var(--line);
   color: var(--ink);
+  font-size: calc(1rem + 2pt);
   padding-right: 48px;
 }
 
 .department-roles-row:last-child {
   border-bottom: 0;
+}
+
+.department-roles-row:has(.department-manager-picker[open]) {
+  z-index: 30;
 }
 
 .department-name-cell {
@@ -2612,6 +2611,7 @@ h1 {
 
 .department-role-tags,
 .department-manager-list {
+  position: relative;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -2630,7 +2630,7 @@ h1 {
   border-radius: 6px;
   background: var(--blue-deep);
   color: #ffffff;
-  font-size: 0.74rem;
+  font-size: calc(0.74rem + 2pt);
   font-weight: 900;
   padding: 7px 10px;
 }
@@ -2638,21 +2638,36 @@ h1 {
 .department-role-tags > span button,
 .department-manager-list > span button {
   display: grid;
-  width: 15px;
-  min-height: 15px;
+  width: 19px;
+  min-height: 19px;
+  appearance: none;
   place-items: center;
-  border: 0;
+  border: 0 !important;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.92);
-  color: var(--blue-deep);
-  font-size: 0.7rem;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: #ffffff !important;
+  font-family: Arial, sans-serif;
+  font-size: 1rem;
   font-weight: 900;
   line-height: 1;
   padding: 0;
 }
 
-.department-role-tags > input,
-.department-manager-list > select {
+.department-role-tags > span button:hover,
+.department-role-tags > span button:focus-visible,
+.department-role-tags > span button:active,
+.department-manager-list > span button:hover,
+.department-manager-list > span button:focus-visible,
+.department-manager-list > span button:active {
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: #ffffff !important;
+  outline: 0 !important;
+}
+
+.department-role-tags > input {
   min-width: 130px;
   min-height: 32px;
   flex: 1 1 130px;
@@ -2664,8 +2679,82 @@ h1 {
   padding: 0 4px;
 }
 
-.department-manager-list > select {
+.department-manager-picker {
+  position: relative;
+  min-width: 150px;
+  flex: 1 1 150px;
+  margin-left: auto;
+}
+
+.department-manager-picker.has-selection {
+  min-width: 36px;
+  flex: 0 0 36px;
+}
+
+.department-manager-picker summary {
+  display: flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--ink);
   cursor: pointer;
+  list-style: none;
+  padding: 0 8px;
+}
+
+.department-manager-picker summary::-webkit-details-marker { display: none; }
+.department-manager-picker.has-selection summary { justify-content: center; padding: 0; }
+
+.department-manager-picker summary svg {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: var(--ink);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+  transition: transform 150ms ease;
+}
+
+.department-manager-picker[open] summary svg { transform: rotate(180deg); }
+
+.department-manager-menu {
+  position: absolute;
+  z-index: 100;
+  top: calc(100% + 6px);
+  right: 0;
+  display: grid;
+  width: max(220px, 100%);
+  max-height: 200px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 12px 28px rgba(7, 29, 58, 0.16);
+  padding: 5px;
+  scrollbar-gutter: stable;
+}
+
+.department-manager-menu button {
+  min-height: 38px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  font-size: calc(1rem + 2pt);
+  padding: 0 10px;
+  text-align: left;
+}
+
+.department-manager-menu button:hover,
+.department-manager-menu button:focus-visible {
+  background: #e7f1fb;
+  color: var(--blue-deep);
+  outline: 0;
 }
 
 .panel-heading {
@@ -2697,7 +2786,7 @@ h1 {
   border-radius: 6px;
   background: transparent;
   color: var(--muted);
-  font-size: 0.82rem;
+  font-size: calc(0.82rem + 2pt);
   font-weight: 800;
 }
 
@@ -2866,7 +2955,7 @@ h1 {
   border-radius: 6px;
   background: transparent;
   color: var(--muted);
-  font-size: 0.82rem;
+  font-size: calc(0.82rem + 2pt);
   font-weight: 800;
 }
 
@@ -2919,7 +3008,7 @@ h1 {
 
 .day-schedule-toolbar span {
   color: var(--muted);
-  font-size: 0.82rem;
+  font-size: calc(0.82rem + 2pt);
   font-weight: 800;
 }
 
@@ -2960,7 +3049,7 @@ h1 {
 .schedule-time-grid span {
   border-left: 1px solid #dfe7ef;
   color: var(--muted);
-  font-size: 0.72rem;
+  font-size: calc(0.72rem + 2pt);
   font-weight: 600;
   padding: 12px 0 0;
   text-align: center;
@@ -2985,18 +3074,18 @@ h1 {
 }
 
 .schedule-member > div { display: grid; gap: 2px; min-width: 0; }
-.schedule-member > div > span { color: var(--muted); font-size: .74rem; }
+.schedule-member > div > span { color: var(--muted); font-size: calc(.74rem + 2pt); }
 
 .shift-day-member-heading {
   display: flex;
   align-items: center;
   border-right: 1px solid #dfe7ef;
   color: var(--muted);
-  font-size: .78rem;
+  font-size: calc(.78rem + 2pt);
   font-weight: 600;
   padding: 8px 14px;
 }
-.shift-day-section-label { min-height: 34px; border-bottom: 1px solid #dfe7ef; background: #edf4fb; color: var(--muted); font-size: .78rem; font-weight: 600; padding: 8px 14px; }
+.shift-day-section-label { min-height: 34px; border-bottom: 1px solid #dfe7ef; background: #edf4fb; color: var(--muted); font-size: calc(.78rem + 2pt); font-weight: 600; padding: 8px 14px; }
 
 .header-actions {
   display: flex;
@@ -3092,7 +3181,7 @@ h1 {
   background: transparent;
   color: var(--blue-accent);
   font: inherit;
-  font-size: 0.76rem;
+  font-size: calc(0.76rem + 2pt);
   font-weight: 800;
   padding: 4px 0;
 }
@@ -3118,7 +3207,7 @@ h1 {
   border-radius: 6px;
   background: transparent;
   color: var(--muted);
-  font-size: 0.78rem;
+  font-size: calc(0.78rem + 2pt);
   font-weight: 900;
 }
 
@@ -3154,7 +3243,7 @@ h1 {
 .notification-item span,
 .notification-empty {
   color: var(--muted);
-  font-size: 0.78rem;
+  font-size: calc(0.78rem + 2pt);
 }
 
 .notification-item small {
@@ -3177,8 +3266,7 @@ h1 {
 
 .notification-message-item:hover,
 .notification-message-item:focus-visible {
-  outline: 2px solid rgba(30, 111, 181, 0.18);
-  outline-offset: 2px;
+  outline: 0;
 }
 
 .notification-request-status.pending {
@@ -3419,7 +3507,7 @@ h1 {
   border-radius: 50%;
   background: #e3eef9;
   color: var(--blue-deep);
-  font-size: 0.72rem;
+  font-size: calc(0.72rem + 2pt);
   font-weight: 900;
 }
 
@@ -3438,7 +3526,7 @@ h1 {
 
 .conversation-preview strong {
   color: var(--ink);
-  font-size: 0.82rem;
+  font-size: calc(0.82rem + 2pt);
 }
 
 .conversation-state-label {
@@ -3450,7 +3538,7 @@ h1 {
 
 .conversation-preview small {
   color: var(--muted);
-  font-size: 0.74rem;
+  font-size: calc(0.74rem + 2pt);
 }
 
 .conversation-unread-count {
@@ -3565,7 +3653,7 @@ h1 {
 
 .message-member-picker legend {
   color: var(--ink);
-  font-size: 0.78rem;
+  font-size: calc(0.78rem + 2pt);
   font-weight: 900;
   padding: 0 5px;
 }
@@ -3605,7 +3693,7 @@ h1 {
 .message-error {
   margin: 0;
   color: var(--danger);
-  font-size: 0.78rem;
+  font-size: calc(0.78rem + 2pt);
   font-weight: 800;
 }
 
@@ -3654,7 +3742,7 @@ h1 {
   border-radius: 7px;
   background: transparent;
   color: var(--muted);
-  font-size: 0.82rem;
+  font-size: calc(0.82rem + 2pt);
   font-weight: 700;
   padding: 6px 10px;
   text-align: left;
@@ -3973,7 +4061,7 @@ h1 {
 
 .account-team-list article span:last-child {
   color: var(--muted);
-  font-size: 0.82rem;
+  font-size: calc(0.82rem + 2pt);
 }
 
 .schedule-member.saved {
@@ -4011,7 +4099,7 @@ h1 {
   border-radius: 8px;
   background: #e7f1fb;
   color: var(--green-dark);
-  font-size: 0.78rem;
+  font-size: calc(0.78rem + 2pt);
   font-weight: 900;
 }
 
@@ -4086,7 +4174,7 @@ h1 {
 }
 
 .schedule-bar span {
-  font-size: 0.78rem;
+  font-size: calc(0.78rem + 2pt);
   font-weight: 700;
 }
 
@@ -4126,7 +4214,7 @@ h1 {
 
 .week-schedule-heading strong {
   color: var(--green-dark);
-  font-size: 0.82rem;
+  font-size: calc(0.82rem + 2pt);
   text-transform: uppercase;
 }
 
@@ -4344,7 +4432,7 @@ h1 {
   right: 16px;
   pointer-events: none;
   color: var(--ink);
-  font-size: 0.78rem;
+  font-size: calc(0.78rem + 2pt);
   line-height: 1;
   transform: translateY(-50%);
 }
@@ -4471,7 +4559,7 @@ h1 {
   padding: 0 18px;
 }
 
-.shift-week-day { font-size: .86rem; font-weight: 900; }
+.shift-week-day { font-size: calc(.86rem + 2pt); font-weight: 900; }
 .shift-week-day.today { color: var(--blue-accent); }
 .shift-week-day.today::after { content: ""; display: block; width: 54px; height: 3px; margin: 8px auto 0; border-radius: 3px; background: var(--blue-accent); }
 
@@ -4482,7 +4570,7 @@ h1 {
   border-bottom: 1px solid #dfe7ef;
   background: #edf4fb;
   color: var(--muted);
-  font-size: .78rem;
+  font-size: calc(.78rem + 2pt);
   font-weight: 900;
   padding: 8px 18px;
 }
@@ -4504,8 +4592,8 @@ h1 {
 }
 
 .shift-week-member > div { display: grid; gap: 2px; min-width: 0; }
-.shift-week-member strong { overflow: hidden; font-size: .82rem; text-overflow: ellipsis; white-space: nowrap; }
-.shift-week-member div span { color: #77737e; font-size: .76rem; }
+.shift-week-member strong { overflow: hidden; font-size: calc(.82rem + 2pt); text-overflow: ellipsis; white-space: nowrap; }
+.shift-week-member div span { color: #77737e; font-size: calc(.76rem + 2pt); }
 .shift-week-cell {
   position: relative;
   display: grid;
@@ -4643,9 +4731,9 @@ h1 {
 .shift-week-card.mine.editable:hover,
 .shift-week-card.mine.editable:focus-visible { outline-color: rgba(34, 139, 70, .3); }
 .shift-week-card strong,
-.shift-time-off strong { font-size: .76rem; line-height: 1.1; }
+.shift-time-off strong { font-size: calc(.76rem + 2pt); line-height: 1.1; }
 .shift-week-card span,
-.shift-time-off span { overflow: hidden; font-size: .72rem; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.shift-time-off span { overflow: hidden; font-size: calc(.72rem + 2pt); font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
 .shift-time-off { background: #dceeff; color: var(--ink); }
 
 .shift-month-board {
@@ -4730,7 +4818,7 @@ h1 {
   border: 0 !important;
   background: transparent !important;
   color: var(--muted) !important;
-  font-size: .76rem !important;
+  font-size: calc(.76rem + 2pt) !important;
   font-weight: 600 !important;
   padding: 0 3px !important;
 }
@@ -4811,7 +4899,7 @@ h1 {
 .week-shift > small {
   grid-column: 1 / -1;
   color: #357254;
-  font-size: 0.72rem;
+  font-size: calc(0.72rem + 2pt);
   font-weight: 400;
   text-align: right;
 }
@@ -4836,7 +4924,7 @@ h1 {
 
 .week-shift span {
   color: var(--muted);
-  font-size: 0.82rem;
+  font-size: calc(0.82rem + 2pt);
   font-weight: 700;
 }
 
@@ -4921,7 +5009,7 @@ h1 {
   align-items: center;
   gap: 8px;
   color: var(--muted);
-  font-size: 0.82rem;
+  font-size: calc(0.82rem + 2pt);
   font-weight: 800;
 }
 
@@ -5036,7 +5124,7 @@ h1 {
 .hours-row span {
   overflow: hidden;
   color: var(--muted);
-  font-size: 0.82rem;
+  font-size: calc(0.82rem + 2pt);
   font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -5170,7 +5258,7 @@ h1 {
   border-bottom: 1px solid var(--line);
   background: #f7fafe;
   color: var(--ink);
-  font-size: 0.72rem;
+  font-size: calc(0.72rem + 2pt);
   font-weight: 900;
 }
 
@@ -5183,7 +5271,7 @@ h1 {
   min-height: 82px;
   border-bottom: 1px solid var(--line);
   color: var(--ink);
-  font-size: 0.82rem;
+  font-size: calc(0.82rem + 2pt);
 }
 
 .roster-row:last-child {
@@ -5213,7 +5301,7 @@ h1 {
 
 .roster-member small {
   color: var(--muted);
-  font-size: 0.72rem;
+  font-size: calc(0.72rem + 2pt);
 }
 
 .roster-name-link {
@@ -5234,7 +5322,7 @@ h1 {
 
 .roster-account-owner {
   color: var(--ink);
-  font-size: 0.76rem;
+  font-size: calc(0.76rem + 2pt);
   font-weight: 700;
 }
 
@@ -5399,7 +5487,7 @@ h1 {
   border-radius: 999px;
   background: #eef3f8;
   color: var(--muted);
-  font-size: 0.74rem;
+  font-size: calc(0.74rem + 2pt);
   font-weight: 800;
   padding: 6px 11px;
 }
@@ -5431,7 +5519,7 @@ h1 {
 .team-member-personal-details div { display: grid; gap: 7px; }
 
 .team-member-job-facts dt,
-.team-member-personal-details dt { color: var(--muted); font-size: 0.78rem; font-weight: 700; }
+.team-member-personal-details dt { color: var(--muted); font-size: calc(0.78rem + 2pt); font-weight: 700; }
 .team-member-job-facts dd,
 .team-member-personal-details dd { margin: 0; color: var(--ink); }
 
@@ -5518,7 +5606,7 @@ h1 {
   background: #fff0e9;
   color: #c34c24;
   padding: 5px 10px;
-  font-size: 0.72rem;
+  font-size: calc(0.72rem + 2pt);
   font-weight: 800;
 }
 
@@ -5634,7 +5722,7 @@ h1 {
 .onboarding-document-header {
   min-height: 54px;
   color: var(--muted);
-  font-size: 0.82rem;
+  font-size: calc(0.82rem + 2pt);
 }
 
 .onboarding-file-action {
@@ -5672,7 +5760,7 @@ h1 {
   padding: 20px;
 }
 
-.performance-metric-grid span { color: var(--muted); font-size: 0.82rem; font-weight: 800; }
+.performance-metric-grid span { color: var(--muted); font-size: calc(0.82rem + 2pt); font-weight: 800; }
 .performance-metric-grid strong { color: var(--ink); font-size: 1.45rem; }
 .performance-metric-grid small { font-size: 1rem; }
 .performance-role-list { display: grid; margin-top: 18px; }
@@ -5797,7 +5885,7 @@ h1 {
   border-radius: 999px;
   background: #fde8ea;
   color: #b4232f;
-  font-size: 0.72rem;
+  font-size: calc(0.72rem + 2pt);
   font-weight: 900;
   padding: 6px 10px;
 }
@@ -6008,7 +6096,7 @@ h1 {
 
 .pto-heading .pto-usage-note {
   color: var(--muted);
-  font-size: 0.82rem;
+  font-size: calc(0.82rem + 2pt);
 }
 
 .pto-list {
@@ -6041,7 +6129,7 @@ h1 {
   min-height: 48px;
   background: linear-gradient(90deg, var(--green-dark), var(--blue));
   color: #ffffff;
-  font-size: 0.78rem;
+  font-size: calc(0.78rem + 2pt);
   font-weight: 800;
   text-transform: uppercase;
 }
@@ -6325,7 +6413,7 @@ h1 {
 
 .pto-current-request-head {
   color: var(--muted);
-  font-size: .82rem;
+  font-size: calc(.82rem + 2pt);
 }
 
 .pto-current-request-head > span:nth-child(n + 2),
@@ -6446,7 +6534,7 @@ h1 {
 }
 
 .pto-requests-expand-button span {
-  font-size: .82rem;
+  font-size: calc(.82rem + 2pt);
   font-weight: 700;
   line-height: 1;
 }
@@ -6550,7 +6638,7 @@ h1 {
 
 .pto-request-timestamp {
   color: var(--muted);
-  font-size: 0.78rem;
+  font-size: calc(0.78rem + 2pt);
   font-style: italic;
 }
 
@@ -6568,7 +6656,7 @@ h1 {
   justify-items: start;
   gap: 6px;
   color: var(--muted);
-  font-size: .82rem;
+  font-size: calc(.82rem + 2pt);
   line-height: 1.45;
 }
 
@@ -6610,7 +6698,7 @@ h1 {
   border-radius: 8px;
   background: #ffffff;
   color: var(--danger);
-  font-size: 0.78rem;
+  font-size: calc(0.78rem + 2pt);
   font-weight: 800;
   padding: 0 10px;
 }
@@ -6643,7 +6731,7 @@ h1 {
   border: 0;
   background: transparent;
   color: var(--green-dark);
-  font-size: 0.82rem;
+  font-size: calc(0.82rem + 2pt);
   font-weight: 800;
   transform: translateX(-50%);
   cursor: pointer;
@@ -6698,7 +6786,7 @@ h1 {
   place-items: center;
   gap: 2px;
   border-radius: 8px;
-  font-size: 0.72rem;
+  font-size: calc(0.72rem + 2pt);
   font-weight: 700;
 }
 
@@ -7023,7 +7111,7 @@ body:has(.modal-backdrop) {
 .termination-summary {
   margin: 24px 0 0;
   color: var(--muted);
-  font-size: 0.82rem;
+  font-size: calc(0.82rem + 2pt);
   line-height: 1.5;
 }
 
@@ -7545,7 +7633,7 @@ body:has(.modal-backdrop) {
   display: block;
   margin-bottom: 5px;
   color: var(--ink);
-  font-size: .78rem;
+  font-size: calc(.78rem + 2pt);
   text-transform: uppercase;
 }
 
@@ -7704,7 +7792,7 @@ body:has(.modal-backdrop) {
   border-left: 1px solid var(--line);
   background: #f4f8fc;
   color: var(--muted);
-  font-size: .78rem;
+  font-size: calc(.78rem + 2pt);
   padding: 0 10px;
   white-space: nowrap;
 }
@@ -7874,7 +7962,7 @@ body:has(.modal-backdrop) {
   border-left: 1px solid var(--line);
   background: #f4f8fc;
   color: var(--muted);
-  font-size: .78rem;
+  font-size: calc(.78rem + 2pt);
   padding: 0 9px;
 }
 
@@ -8031,10 +8119,25 @@ button[aria-label^="Remove"]:focus-visible,
 
 .shift-apply-days > div {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: flex-start;
   gap: 12px;
   margin-top: 5px;
+}
+
+.shift-apply-day-option {
+  display: grid;
+  flex: 0 0 42px;
+  justify-items: center;
+  gap: 5px;
+}
+
+.shift-apply-day-date {
+  color: var(--muted);
+  font-size: calc(0.72rem + 2pt);
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .shift-apply-days button {
@@ -8047,7 +8150,7 @@ button[aria-label^="Remove"]:focus-visible,
   border-radius: 50%;
   background: #ffffff;
   color: var(--blue-accent);
-  font-size: 0.78rem;
+  font-size: calc(0.78rem + 2pt);
   font-weight: 800;
   padding: 0;
 }
@@ -8130,6 +8233,83 @@ button[aria-label^="Remove"]:focus-visible,
   white-space: nowrap;
 }
 
+.time-input-picker {
+  position: absolute;
+  z-index: 90;
+  top: calc(100% + 8px);
+  left: 0;
+  display: grid;
+  width: min(330px, calc(100vw - 64px));
+  grid-template-columns: repeat(3, minmax(88px, 1fr));
+  gap: 5px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 16px 34px rgba(7, 29, 58, 0.2);
+  padding: 10px;
+}
+
+.time-input-picker-column {
+  display: grid;
+  min-width: 0;
+  grid-template-rows: 28px minmax(0, 1fr);
+}
+
+.time-input-picker-column > strong {
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: calc(0.72rem + 2pt);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.time-input-picker-options {
+  display: grid;
+  height: 138px;
+  max-height: 138px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-snap-type: y mandatory;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.time-input-picker-options::-webkit-scrollbar {
+  display: none;
+}
+
+.time-input-picker-option {
+  min-height: 46px;
+  border: 0;
+  border-radius: 0;
+  background: #ffffff;
+  color: #8a98aa;
+  font-size: 1.05rem;
+  font-weight: 700;
+  scroll-snap-align: center;
+}
+
+.time-input-picker-option:hover,
+.time-input-picker-option:focus-visible {
+  background: #f3f8fd;
+  color: var(--blue-deep);
+  outline: 0;
+}
+
+.time-input-picker-option[aria-selected="true"] {
+  background: #e7f1fb;
+  color: var(--blue-deep);
+  font-size: 1.15rem;
+  font-weight: 900;
+}
+
+.time-input-picker-options.period {
+  align-content: start;
+}
+
 .shift-create-modal input:disabled,
 .shift-create-modal select:disabled,
 .shift-edit-modal input:disabled,
@@ -8145,7 +8325,7 @@ button[aria-label^="Remove"]:focus-visible,
   border-radius: 8px;
   background: #f4f8fc;
   color: var(--blue-deep);
-  font-size: 0.82rem;
+  font-size: calc(0.82rem + 2pt);
   font-weight: 700;
   line-height: 1.4;
   padding: 10px 12px;
@@ -8161,7 +8341,7 @@ button[aria-label^="Remove"]:focus-visible,
   justify-self: end;
   margin: -4px 0 0;
   color: var(--muted);
-  font-size: 0.78rem;
+  font-size: calc(0.78rem + 2pt);
   font-weight: 800;
 }
 
@@ -8207,7 +8387,7 @@ button[aria-label^="Remove"]:focus-visible,
 .pto-review-details dt,
 .pto-review-explanation strong {
   color: var(--muted);
-  font-size: 0.72rem;
+  font-size: calc(0.72rem + 2pt);
   font-weight: 800;
   text-transform: uppercase;
 }
@@ -8229,7 +8409,7 @@ button[aria-label^="Remove"]:focus-visible,
   border: 0;
   background: transparent;
   color: var(--blue-accent);
-  font-size: 0.74rem;
+  font-size: calc(0.74rem + 2pt);
   padding: 5px 0;
   white-space: nowrap;
 }
@@ -8352,7 +8532,7 @@ button[aria-label^="Remove"]:focus-visible,
   display: grid;
   gap: 6px;
   color: var(--ink);
-  font-size: 0.82rem;
+  font-size: calc(0.82rem + 2pt);
   font-weight: 800;
 }
 
@@ -8369,7 +8549,7 @@ button[aria-label^="Remove"]:focus-visible,
 .pto-full-shift-note {
   margin: -4px 0 0;
   color: var(--muted);
-  font-size: 0.82rem;
+  font-size: calc(0.82rem + 2pt);
 }
 
 .pto-admin-auto-approval-note {
@@ -8378,7 +8558,7 @@ button[aria-label^="Remove"]:focus-visible,
   border-radius: 4px;
   background: #eef7ff;
   color: var(--blue-deep);
-  font-size: 0.82rem;
+  font-size: calc(0.82rem + 2pt);
   padding: 9px 11px;
 }
 
@@ -8392,7 +8572,7 @@ button[aria-label^="Remove"]:focus-visible,
 .pto-compensation-options legend,
 .pto-reason-options legend {
   color: var(--ink);
-  font-size: 0.82rem;
+  font-size: calc(0.82rem + 2pt);
   font-weight: 800;
   padding: 0 4px;
 }
@@ -8454,7 +8634,7 @@ button[aria-label^="Remove"]:focus-visible,
 .pto-request-preview dt,
 .pto-request-preview dd {
   color: var(--muted);
-  font-size: 0.76rem;
+  font-size: calc(0.76rem + 2pt);
 }
 
 .pto-request-preview dd {
@@ -8482,7 +8662,7 @@ button[aria-label^="Remove"]:focus-visible,
   display: grid;
   gap: 6px;
   color: var(--ink);
-  font-size: 0.82rem;
+  font-size: calc(0.82rem + 2pt);
   font-weight: 800;
 }
 
@@ -8895,19 +9075,18 @@ button[aria-label^="Remove"]:focus-visible,
 
   .team-availability-week-controls {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 42px 42px;
+    grid-template-columns: 42px minmax(0, 1fr) 42px;
     gap: 6px;
   }
 
   .team-availability-date-control {
-    min-height: 48px;
-    gap: 9px;
-    padding-inline: 12px;
+    min-height: 42px;
+    padding-inline: 14px;
   }
 
   .team-availability-date-control span {
     overflow: hidden;
-    font-size: 0.78rem;
+    font-size: .88rem;
     text-overflow: ellipsis;
   }
 

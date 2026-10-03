@@ -76,6 +76,17 @@ test("Schedule is a sidebar dropdown with scheduling routes", async () => {
   assert.match(page, />My availability<\/button>/);
   assert.match(page, />Team availability<\/button>/);
   assert.match(page, /navigateToView\("team_availability"\)/);
+  assert.match(page, /<header className="topbar">/);
+  assert.match(page, /if \(activeView === "schedule"\) return "Shifts";/);
+  assert.match(page, /if \(activeView === "time_off"\) return "Time off";/);
+  assert.match(page, /if \(activeView === "my_availability"\) return "My availability";/);
+  assert.match(page, /if \(activeView === "team_availability"\) return "Team availability";/);
+  assert.doesNotMatch(page, /availability-hidden-topbar/);
+  assert.match(page, /<section className="availability-section" aria-label="My availability">/);
+  assert.match(page, /<section className="team-availability-section" aria-label="Team availability">/);
+  const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+  assert.match(styles, /\.availability-actions button,[^}]*background: #ffffff;/s);
+  assert.match(styles, /\.availability-actions \.availability-notify-button,[^}]*background: var\(--blue\);/s);
 });
 
 test("manager schedule can open the shared add-team-member modal below the planner", async () => {
@@ -120,6 +131,20 @@ test("shift editor uses clear time labels and available role options", async () 
   assert.match(page, /<form className="shift-edit-modal"[^]*?<span className="shift-edit-label-row">\s*<span>Clock-out time<\/span>[^]*?value=\{editingShift\.end\}/);
   assert.doesNotMatch(page, /<form className="shift-create-modal"(?:(?!<\/form>)[\s\S])*Clocked in:/);
   assert.match(page, /function suggestedTimeForDraft/);
+  assert.match(page, /const timePickerHours = Array\.from\(\{ length: 12 \}/);
+  assert.match(page, /const timePickerMinutes = Array\.from\(\{ length: 60 \}/);
+  assert.match(page, /const timePickerLoopCount = 5;/);
+  assert.match(page, /const optionTopInList = option\.offsetTop - list\.offsetTop;/);
+  assert.match(page, /list\.scrollTop = optionTopInList - \(list\.clientHeight - option\.offsetHeight\) \/ 2;/);
+  assert.match(page, /function loopTimePickerScroll\(list: HTMLSpanElement\)/);
+  assert.match(page, /list\.scrollTop \+= loopHeight \* 2;/);
+  assert.match(page, /list\.scrollTop -= loopHeight \* 2;/);
+  assert.match(page, /className="time-input-picker" role="group"/);
+  assert.match(page, /aria-label="Hour" onScroll=\{\(event\) => loopTimePickerScroll\(event\.currentTarget\)\}/);
+  assert.match(page, /aria-label="Minute" onScroll=\{\(event\) => loopTimePickerScroll\(event\.currentTarget\)\}/);
+  assert.match(page, /className="time-input-picker-options period" role="listbox" aria-label="Period"/);
+  assert.match(page, /onClick=\{\(\) => selectPickerTime\(pickerHour, minute, pickerPeriod\)\}/);
+  assert.match(page, /period\.toUpperCase\(\)/);
   assert.match(page, /function formatTimeDraftInput/);
   assert.match(page, /minuteDigits\.length > 0 && Number\(minuteDigits\[0\]\) > 5/);
   assert.match(page, /minuteDigits\.length === 2 && Number\(minuteDigits\) > 59/);
@@ -131,15 +156,26 @@ test("shift editor uses clear time labels and available role options", async () 
   assert.match(page, /suggestBefore=\{editingShift\.end\}/);
   assert.match(page, /function isTimeDraftBefore\(value: string, before\?: string\)/);
   assert.match(page, /candidateMinutes < beforeMinutes/);
+  assert.match(page, /function isTimeDraftAfter\(value: string, after\?: string\)/);
+  assert.match(page, /suggestedTimeForDraft\(value, after\)\?\.time/);
+  assert.match(page, /candidateMinutes > afterMinutes/);
+  assert.match(page, /function isTimeWithinBounds\(value: string, after\?: string, before\?: string\)/);
+  assert.match(page, /candidateMinutes <= afterMinutes/);
   assert.match(page, /suggestion\?\.time \?\? parseTypedTime\(draft\)/);
   assert.match(page, /const formattedDraft = formatTimeDraftInput\(nextValue, currentDraft\)/);
-  assert.match(page, /return isTimeDraftBefore\(formattedDraft, suggestBefore\) \? formattedDraft : currentDraft/);
-  assert.match(page, /!parsed \|\| !isTimeDraftBefore\(draft, suggestBefore\)/);
+  assert.match(page, /isTimeDraftBefore\(formattedDraft, suggestBefore\) && isTimeDraftAfter\(formattedDraft, suggestAfter\)/);
+  assert.match(page, /!parsed \|\| !isTimeWithinBounds\(parsed, suggestAfter, suggestBefore\)/);
+  assert.match(page, /if \(!isTimeWithinBounds\(nextTime, suggestAfter, suggestBefore\)\) return;/);
   assert.match(page, /className="time-input-hint"/);
+  assert.doesNotMatch(page, /suggestion && !isPickerOpen/);
   assert.doesNotMatch(page, /copy-calendar|Copy shift range|repeatDates/);
   assert.match(page, /const shiftDates = shiftDatesForWeekdays\(shiftForm\.date, createShiftWeekdays\)/);
   assert.match(page, /const shiftWeekdayOptions = \[/);
   assert.match(page, /function shiftDatesForWeekdays/);
+  assert.match(page, /function shiftDateForWeekday\(anchorDate: string, weekday: number\)/);
+  assert.match(page, /function formatShiftApplyDate\(anchorDate: string, weekday: number\)/);
+  assert.match(page, /className="shift-apply-day-date">\{formatShiftApplyDate\(shiftForm\.date, option\.value\)\}/);
+  assert.match(page, /className="shift-apply-day-date">\{formatShiftApplyDate\(editingShift\.date, option\.value\)\}/);
   assert.match(page, /function toggleCreateShiftWeekday/);
   assert.match(page, /function toggleEditingShiftWeekday/);
   assert.match(page, /<legend>Apply to:<\/legend>/);
@@ -158,6 +194,8 @@ test("shift editor uses clear time labels and available role options", async () 
   assert.match(styles, /\.modal-actions \.secondary-action\.align-right \{[^}]*grid-column: 4;[^}]*justify-self: end;[^}]*inline-size: 94px;/s);
   assert.match(styles, /\.modal-actions \.delete-action \{[^}]*inline-size: 94px;/s);
   assert.match(styles, /\.modal-actions \.primary-action \{[^}]*grid-column: 4;/s);
+  assert.match(styles, /\.shift-apply-day-option \{[^}]*justify-items: center;/s);
+  assert.match(styles, /\.shift-apply-day-date \{[^}]*white-space: nowrap;/s);
   assert.match(page, /additionalShifts/);
   assert.match(page, /activeIsClockedIn && myShift\?\.notes/);
   assert.match(page, /<strong>Shift note:<\/strong>/);
@@ -182,6 +220,10 @@ test("shift editor uses clear time labels and available role options", async () 
   assert.match(page, /onClick=\{\(\) => openMonthShiftCreator\(day\.date\)\}/);
   assert.match(page, /event\.target === event\.currentTarget/);
   assert.match(page, /className="shift-create-modal"/);
+  assert.match(page, /function openNativeDatePicker\(event: ReactMouseEvent<HTMLInputElement>\)/);
+  assert.match(page, /typeof input\.showPicker !== "function"/);
+  assert.match(page, /value=\{shiftForm\.date\}\s*onClick=\{openNativeDatePicker\}/);
+  assert.match(page, /value=\{editingShift\.date\}\s*onClick=\{openNativeDatePicker\}/);
   assert.match(page, /Date, clock-in time, clock-out time, and role are required\./);
   assert.match(page, /<span>Date<\/span>/);
   assert.match(page, /<span>Clock-in time<\/span>/);
@@ -220,6 +262,11 @@ test("shift editor uses clear time labels and available role options", async () 
   assert.match(styles, /\.shift-edit-actual-time \{[^}]*font-size: inherit;/s);
   assert.match(styles, /\.time-input-shell \{/);
   assert.match(styles, /\.time-input-hint \{[^}]*color: #9aa9ba;/s);
+  assert.match(styles, /\.time-input-picker \{[^}]*position: absolute;[^}]*grid-template-columns: repeat\(3, minmax\(88px, 1fr\)\);/s);
+  assert.match(styles, /\.time-input-picker-options \{[^}]*height: 138px;[^}]*max-height: 138px;[^}]*overflow-y: auto;[^}]*scroll-snap-type: y mandatory;/s);
+  assert.match(styles, /\.time-input-picker-options \{[^}]*scrollbar-width: none;[^}]*-ms-overflow-style: none;/s);
+  assert.match(styles, /\.time-input-picker-options::\-webkit-scrollbar \{[^}]*display: none;/s);
+  assert.match(styles, /\.time-input-picker-option\[aria-selected="true"\] \{[^}]*background: #e7f1fb;/s);
   assert.match(styles, /html \{[^}]*scrollbar-gutter: stable;/s);
   assert.match(styles, /\.shift-date-navigation \{[^}]*grid-template-columns: 42px minmax\(250px, auto\) 42px;/s);
   assert.match(styles, /\.shift-view-select \{[^}]*appearance: none;[^}]*background: #edf4fb !important;/s);
@@ -236,6 +283,10 @@ test("shift editor uses clear time labels and available role options", async () 
   assert.match(styles, /\.shift-month-day \{[^}]*display: flex;[^}]*flex-direction: column;/s);
   assert.match(styles, /\.shift-month-add \{[^}]*flex: 1 1 42px;[^}]*width: 100%;/s);
   assert.match(styles, /\.shift-month-add > span \{[^}]*width: 32px;[^}]*height: 32px;[^}]*place-items: center;/s);
+  assert.match(styles, /\.shift-week-section-label,[^}]*font-size: calc\(\.78rem \+ 2pt\);/s);
+  assert.match(styles, /\.shift-week-day \{[^}]*font-size: calc\(\.86rem \+ 2pt\);/s);
+  assert.match(styles, /\.shift-week-member strong \{[^}]*font-size: calc\(\.82rem \+ 2pt\);/s);
+  assert.match(styles, /\.shift-week-member div span \{[^}]*font-size: calc\(\.76rem \+ 2pt\);/s);
 });
 
 test("sidebar dropdowns collapse when another section is selected", async () => {
@@ -393,11 +444,21 @@ test("Roster includes complete team fields without placeholders for contact, loc
   assert.match(page, /function uploadEmployeeCertificate/);
   assert.match(page, /function uploadOnboardingDocument/);
   assert.match(page, /className="team-availability-week-calendar" role="dialog" aria-label="Choose team availability week"/);
+  assert.match(page, /aria-label="Previous week"[^]*?className="team-availability-date-picker"[^]*?aria-label="Next week"/);
+  assert.match(page, /className="team-availability-date-control"[^]*?aria-expanded=\{isWeekCalendarOpen\}[^]*?>\s*<span>\{weekRangeLabel\}<\/span>/);
+  assert.doesNotMatch(page, /className="team-availability-date-control"(?:(?!<\/button>)[\s\S])*<svg/);
   assert.match(page, /function chooseAvailabilityWeek/);
   assert.match(page, /className="apply" onClick=\{applyAvailabilityWeek\} disabled=\{pendingWeekDate === weekDate\}>Apply<\/button>/);
   assert.match(styles, /\.team-availability-week-calendar-days button\.in-range \{ background: #dceeff; \}/);
   assert.match(styles, /radial-gradient\(circle at center, var\(--blue-accent\) 0 22px, transparent 23px\)/);
   assert.match(styles, /\.team-availability-preference button \{[^}]*font-size: 0\.88rem;[^}]*font-weight: 800;/s);
+  assert.match(styles, /\.team-availability-day-heading \{[^}]*font-size: calc\(clamp\(0\.7rem, 0\.9vw, 0\.9rem\) \+ 2pt\);/s);
+  assert.match(styles, /\.team-availability-avatar \{[^}]*font-size: calc\(0\.8rem \+ 2pt\);/s);
+  assert.match(styles, /\.team-availability-member strong \{[^}]*font-size: calc\(clamp\(0\.76rem, 0\.95vw, 0\.9rem\) \+ 2pt\);/s);
+  assert.match(styles, /\.team-availability-week-controls \{[^}]*grid-template-columns: 42px minmax\(250px, auto\) 42px;/s);
+  assert.match(styles, /\.team-availability-week-controls > button > span \{[^}]*transform: translateY\(-2px\);/s);
+  assert.match(styles, /\.team-availability-date-control \{[^}]*min-width: 250px;[^}]*min-height: 42px;[^}]*justify-content: center;[^}]*border-radius: 10px;[^}]*font-weight: 800;[^}]*text-align: center;/s);
+  assert.match(styles, /\.team-availability-date-control span \{[^}]*font-size: \.88rem;[^}]*text-align: center;/s);
   assert.match(page, /<h3>Attendance • this month<\/h3>/);
   [
     "On time rate",
@@ -511,10 +572,16 @@ test("Departments and Roles keeps an unassigned row and supports editable roles 
   assert.match(page, /className="department-manager-list"/);
   assert.match(page, /placeholder="Add role"/);
   assert.match(page, /onBlur=\{\(\) => addDepartmentRole\(department\.id\)\}/);
-  assert.match(page, />Select manager<\/option>/);
-  assert.match(page, /addDepartmentManager\(department\.id, Number\(event\.target\.value\)\)/);
+  assert.match(page, /assignedManagers\.length === 0 \? <span>Select manager<\/span> : null/);
+  assert.match(page, /className=\{assignedManagers\.length > 0 \? "department-manager-picker has-selection" : "department-manager-picker"\}/);
+  assert.match(page, /aria-label=\{`Select manager for \$\{department\.name\}`\}/);
+  assert.match(page, /addDepartmentManager\(department\.id, manager\.id\)/);
+  assert.match(page, /event\.currentTarget\.closest\("details"\)\?\.removeAttribute\("open"\)/);
   assert.match(page, /function removeDepartmentRole/);
   assert.match(page, /function removeDepartmentManager/);
+  assert.match(page, /const assignableManagers = availableManagers\s*\.filter\(\(manager\) => !department\.managerIds\.includes\(manager\.id\)\)/);
+  assert.match(page, /assignableManagers\.length > 0 \? \(/);
+  assert.match(page, /\{assignableManagers\.map\(\(manager\) => \(/);
   assert.match(page, /departments: Department\[\]/);
   assert.match(page, /unassignedDepartment \?\? fallbackDepartment/);
   assert.match(page, /function rolesForDepartment/);
@@ -524,11 +591,23 @@ test("Departments and Roles keeps an unassigned row and supports editable roles 
   assert.match(page, /className="department-edit-button"/);
   assert.match(page, /placeholder="Department not set"/);
   assert.match(page, /function saveDepartmentName/);
+  const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+  assert.match(styles, /\.department-role-tags > span button,[^}]*color: #ffffff !important;[^}]*font-size: 1rem;/s);
+  assert.match(styles, /\.department-role-tags > span button:hover,[^}]*outline: 0 !important;/s);
+  assert.match(styles, /\.department-manager-picker\.has-selection \{[^}]*flex: 0 0 36px;/s);
+  assert.match(styles, /\.department-roles-panel \{[^}]*overflow: visible;/s);
+  assert.match(styles, /\.department-roles-table \{[^}]*min-width: 0;[^}]*overflow: visible;/s);
+  assert.match(styles, /\.department-roles-row:has\(\.department-manager-picker\[open\]\) \{[^}]*z-index: 30;/s);
+  assert.match(styles, /\.department-manager-menu \{[^}]*position: absolute;[^}]*z-index: 100;[^}]*max-height: 200px;[^}]*overflow-y: auto;[^}]*background: #ffffff;/s);
+  assert.match(styles, /\.department-roles-header \{[^}]*font-size: calc\(0\.78rem \+ 2pt\);/s);
+  assert.match(styles, /\.department-roles-row \{[^}]*font-size: calc\(1rem \+ 2pt\);/s);
+  assert.match(styles, /\.department-manager-list > span \{[^}]*font-size: calc\(0\.74rem \+ 2pt\);/s);
+  assert.match(styles, /\.roster-row \{[^}]*font-size: calc\(0\.82rem \+ 2pt\);/s);
+  assert.match(styles, /\.roster-member small \{[^}]*font-size: calc\(0\.72rem \+ 2pt\);/s);
   assert.match(page, /departmentNameDraft\.trim\(\) \|\| "Department not set"/);
   assert.match(page, /departmentIndex > 0 \? \(/);
   assert.match(page, /className="department-row-remove"/);
   assert.match(page, /function removeDepartment\(/);
-  assert.match(page, /assignedManagers\.length === 0 \? \(/);
   assert.match(page, /assignedManagers\.map\(\(manager\)/);
 });
 
@@ -899,6 +978,7 @@ test("signed-in users have a header account menu instead of a sidebar logout pan
   assert.match(styles, /\.topbar\s*\{[^}]*border-bottom: 1px solid var\(--line\)/s);
   assert.match(styles, /\.topbar\s*\{[^}]*width: min\(1200px, 100%\)/s);
   assert.match(styles, /\.notification-item \{[^}]*background: #ffffff;/s);
+  assert.match(styles, /\.notification-message-item:hover,[^}]*outline: 0;/s);
   assert.match(styles, /\.notification-dismiss \{[^}]*position: absolute;/s);
   assert.match(styles, /\.notification-clear \{/);
   assert.doesNotMatch(styles, /\.operational-alert\.danger/);

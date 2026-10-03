@@ -1324,6 +1324,16 @@ export default function Home() {
     if (event.target === event.currentTarget) dismiss();
   }
 
+  function openNativeDatePicker(event: ReactMouseEvent<HTMLInputElement>) {
+    const input = event.currentTarget;
+    if (typeof input.showPicker !== "function") return;
+    try {
+      input.showPicker();
+    } catch {
+      // The input remains usable for browsers that restrict programmatic pickers.
+    }
+  }
+
   function startEditingConversationName(conversation: TeamConversation) {
     if (conversation.participantIds.length <= 2 || conversation.creatorEmployeeId !== activeEmployeeId) return;
     setEditingConversationNameId(conversation.id);
@@ -3204,7 +3214,7 @@ export default function Home() {
         </aside>
 
         <section className="workspace" aria-live="polite">
-          <header className={["my_availability", "team_availability"].includes(activeView) ? "topbar availability-hidden-topbar" : "topbar"}>
+          <header className="topbar">
             <div>
               <p className="eyebrow">{formatLongDate(today)}</p>
               <h2>{activeViewLabel(activeView, mode)}</h2>
@@ -3989,6 +3999,9 @@ export default function Home() {
                     const assignedManagers = department.managerIds
                       .map((managerId) => employeeById(availableManagers, managerId))
                       .filter((manager): manager is Employee => Boolean(manager));
+                    const assignableManagers = availableManagers
+                      .filter((manager) => !department.managerIds.includes(manager.id))
+                      .sort((first, second) => first.name.localeCompare(second.name, undefined, { sensitivity: "base" }));
                     return (
                       <div className="department-roles-row" role="row" key={department.id}>
                       <div className="department-name-cell" role="cell">
@@ -4057,7 +4070,6 @@ export default function Home() {
                       <div
                         className="department-manager-list"
                         role="cell"
-                        onClick={(event) => event.currentTarget.querySelector("select")?.focus()}
                       >
                         {assignedManagers.map((manager) => (
                             <span key={manager.id}>
@@ -4069,20 +4081,29 @@ export default function Home() {
                               >×</button>
                             </span>
                         ))}
-                        {assignedManagers.length === 0 ? (
-                          <select
-                            value=""
-                            onChange={(event) => {
-                              addDepartmentManager(department.id, Number(event.target.value));
-                              event.target.value = "";
-                            }}
-                            aria-label={`Add manager to ${department.name}`}
-                          >
-                            <option value="">Select manager</option>
-                            {availableManagers.map((manager) => (
-                              <option value={manager.id} key={manager.id}>{manager.name}</option>
-                            ))}
-                          </select>
+                        {assignableManagers.length > 0 ? (
+                          <details className={assignedManagers.length > 0 ? "department-manager-picker has-selection" : "department-manager-picker"}>
+                            <summary aria-label={`Select manager for ${department.name}`}>
+                              {assignedManagers.length === 0 ? <span>Select manager</span> : null}
+                              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+                            </summary>
+                            <div className="department-manager-menu" role="listbox" aria-label={`Available managers for ${department.name}`}>
+                              {assignableManagers.map((manager) => (
+                                <button
+                                  type="button"
+                                  role="option"
+                                  aria-selected="false"
+                                  onClick={(event) => {
+                                    addDepartmentManager(department.id, manager.id);
+                                    event.currentTarget.closest("details")?.removeAttribute("open");
+                                  }}
+                                  key={manager.id}
+                                >
+                                  {manager.name}
+                                </button>
+                              ))}
+                            </div>
+                          </details>
                         ) : null}
                       </div>
                       {departmentIndex > 0 ? (
@@ -6417,6 +6438,7 @@ export default function Home() {
               <input
                 type="date"
                 value={shiftForm.date}
+                onClick={openNativeDatePicker}
                 onChange={(event) => {
                   const date = event.target.value;
                   setShiftForm((form) => ({ ...form, date }));
@@ -6466,15 +6488,18 @@ export default function Home() {
               <legend>Apply to:</legend>
               <div>
                 {shiftWeekdayOptions.map((option) => (
-                  <button
-                    type="button"
-                    className={createShiftWeekdays.includes(option.value) ? "active" : ""}
-                    onClick={() => toggleCreateShiftWeekday(option.value)}
-                    aria-pressed={createShiftWeekdays.includes(option.value)}
-                    key={option.value}
-                  >
-                    {option.label}
-                  </button>
+                  <span className="shift-apply-day-option" key={option.value}>
+                    <span className="shift-apply-day-date">{formatShiftApplyDate(shiftForm.date, option.value)}</span>
+                    <button
+                      type="button"
+                      className={createShiftWeekdays.includes(option.value) ? "active" : ""}
+                      onClick={() => toggleCreateShiftWeekday(option.value)}
+                      aria-label={`${option.label}, ${formatShiftApplyDate(shiftForm.date, option.value)}`}
+                      aria-pressed={createShiftWeekdays.includes(option.value)}
+                    >
+                      {option.label}
+                    </button>
+                  </span>
                 ))}
               </div>
             </fieldset>
@@ -6513,6 +6538,7 @@ export default function Home() {
               <input
                 type="date"
                 value={editingShift.date}
+                onClick={openNativeDatePicker}
                 onChange={(event) => {
                   const date = event.target.value;
                   setEditingShift((shift) => shift ? { ...shift, date } : shift);
@@ -6578,16 +6604,19 @@ export default function Home() {
                 {shiftWeekdayOptions.map((option) => {
                   const isAnchorDay = option.value === weekdayForDate(editingShift.date);
                   return (
-                    <button
-                      type="button"
-                      className={editingShiftWeekdays.includes(option.value) ? "active" : ""}
-                      onClick={() => toggleEditingShiftWeekday(option.value)}
-                      aria-pressed={editingShiftWeekdays.includes(option.value)}
-                      disabled={editingShiftHasStarted || isAnchorDay}
-                      key={option.value}
-                    >
-                      {option.label}
-                    </button>
+                    <span className="shift-apply-day-option" key={option.value}>
+                      <span className="shift-apply-day-date">{formatShiftApplyDate(editingShift.date, option.value)}</span>
+                      <button
+                        type="button"
+                        className={editingShiftWeekdays.includes(option.value) ? "active" : ""}
+                        onClick={() => toggleEditingShiftWeekday(option.value)}
+                        aria-label={`${option.label}, ${formatShiftApplyDate(editingShift.date, option.value)}`}
+                        aria-pressed={editingShiftWeekdays.includes(option.value)}
+                        disabled={editingShiftHasStarted || isAnchorDay}
+                      >
+                        {option.label}
+                      </button>
+                    </span>
                   );
                 })}
               </div>
@@ -6663,6 +6692,10 @@ function activeViewLabel(activeView: ViewId, mode: Mode) {
   if (activeView === "dashboard") return mode === "manager" ? "Manager mode" : "Employee mode";
   if (activeView === "employees") return "Roster";
   if (activeView === "departments_roles") return "Department / Roles";
+  if (activeView === "schedule") return "Shifts";
+  if (activeView === "time_off") return "Time off";
+  if (activeView === "my_availability") return "My availability";
+  if (activeView === "team_availability") return "Team availability";
   if (activeView === "profile") return "Profile";
   if (activeView === "team_members") return "Team members";
   return navItems.find((item) => item.id === activeView)?.label ?? "Home";
@@ -7769,18 +7802,24 @@ function weekdayForDate(date: string) {
   return parseLocalDate(date).getDay();
 }
 
-function shiftDatesForWeekdays(anchorDate: string, weekdays: number[]) {
+function shiftDateForWeekday(anchorDate: string, weekday: number) {
   const anchor = parseLocalDate(anchorDate);
   const monday = new Date(anchor);
   monday.setDate(anchor.getDate() - ((anchor.getDay() + 6) % 7));
+  const date = new Date(monday);
+  date.setDate(monday.getDate() + ((weekday + 6) % 7));
+  return toDateInputValue(date);
+}
 
+function formatShiftApplyDate(anchorDate: string, weekday: number) {
+  const date = parseLocalDate(shiftDateForWeekday(anchorDate, weekday));
+  return `${date.getMonth() + 1}/${date.getDate()}`;
+}
+
+function shiftDatesForWeekdays(anchorDate: string, weekdays: number[]) {
   return shiftWeekdayOptions
     .filter((option) => weekdays.includes(option.value))
-    .map((option) => {
-      const date = new Date(monday);
-      date.setDate(monday.getDate() + ((option.value + 6) % 7));
-      return toDateInputValue(date);
-    });
+    .map((option) => shiftDateForWeekday(anchorDate, option.value));
 }
 
 function startOfDay(date: Date) {
@@ -7959,6 +7998,27 @@ function isTimeDraftBefore(value: string, before?: string) {
   const beforeMinutes = timeToMinutes(before);
 
   return candidateMinutes === null || beforeMinutes === null || candidateMinutes < beforeMinutes;
+}
+
+function isTimeDraftAfter(value: string, after?: string) {
+  if (!value.trim() || !after) return true;
+
+  const candidate = suggestedTimeForDraft(value, after)?.time ?? parseTypedTime(value);
+  const candidateMinutes = candidate ? timeToMinutes(candidate) : null;
+  const afterMinutes = timeToMinutes(after);
+
+  return candidateMinutes === null || afterMinutes === null || candidateMinutes > afterMinutes;
+}
+
+function isTimeWithinBounds(value: string, after?: string, before?: string) {
+  const candidateMinutes = timeToMinutes(value);
+  const afterMinutes = after ? timeToMinutes(after) : null;
+  const beforeMinutes = before ? timeToMinutes(before) : null;
+
+  if (candidateMinutes === null) return false;
+  if (afterMinutes !== null && candidateMinutes <= afterMinutes) return false;
+  if (beforeMinutes !== null && candidateMinutes >= beforeMinutes) return false;
+  return true;
 }
 
 function formatScheduledHours(shift: Shift) {
@@ -8535,11 +8595,102 @@ function TimeInput({
 }) {
   const [draft, setDraft] = useState(() => (value ? formatTime12(value).replace(" ", "") : ""));
   const [isFocused, setIsFocused] = useState(false);
+  const [isPickerOpen, setIsPickerOpen] = useState(false);
+  const [pickerHour, setPickerHour] = useState(8);
+  const [pickerMinute, setPickerMinute] = useState(0);
+  const [pickerPeriod, setPickerPeriod] = useState<"am" | "pm">("am");
+  const [pickerScrollRevision, setPickerScrollRevision] = useState(0);
+  const shellRef = useRef<HTMLSpanElement>(null);
   const suggestion = isFocused && !disabled ? suggestedTimeForDraft(draft, suggestAfter) : null;
+  const timePickerHours = Array.from({ length: 12 }, (_, index) => index + 1);
+  const timePickerMinutes = Array.from({ length: 60 }, (_, index) => index);
+  const timePickerLoopCount = 5;
+  const middleTimePickerLoop = Math.floor(timePickerLoopCount / 2);
+  const loopingTimePickerHours = Array.from({ length: timePickerLoopCount }, (_, loop) => (
+    timePickerHours.map((value) => ({ loop, value }))
+  )).flat();
+  const loopingTimePickerMinutes = Array.from({ length: timePickerLoopCount }, (_, loop) => (
+    timePickerMinutes.map((value) => ({ loop, value }))
+  )).flat();
 
   useEffect(() => {
     setDraft(value ? formatTime12(value).replace(" ", "") : "");
   }, [value]);
+
+  useEffect(() => {
+    if (!isPickerOpen) return;
+    const selectedOptions = shellRef.current?.querySelectorAll<HTMLElement>('.time-input-picker-option[aria-selected="true"]');
+    selectedOptions?.forEach((option) => {
+      const list = option.parentElement;
+      if (list) {
+        const optionTopInList = option.offsetTop - list.offsetTop;
+        list.scrollTop = optionTopInList - (list.clientHeight - option.offsetHeight) / 2;
+      }
+    });
+  }, [isPickerOpen, pickerHour, pickerMinute, pickerPeriod, pickerScrollRevision]);
+
+  useEffect(() => {
+    if (!isPickerOpen) return;
+    function closePicker(event: PointerEvent) {
+      if (!shellRef.current?.contains(event.target as Node)) setIsPickerOpen(false);
+    }
+    document.addEventListener("pointerdown", closePicker);
+    return () => document.removeEventListener("pointerdown", closePicker);
+  }, [isPickerOpen]);
+
+  function pickerPartsForCurrentValue() {
+    let parsed = parseTypedTime(draft) ?? value;
+    if (!parsed && suggestAfter) {
+      const afterMinutes = timeToMinutes(suggestAfter);
+      if (afterMinutes !== null) {
+        const nextMinutes = (afterMinutes + 60) % (24 * 60);
+        parsed = `${Math.floor(nextMinutes / 60).toString().padStart(2, "0")}:${(nextMinutes % 60).toString().padStart(2, "0")}`;
+      }
+    }
+    parsed ||= "08:00";
+    const [hourText, minuteText] = parsed.split(":");
+    const hour24 = Number(hourText);
+    return {
+      hour: hour24 % 12 || 12,
+      minute: Number(minuteText) || 0,
+      period: (hour24 >= 12 ? "pm" : "am") as "am" | "pm",
+    };
+  }
+
+  function openTimePicker() {
+    if (disabled) return;
+    if (!isPickerOpen) {
+      const parts = pickerPartsForCurrentValue();
+      setPickerHour(parts.hour);
+      setPickerMinute(parts.minute);
+      setPickerPeriod(parts.period);
+    }
+    setIsPickerOpen(true);
+  }
+
+  function selectPickerTime(hour: number, minute: number, period: "am" | "pm") {
+    const hour24 = period === "am"
+      ? hour === 12 ? 0 : hour
+      : hour === 12 ? 12 : hour + 12;
+    const nextTime = `${hour24.toString().padStart(2, "0")}:${minute.toString().padStart(2, "0")}`;
+    if (!isTimeWithinBounds(nextTime, suggestAfter, suggestBefore)) return;
+    setPickerHour(hour);
+    setPickerMinute(minute);
+    setPickerPeriod(period);
+    setPickerScrollRevision((current) => current + 1);
+    setDraft(formatTime12(nextTime).replace(" ", ""));
+    onChange(nextTime);
+  }
+
+  function loopTimePickerScroll(list: HTMLSpanElement) {
+    const loopHeight = list.scrollHeight / timePickerLoopCount;
+    if (!Number.isFinite(loopHeight) || loopHeight <= 0) return;
+    if (list.scrollTop < loopHeight * 0.5) {
+      list.scrollTop += loopHeight * 2;
+    } else if (list.scrollTop > loopHeight * 3.5) {
+      list.scrollTop -= loopHeight * 2;
+    }
+  }
 
   function commitTime() {
     if (!draft.trim()) {
@@ -8549,7 +8700,7 @@ function TimeInput({
     }
 
     const parsed = suggestion?.time ?? parseTypedTime(draft);
-    if (!parsed || !isTimeDraftBefore(draft, suggestBefore)) {
+    if (!parsed || !isTimeWithinBounds(parsed, suggestAfter, suggestBefore)) {
       setDraft(value ? formatTime12(value).replace(" ", "") : "");
       return;
     }
@@ -8559,7 +8710,16 @@ function TimeInput({
   }
 
   return (
-    <span className="time-input-shell">
+    <span
+      className="time-input-shell"
+      ref={shellRef}
+      onBlur={(event) => {
+        if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+        commitTime();
+        setIsFocused(false);
+        setIsPickerOpen(false);
+      }}
+    >
       {suggestion ? <span className="time-input-hint" aria-hidden="true">{suggestion.label}</span> : null}
       <input
         type="text"
@@ -8568,31 +8728,95 @@ function TimeInput({
           const nextValue = event.target.value;
           setDraft((currentDraft) => {
             const formattedDraft = formatTimeDraftInput(nextValue, currentDraft);
-            return isTimeDraftBefore(formattedDraft, suggestBefore) ? formattedDraft : currentDraft;
+            return isTimeDraftBefore(formattedDraft, suggestBefore) && isTimeDraftAfter(formattedDraft, suggestAfter)
+              ? formattedDraft
+              : currentDraft;
           });
         }}
         onFocus={(event) => {
           setIsFocused(true);
+          openTimePicker();
           if (selectOnFocus) event.currentTarget.select();
         }}
         onClick={(event) => {
+          openTimePicker();
           if (selectOnFocus) event.currentTarget.select();
-        }}
-        onBlur={() => {
-          commitTime();
-          setIsFocused(false);
         }}
         onKeyDown={(event) => {
           if (event.key === "Enter") {
             commitTime();
+            setIsPickerOpen(false);
+          }
+          if (event.key === "Escape") {
+            setIsPickerOpen(false);
           }
         }}
         placeholder={placeholder}
         aria-label={ariaLabel}
+        aria-haspopup="listbox"
+        aria-expanded={isPickerOpen}
         inputMode="text"
         disabled={disabled}
         required={required}
       />
+      {isPickerOpen && !disabled ? (
+        <span className="time-input-picker" role="group" aria-label={`${ariaLabel} picker`}>
+          <span className="time-input-picker-column">
+            <strong>Hour</strong>
+            <span className="time-input-picker-options" role="listbox" aria-label="Hour" onScroll={(event) => loopTimePickerScroll(event.currentTarget)}>
+              {loopingTimePickerHours.map(({ loop, value: hour }) => (
+                <button
+                  type="button"
+                  className="time-input-picker-option"
+                  role="option"
+                  aria-selected={pickerHour === hour && loop === middleTimePickerLoop}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => selectPickerTime(hour, pickerMinute, pickerPeriod)}
+                  key={`${loop}-${hour}`}
+                >
+                  {hour}
+                </button>
+              ))}
+            </span>
+          </span>
+          <span className="time-input-picker-column">
+            <strong>Minute</strong>
+            <span className="time-input-picker-options" role="listbox" aria-label="Minute" onScroll={(event) => loopTimePickerScroll(event.currentTarget)}>
+              {loopingTimePickerMinutes.map(({ loop, value: minute }) => (
+                <button
+                  type="button"
+                  className="time-input-picker-option"
+                  role="option"
+                  aria-selected={pickerMinute === minute && loop === middleTimePickerLoop}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => selectPickerTime(pickerHour, minute, pickerPeriod)}
+                  key={`${loop}-${minute}`}
+                >
+                  {minute.toString().padStart(2, "0")}
+                </button>
+              ))}
+            </span>
+          </span>
+          <span className="time-input-picker-column">
+            <strong>Period</strong>
+            <span className="time-input-picker-options period" role="listbox" aria-label="Period">
+              {(["am", "pm"] as const).map((period) => (
+                <button
+                  type="button"
+                  className="time-input-picker-option"
+                  role="option"
+                  aria-selected={pickerPeriod === period}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => selectPickerTime(pickerHour, pickerMinute, period)}
+                  key={period}
+                >
+                  {period.toUpperCase()}
+                </button>
+              ))}
+            </span>
+          </span>
+        </span>
+      ) : null}
     </span>
   );
 }
@@ -8784,9 +9008,8 @@ function AvailabilityBoard({
   const calendarMonthLabel = new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric" }).format(calendarMonthDate);
 
   return (
-    <section className="availability-section" aria-labelledby="availability-title">
+    <section className="availability-section" aria-label="My availability">
       <div className="availability-toolbar">
-        <h2 id="availability-title">My Availability</h2>
         <div className="availability-actions">
           <div className={isVersionMenuOpen ? "availability-version-select open" : "availability-version-select"}>
             <button
@@ -9196,10 +9419,10 @@ function TeamAvailabilityBoard({
   }
 
   return (
-    <section className="team-availability-section" aria-labelledby="team-availability-title">
+    <section className="team-availability-section" aria-label="Team availability">
       <div className="team-availability-toolbar">
-        <h2 id="team-availability-title">Team Availability</h2>
         <div className="team-availability-week-controls">
+          <button type="button" onClick={() => moveWeek(-1)} aria-label="Previous week"><span aria-hidden="true">‹</span></button>
           <div className="team-availability-date-picker">
             <button
               type="button"
@@ -9209,10 +9432,6 @@ function TeamAvailabilityBoard({
               aria-haspopup="dialog"
               aria-expanded={isWeekCalendarOpen}
             >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <rect x="3" y="5" width="18" height="16" rx="2" />
-                <path d="M7 3v4M17 3v4M3 10h18" />
-              </svg>
               <span>{weekRangeLabel}</span>
             </button>
             {isWeekCalendarOpen ? (
@@ -9248,7 +9467,6 @@ function TeamAvailabilityBoard({
               </div>
             ) : null}
           </div>
-          <button type="button" onClick={() => moveWeek(-1)} aria-label="Previous week"><span aria-hidden="true">‹</span></button>
           <button type="button" onClick={() => moveWeek(1)} aria-label="Next week"><span aria-hidden="true">›</span></button>
         </div>
       </div>
