@@ -5,6 +5,22 @@ import type { CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { readCertificateFile, storeCertificateFile } from "./certificate-files";
 import { rosterCopyHeaders, rosterCopyRows, rosterCsv } from "./roster-export";
+import { alertsPermissionsFields, automaticClockOutAt, canManageScheduleRole, canViewTeamSchedule, clockInTiming, defaultScheduleEnforcement, normalizeScheduleEnforcement, scheduleDraftIsAllowed, scheduleEnforcementFields, schedulingSettingsForSave, workWeekOffset } from "./schedule-enforcement";
+import type { ScheduleEnforcement } from "./schedule-enforcement";
+import { breaksComplianceFields, eventsTradesFields, overtimeFields, messagesSettingsFields } from "./schedule-enforcement";
+import { normalizeScheduleEvents, scheduleEventsForDate, validEventDate } from "./schedule-events";
+import type { ScheduleEvent } from "./schedule-events";
+import { TimeClockOptionsPanel } from "./time-clock-options";
+import { OvertimeOptionsPanel } from "./overtime-options";
+import { BreaksCompliancePanel } from "./breaks-compliance";
+import { MessagesSettingsPanel } from "./messages-settings";
+import { TeamPermissionsPanel } from "./team-permissions";
+import { AccountProfilePanel } from "./account-profile-panel";
+import { LocationsPinsPanel } from "./locations-pins";
+import { NotificationsSettingsPanel } from "./notifications-settings";
+import { SchedulingHourSelect } from "./scheduling-hour-select";
+import { profileUpdate, profileValues } from "./account-profile";
+import type { ProfileValues } from "./account-profile";
 
 type Mode = "manager" | "employee";
 type ViewId = "dashboard" | "employees" | "departments_roles" | "schedule" | "time_off" | "my_availability" | "team_availability" | "clockins" | "hours" | "settings" | "profile" | "team_members";
@@ -13,7 +29,6 @@ type HoursSectionTab = "hours" | "pto";
 type SettingsTab =
   | "Basic info"
   | "POS connection"
-  | "Plan & billing"
   | "Schedule enforcement"
   | "Alerts & permissions"
   | "Events & trades"
@@ -21,7 +36,6 @@ type SettingsTab =
   | "Overtime"
   | "Breaks & compliance"
   | "Tip settings"
-  | "Tip Manager"
   | "Payroll settings"
   | "Time off"
   | "Messages"
@@ -30,8 +44,7 @@ type SettingsTab =
   | "Profile"
   | "Locations & PINs"
   | "Notifications"
-  | "Password & security"
-  | "API access (read only)";
+  | "Password & security";
 type BasicInfo = {
   locationName: string;
   locationPhone: string;
@@ -164,6 +177,7 @@ type ClockEvent = {
   durationMinutes?: 30 | 45;
   durationSeconds?: 5;
   explanation?: string;
+  automatic?: boolean;
 };
 
 type OperationalAlert = {
@@ -291,6 +305,7 @@ type StaffState = {
   employees: Employee[];
   departments: Department[];
   shifts: Shift[];
+  scheduleEvents: ScheduleEvent[];
   clockEvents: ClockEvent[];
   hoursAdjustments: HoursAdjustment[];
   ptoRequests: PtoRequest[];
@@ -309,22 +324,13 @@ const storageKey = "dombase-staff-state-v1";
 const stateBackupStorageKey = "dombase-staff-state-backup-v1";
 const unpublishedShiftsStorageKey = "dombase-unpublished-shifts-v1";
 const basicInfoStorageKey = "dombase-basic-info-v1";
+const scheduleEnforcementStorageKey = "dombase-schedule-enforcement-v1";
 const companyLocationsStorageKey = "dombase-company-locations-v1";
 const openedNotificationsStorageKey = "dombase-opened-notifications-v1";
 const dismissedNotificationsStorageKey = "dombase-dismissed-notifications-v1";
 const timeExceptionExplanationLimit = 250;
-const earlyClockInGraceMs = 5 * 60 * 1000;
-const missedClockInGraceMs = 5 * 60 * 1000;
-const automaticClockOutDelayMs = 2 * 60 * 60 * 1000;
 const automaticClockOutExplanation = "Automatically clocked out two hours after the scheduled shift ended.";
-const missedBreakThresholdMs = 5 * 60 * 60 * 1000;
 const operationalAlertLookbackMs = 7 * 24 * 60 * 60 * 1000;
-const scheduleStartHour = 7;
-const scheduleEndHour = 17;
-const scheduleHourLabels = Array.from(
-  { length: scheduleEndHour - scheduleStartHour },
-  (_, index) => scheduleStartHour + index,
-);
 const shiftWeekdayOptions = [
   { label: "Mon", value: 1 },
   { label: "Tue", value: 2 },
@@ -355,19 +361,19 @@ const navItems: { id: ViewId; label: string; icon: string; managerOnly?: boolean
   { id: "dashboard", label: "Home", icon: "home" },
   { id: "employees", label: "Team", icon: "person", managerOnly: true },
   { id: "schedule", label: "Schedule", icon: "calendar" },
-  { id: "hours", label: "Hours", icon: "clock" },
+  { id: "hours", label: "Timesheets", icon: "clock" },
   { id: "clockins", label: "Events", icon: "flag", managerOnly: true },
   { id: "settings", label: "Settings", icon: "gear", managerOnly: true },
 ];
 
 const settingsGroups: { label: string; items: SettingsTab[] }[] = [
-  { label: "Location", items: ["Basic info", "POS connection", "Plan & billing"] },
+  { label: "Location", items: ["Basic info", "POS connection"] },
   { label: "Scheduling", items: ["Schedule enforcement", "Alerts & permissions", "Events & trades"] },
   { label: "Time tracking", items: ["Time clock options", "Overtime", "Breaks & compliance"] },
-  { label: "Tips", items: ["Tip settings", "Tip Manager"] },
+  { label: "Tips", items: ["Tip settings"] },
   { label: "Payroll", items: ["Payroll settings"] },
   { label: "Team management", items: ["Time off", "Messages", "Team permissions", "Manager Log"] },
-  { label: "Account", items: ["Profile", "Locations & PINs", "Notifications", "Password & security", "API access (read only)"] },
+  { label: "Account", items: ["Profile", "Locations & PINs", "Notifications", "Password & security"] },
 ];
 
 const defaultBasicInfo: BasicInfo = {
@@ -433,6 +439,7 @@ const starterState: StaffState = {
   ],
   departments: [{ id: 1, name: "Department not set", roles: [], managerIds: [1] }],
   shifts: [],
+  scheduleEvents: [],
   clockEvents: [],
   hoursAdjustments: [],
   ptoRequests: [],
@@ -522,6 +529,16 @@ export default function Home() {
   const [isTeamNavOpen, setIsTeamNavOpen] = useState(false);
   const [isScheduleNavOpen, setIsScheduleNavOpen] = useState(false);
   const [activeSettingsTab, setActiveSettingsTab] = useState<SettingsTab>("Basic info");
+  const [scheduleEnforcement, setScheduleEnforcement] = useState<ScheduleEnforcement>(() => readStoredScheduleEnforcement());
+  const [scheduleEnforcementDraft, setScheduleEnforcementDraft] = useState<ScheduleEnforcement>(() => readStoredScheduleEnforcement());
+  const [scheduleEnforcementMessage, setScheduleEnforcementMessage] = useState("");
+  const [alertsPermissionsMessage, setAlertsPermissionsMessage] = useState("");
+  const [eventsTradesMessage, setEventsTradesMessage] = useState("");
+  const [overtimeMessage, setOvertimeMessage] = useState("");
+  const [breaksComplianceMessage, setBreaksComplianceMessage] = useState("");
+  const [messagesSettingsMessage, setMessagesSettingsMessage] = useState("");
+  const [scheduleEventDraft, setScheduleEventDraft] = useState<ScheduleEvent | null>(null);
+  const [schedulePermissionError, setSchedulePermissionError] = useState("");
   const [basicInfo, setBasicInfo] = useState<BasicInfo>(() => readStoredBasicInfo());
   const [savedBasicInfoSnapshot, setSavedBasicInfoSnapshot] = useState(() => JSON.stringify(readStoredBasicInfo()));
   const [editingBasicInfoField, setEditingBasicInfoField] = useState<BasicInfoField | null>(null);
@@ -706,11 +723,11 @@ export default function Home() {
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      setState((current) => applyAutomaticClockOuts(current, currentTime));
+      setState((current) => applyAutomaticClockOuts(current, currentTime, scheduleEnforcement));
     }, 0);
 
     return () => window.clearTimeout(timer);
-  }, [currentTime]);
+  }, [currentTime, scheduleEnforcement]);
 
   useEffect(() => {
     if (rosterActionEmployeeId === null) return;
@@ -1008,10 +1025,11 @@ export default function Home() {
         alertEligibleShifts,
         state.clockEvents,
         currentTime,
+        scheduleEnforcement,
       )
     : [];
   const noShowEvents = activeUserCanManage
-    ? noShowAlertsFor(state.employees, alertEligibleShifts, state.clockEvents, currentTime)
+    ? noShowAlertsFor(state.employees, alertEligibleShifts, state.clockEvents, currentTime, Number.NEGATIVE_INFINITY, scheduleEnforcement)
     : [];
   const eventHistoryItems = [
     ...state.clockEvents.map((event) => ({ kind: "clock" as const, at: event.at, event })),
@@ -1114,6 +1132,17 @@ export default function Home() {
   }, [isCreatingConversation, isMessagesOpen, ptoMessageEmployeeId, selectedConversationId]);
 
   const isBasicInfoDirty = JSON.stringify(basicInfo) !== savedBasicInfoSnapshot;
+  const isScheduleEnforcementDirty = scheduleEnforcementFields.some(field => scheduleEnforcementDraft[field] !== scheduleEnforcement[field]);
+  const isAlertsPermissionsDirty = alertsPermissionsFields.some(field => scheduleEnforcementDraft[field] !== scheduleEnforcement[field]);
+  const isEventsTradesDirty = eventsTradesFields.some(field => scheduleEnforcementDraft[field] !== scheduleEnforcement[field]);
+  const isOvertimeDirty = overtimeFields.some(field => scheduleEnforcementDraft[field] !== scheduleEnforcement[field]);
+  const isBreaksComplianceDirty = breaksComplianceFields.some(field => scheduleEnforcementDraft[field] !== scheduleEnforcement[field]);
+  const isMessagesSettingsDirty = messagesSettingsFields.some(field => scheduleEnforcementDraft[field] !== scheduleEnforcement[field]);
+  const canViewScheduleEvents = !isPublicSchedule || !scheduleEnforcement.employeesOwnScheduleOnly;
+  const scheduleHourLabels = Array.from(
+    { length: scheduleEnforcement.scheduleEndHour - scheduleEnforcement.scheduleStartHour },
+    (_, index) => scheduleEnforcement.scheduleStartHour + index,
+  );
   const activeEmployees = useMemo(
     () => state.employees.filter((employee) => employee.active),
     [state.employees],
@@ -1170,8 +1199,8 @@ export default function Home() {
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
   const shiftEmployees = useMemo(
-    () => activeEmployees,
-    [activeEmployees],
+    () => activeEmployees.filter(employee => canViewTeamSchedule(employee.id, activeEmployeeId, mode === "manager", isPublicSchedule, scheduleEnforcement.employeesOwnScheduleOnly)),
+    [activeEmployees, activeEmployeeId, mode, isPublicSchedule, scheduleEnforcement.employeesOwnScheduleOnly],
   );
   const hoursEmployees = useMemo(
     () => [...activeEmployees].sort((first, second) => first.name.localeCompare(second.name, undefined, { sensitivity: "base" })),
@@ -1181,7 +1210,7 @@ export default function Home() {
     () => new Set(shiftEmployees.map((employee) => employee.id)),
     [shiftEmployees],
   );
-  const accessibleShifts = workingScheduleShifts;
+  const accessibleShifts = workingScheduleShifts.filter(shift => canViewTeamSchedule(shift.employeeId, activeEmployeeId, mode === "manager", isPublicSchedule, scheduleEnforcement.employeesOwnScheduleOnly));
   const unpublishedShiftCount = activeScheduleDraft
     ? new Set([
         ...activeScheduleDraft.upsertedShifts.map((shift) => shift.id),
@@ -1200,10 +1229,10 @@ export default function Home() {
     .sort((a, b) => a.start.localeCompare(b.start));
   const calendarShifts = useMemo(
     () =>
-      shiftsForCalendarRange(accessibleShifts, shiftEmployeeIds, today, activeCalendarTab).sort(
+      shiftsForCalendarRange(accessibleShifts, shiftEmployeeIds, today, activeCalendarTab, scheduleEnforcement.workWeekStart).sort(
         (a, b) => `${a.date}${a.start}`.localeCompare(`${b.date}${b.start}`),
       ),
-    [accessibleShifts, activeCalendarTab, shiftEmployeeIds, today],
+    [accessibleShifts, activeCalendarTab, shiftEmployeeIds, today, scheduleEnforcement.workWeekStart],
   );
   const scheduleDayShifts = useMemo(
     () =>
@@ -1214,11 +1243,11 @@ export default function Home() {
           && !employeeHasApprovedTimeOffOnDate(state.ptoRequests ?? [], shift.employeeId, shift.date)
         ))
         .sort((a, b) => a.start.localeCompare(b.start)),
-    [accessibleShifts, scheduleDate, shiftEmployeeIds, state.ptoRequests],
+    [accessibleShifts, scheduleDate, shiftEmployeeIds, state.ptoRequests, scheduleEnforcement.workWeekStart],
   );
   const scheduleWeekDays = useMemo(
     () =>
-      mondayWeekCalendarDays(scheduleDate).map((day) => ({
+      workWeekCalendarDays(scheduleDate, scheduleEnforcement.workWeekStart).map((day) => ({
         ...day,
         shifts: accessibleShifts
           .filter((shift) => (
@@ -1228,10 +1257,10 @@ export default function Home() {
           ))
           .sort((a, b) => a.start.localeCompare(b.start)),
       })),
-    [accessibleShifts, scheduleDate, shiftEmployeeIds, state.ptoRequests],
+    [accessibleShifts, scheduleDate, shiftEmployeeIds, state.ptoRequests, scheduleEnforcement.workWeekStart],
   );
   const scheduleMonthDays = useMemo(
-    () => scheduleMonthCalendarDays(scheduleDate).map((day) => ({
+    () => scheduleMonthCalendarDays(scheduleDate, scheduleEnforcement.workWeekStart).map((day) => ({
       ...day,
       shifts: accessibleShifts
         .filter((shift) => (
@@ -1241,7 +1270,7 @@ export default function Home() {
         ))
         .sort((a, b) => a.start.localeCompare(b.start)),
     })),
-    [accessibleShifts, scheduleDate, shiftEmployeeIds, state.ptoRequests],
+    [accessibleShifts, scheduleDate, shiftEmployeeIds, state.ptoRequests, scheduleEnforcement.workWeekStart],
   );
   const visibleScheduleEmployees = orderedShiftEmployees.filter((employee) => visibleEmployeeIds === null || visibleEmployeeIds.includes(employee.id));
   const myShift = todaysShifts.find((shift) => shift.employeeId === activeEmployeeId);
@@ -1273,7 +1302,7 @@ export default function Home() {
     : "";
   const hoursRows = useMemo(
     () => {
-      const range = hoursDateRange(hoursDate, activeHoursTab);
+      const range = hoursDateRange(hoursDate, activeHoursTab, scheduleEnforcement.workWeekStart);
       const selectedRounding = activeUserIsAdmin && mode === "manager"
         ? hoursRounding
         : hoursDisplay === "rounded"
@@ -1294,7 +1323,7 @@ export default function Home() {
         ),
       }));
     },
-    [activeHoursTab, activeUserIsAdmin, currentTime, hoursDate, hoursDisplay, hoursEmployees, hoursRounding, mode, state.clockEvents, state.hoursAdjustments, state.hoursRoundingMinutes],
+    [activeHoursTab, activeUserIsAdmin, currentTime, hoursDate, hoursDisplay, hoursEmployees, hoursRounding, mode, state.clockEvents, state.hoursAdjustments, state.hoursRoundingMinutes, scheduleEnforcement.workWeekStart],
   );
   const sortedHoursRows = useMemo(() => [...hoursRows].sort((first, second) => {
     const nameOrder = first.employee.name.localeCompare(second.employee.name, undefined, { sensitivity: "base" });
@@ -1357,8 +1386,8 @@ export default function Home() {
   const viewingRosterEmployeePerformance = useMemo(
     () => viewingRosterEmployeeId === null
       ? null
-      : employeePerformanceFor(state, viewingRosterEmployeeId, currentTime),
-    [currentTime, state, viewingRosterEmployeeId],
+      : employeePerformanceFor(state, viewingRosterEmployeeId, currentTime, scheduleEnforcement),
+    [currentTime, state, viewingRosterEmployeeId, scheduleEnforcement],
   );
   const sortedPtoRequests = useMemo(
     () => (state.ptoRequests ?? [])
@@ -1621,6 +1650,7 @@ export default function Home() {
   }
 
   function messagePtoRequestEmployee() {
+    if (!scheduleEnforcement.enableTeamMessaging) return;
     if (!reviewingPtoRequest || mode !== "manager") return;
 
     const employeeId = reviewingPtoRequest.employeeId;
@@ -1661,6 +1691,10 @@ export default function Home() {
 
   function createTeamConversation(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!scheduleEnforcement.enableTeamMessaging) {
+      setMessageError("Messaging is disabled in location settings.");
+      return;
+    }
     const body = newConversationMessage.trim();
     const recipientIds = ptoMessageEmployeeId === null
       ? newConversationMemberIds
@@ -1737,6 +1771,10 @@ export default function Home() {
 
   function sendTeamMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!scheduleEnforcement.enableTeamMessaging) {
+      setMessageError("Messaging is disabled in location settings.");
+      return;
+    }
     const body = messageDraft.trim();
     if (!selectedConversation || !body) return;
 
@@ -1766,6 +1804,140 @@ export default function Home() {
       ? formatPhoneNumberInput(value)
       : value;
     setBasicInfo((current) => ({ ...current, [field]: nextValue }));
+  }
+
+  function saveScheduleEnforcement(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const draftToSave = schedulingSettingsForSave(scheduleEnforcement, scheduleEnforcementDraft, scheduleEnforcementFields);
+    const normalized = normalizeScheduleEnforcement(draftToSave);
+    if (JSON.stringify(normalized) !== JSON.stringify(draftToSave)) {
+      setScheduleEnforcementMessage("Check the minute limits and choose scheduling hours with an end time after the start time.");
+      return;
+    }
+    try {
+      window.localStorage.setItem(scheduleEnforcementStorageKey, JSON.stringify(normalized));
+      setScheduleEnforcement(normalized);
+      setScheduleEnforcementMessage("Schedule enforcement settings saved.");
+    } catch {
+      setScheduleEnforcementMessage("Settings could not be saved. Please try again.");
+    }
+  }
+
+  function saveAlertsPermissions(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const draftToSave = schedulingSettingsForSave(scheduleEnforcement, scheduleEnforcementDraft, alertsPermissionsFields);
+    const normalized = normalizeScheduleEnforcement(draftToSave);
+    if (JSON.stringify(normalized) !== JSON.stringify(draftToSave)) {
+      setAlertsPermissionsMessage("Enter a missed clock-in alert delay from 0 to 120 minutes.");
+      return;
+    }
+    try {
+      window.localStorage.setItem(scheduleEnforcementStorageKey, JSON.stringify(normalized));
+      setScheduleEnforcement(normalized);
+      setAlertsPermissionsMessage("Alerts & permissions settings saved.");
+    } catch {
+      setAlertsPermissionsMessage("Settings could not be saved. Please try again.");
+    }
+  }
+
+  function canEditScheduleRole(role: string, current = state) {
+    const roles = Array.from(new Set(current.employees.map(employee => employee.role).filter(Boolean)));
+    const departments = current.departments.map(department => ({ ...department, roles: rolesForDepartment(department, current.departments, roles) }));
+    return mode === "manager" && canManageScheduleRole(role, current.employees.find(employee => employee.id === activeEmployeeId), departments, scheduleEnforcement.restrictManagerDepartments);
+  }
+
+  function saveEventsTrades(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const saved = normalizeScheduleEnforcement(schedulingSettingsForSave(scheduleEnforcement, scheduleEnforcementDraft, eventsTradesFields));
+    try {
+      window.localStorage.setItem(scheduleEnforcementStorageKey, JSON.stringify(saved));
+      setScheduleEnforcement(saved);
+      setEventsTradesMessage("Events & trades settings saved.");
+    } catch {
+      setEventsTradesMessage("Settings could not be saved. Please try again.");
+    }
+  }
+
+  function saveOvertime(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const draftToSave = schedulingSettingsForSave(scheduleEnforcement, scheduleEnforcementDraft, overtimeFields);
+    const saved = normalizeScheduleEnforcement(draftToSave);
+    if (JSON.stringify(saved) !== JSON.stringify(draftToSave)) {
+      setOvertimeMessage("Choose a valid start of workweek.");
+      return;
+    }
+    try {
+      window.localStorage.setItem(scheduleEnforcementStorageKey, JSON.stringify(saved));
+      setScheduleEnforcement(saved);
+      setOvertimeMessage("Workweek setting saved.");
+    } catch {
+      setOvertimeMessage("Settings could not be saved. Please try again.");
+    }
+  }
+
+  function saveBreaksCompliance(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const draftToSave = schedulingSettingsForSave(scheduleEnforcement, scheduleEnforcementDraft, breaksComplianceFields);
+    const saved = normalizeScheduleEnforcement(draftToSave);
+    if (JSON.stringify(saved) !== JSON.stringify(draftToSave)) {
+      setBreaksComplianceMessage("Enter a whole-number break frequency from 1 to 24 hours.");
+      return;
+    }
+    try {
+      window.localStorage.setItem(scheduleEnforcementStorageKey, JSON.stringify(saved));
+      setScheduleEnforcement(saved);
+      setBreaksComplianceMessage("Break settings saved.");
+    } catch {
+      setBreaksComplianceMessage("Settings could not be saved. Please try again.");
+    }
+  }
+
+  function saveMessagesSettings(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (mode !== "manager") return;
+    const saved = normalizeScheduleEnforcement(schedulingSettingsForSave(scheduleEnforcement, scheduleEnforcementDraft, messagesSettingsFields));
+    try {
+      window.localStorage.setItem(scheduleEnforcementStorageKey, JSON.stringify(saved));
+      setScheduleEnforcement(saved);
+      if (!saved.enableTeamMessaging) {
+        setIsCreatingConversation(false);
+        setPtoMessageEmployeeId(null);
+        setIsPtoMessageContext(false);
+      }
+      setMessagesSettingsMessage("Messages settings saved.");
+    } catch {
+      setMessagesSettingsMessage("Settings could not be saved. Please try again.");
+    }
+  }
+
+  function openScheduleEvent(date: string, event?: ScheduleEvent) {
+    if (!scheduleEnforcement.enableScheduleEvents || !canViewScheduleEvents) return;
+    if (!event && mode !== "manager") return;
+    setScheduleEventDraft(event ?? { id: 0, date, title: "", notes: "" });
+  }
+
+  function saveScheduleEvent(event: ScheduleEvent) {
+    if (mode !== "manager" || !scheduleEnforcement.enableScheduleEvents || !validEventDate(event.date) || !event.title.trim()) return;
+    setState(current => ({ ...current, scheduleEvents: [
+      ...current.scheduleEvents.filter(saved => saved.id !== event.id),
+      { ...event, id: event.id || nextId(current.scheduleEvents), title: event.title.trim().slice(0, 100), notes: event.notes.trim().slice(0, 500) },
+    ] }));
+    setScheduleEventDraft(null);
+  }
+
+  function deleteScheduleEvent(id: number) {
+    if (mode !== "manager" || !scheduleEnforcement.enableScheduleEvents) return;
+    setState(current => ({ ...current, scheduleEvents: current.scheduleEvents.filter(event => event.id !== id) }));
+    setScheduleEventDraft(null);
+  }
+
+  function scheduleEventList(date: string) {
+    return <ScheduleEventList
+      events={scheduleEventsForDate(state.scheduleEvents, date, scheduleEnforcement.enableScheduleEvents && canViewScheduleEvents)}
+      date={date}
+      canAdd={mode === "manager"}
+      onOpen={openScheduleEvent}
+    />;
   }
 
   function saveBasicInfo() {
@@ -1859,6 +2031,7 @@ export default function Home() {
   }
 
   function navigateToView(view: ViewId) {
+    setScheduleEventDraft(null);
     if (view !== activeView) {
       setRosterSearch("");
       setShowTerminatedEmployees(false);
@@ -1868,6 +2041,7 @@ export default function Home() {
       setRosterMissingFilter("");
     }
     setScheduleTimeOffRequestId(null);
+    setSchedulePermissionError("");
     setIsViewingPtoHistory(false);
     setIsPtoHistoryEmployeeFilterOpen(false);
     setArePtoRequestsExpanded(false);
@@ -2275,6 +2449,7 @@ export default function Home() {
   }
 
   function messageRosterEmployee(employeeId: number) {
+    if (!scheduleEnforcement.enableTeamMessaging) return;
     if (employeeId === activeEmployeeId) return;
 
     const directConversation = (state.conversations ?? []).find((conversation) => (
@@ -2316,6 +2491,40 @@ export default function Home() {
       )),
     }));
     setEditingPayrollEmployeeId(null);
+  }
+
+  function saveAccountProfile(values: ProfileValues): string | null {
+    if (isPublicSchedule || !activeEmployee) return "Sign in to update your profile.";
+    const result = profileUpdate(values, today);
+    if (result.error) return result.error;
+    const update = { ...result.update, phone: formatPhoneNumberInput(result.update.phone), emergencyContactPhone: formatPhoneNumberInput(result.update.emergencyContactPhone) };
+    if (hasEmployeeWithName(state.employees, update.name, activeEmployeeId)) return "Name already in use.";
+    if (accountOwnerEmployeeId === activeEmployeeId && update.name !== activeEmployee.name) {
+      const savedInfo = { ...JSON.parse(savedBasicInfoSnapshot), accountOwner: update.name } as BasicInfo;
+      try {
+        window.localStorage.setItem(basicInfoStorageKey, JSON.stringify(savedInfo));
+      } catch {
+        return "Profile could not be saved. Please try again.";
+      }
+      setBasicInfo(current => ({ ...current, accountOwner: update.name }));
+      setSavedBasicInfoSnapshot(JSON.stringify(savedInfo));
+    }
+    setState(current => ({ ...current, employees: current.employees.map(employee => employee.id === activeEmployeeId ? { ...employee, ...update } : employee) }));
+    return null;
+  }
+
+  function accountProfilePanel() {
+    if (!activeEmployee) return null;
+    return <AccountProfilePanel key={activeEmployee.id}
+      values={profileValues(activeEmployee)} name={activeEmployee.name}
+      companyName={savedBasicInfo.companyName.trim() || sidebarLocationName}
+      position={activeEmployee.role} startDate={activeEmployee.startDate}
+      endDate={activeEmployee.terminated ? activeEmployee.terminationDate : undefined}
+      certificates={activeEmployee.certificates ?? []} certificateError={certificateDownloadError}
+      addCertificateRef={addCertificateButtonRef}
+      onAddCertificate={() => openCertificateModal(activeEmployee.id)} onDownloadCertificate={downloadCertificate}
+      onSave={saveAccountProfile} formatPhone={formatPhoneNumberInput}
+    />;
   }
 
   function startEditingPersonalContact(employee: Employee) {
@@ -2552,6 +2761,10 @@ export default function Home() {
 
   function saveShift(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!canEditScheduleRole(shiftForm.role)) {
+      setCreateShiftError("You can only create shifts for roles in your assigned departments.");
+      return;
+    }
     if (!shiftEmployeeIds.has(shiftForm.employeeId) || !shiftForm.date || !shiftForm.role.trim()) {
       setCreateShiftError("Date, clock-in time, clock-out time, and role are required.");
       return;
@@ -2572,7 +2785,7 @@ export default function Home() {
       return;
     }
 
-    const shiftDates = shiftDatesForWeekdays(shiftForm.date, createShiftWeekdays);
+    const shiftDates = shiftDatesForWeekdays(shiftForm.date, createShiftWeekdays, scheduleEnforcement.workWeekStart);
     const duplicateDate = shiftDates.find((date) => workingScheduleShifts.some((shift) => (
       shift.id !== shiftForm.id
       && shift.employeeId === shiftForm.employeeId
@@ -3064,7 +3277,7 @@ export default function Home() {
 
     const requestedHours = enteredHours + enteredMinutes / 60;
 
-    const range = hoursDateRange(hoursDate, activeHoursTab);
+    const range = hoursDateRange(hoursDate, activeHoursTab, scheduleEnforcement.workWeekStart);
     const currentHours = adjustedWorkedHoursForRange(
       state.clockEvents,
       state.hoursAdjustments ?? [],
@@ -3096,6 +3309,11 @@ export default function Home() {
 
   function openShiftEditor(shift: Shift) {
     if (mode !== "manager") return;
+    if (!canEditScheduleRole(shift.role)) {
+      setSchedulePermissionError("You can only edit shifts for roles in your assigned departments.");
+      return;
+    }
+    setSchedulePermissionError("");
     setEditShiftError("");
     setEditingShift({ ...shift, notes: shift.notes ?? "" });
     setEditingShiftWeekdays([weekdayForDate(shift.date)]);
@@ -3106,6 +3324,10 @@ export default function Home() {
     if (!editingShift) return;
 
     const savedShift = workingScheduleShifts.find((shift) => shift.id === editingShift.id);
+    if (!canEditScheduleRole(editingShift.role) || (savedShift && !canEditScheduleRole(savedShift.role))) {
+      setEditShiftError("You can only edit shifts for roles in your assigned departments.");
+      return;
+    }
     const start = parseTypedTime(editingShift.start);
     const end = parseTypedTime(editingShift.end);
     const role = editingShift.role.trim();
@@ -3146,7 +3368,7 @@ export default function Home() {
     }
     const targetDates = Array.from(new Set([
       editingShift.date,
-      ...shiftDatesForWeekdays(editingShift.date, editingShiftWeekdays),
+      ...shiftDatesForWeekdays(editingShift.date, editingShiftWeekdays, scheduleEnforcement.workWeekStart),
     ]));
     if (shiftHasStarted && savedShift && targetDates.some((date) => date !== savedShift.date)) {
       setEditShiftError("Days cannot be added after a shift starts.");
@@ -3238,16 +3460,23 @@ export default function Home() {
 
   function publishSchedule() {
     if (mode !== "manager") return;
+    if (activeScheduleDraft && !scheduleDraftIsAllowed(activeScheduleDraft, state.shifts, role => canEditScheduleRole(role))) {
+      setSchedulePermissionError("This draft contains shifts outside your assigned departments. Ask an admin to publish it.");
+      return;
+    }
+    setSchedulePermissionError("");
     const publishedAt = new Date().toISOString();
     const publishId = Date.now();
     setState((current) => {
       const scheduleDraft = current.scheduleDraftsByManager?.[activeEmployeeId];
       if (!scheduleDraft) return current;
+      if (!scheduleDraftIsAllowed(scheduleDraft, current.shifts, role => canEditScheduleRole(role, current))) return current;
       const publishedShifts = applyScheduleDraft(current.shifts, scheduleDraft);
       const publisherName = current.employees.find((employee) => employee.id === activeEmployeeId)?.name ?? "A manager";
       const scheduleUpdates = [
         ...(current.scheduleUpdates ?? []).slice(-200),
         ...current.employees
+          .filter(employee => scheduleEnforcement.notifyScheduleChanges && employee.active && employee.locationSettings.sendLocationAlerts)
           .map((employee) => ({
             id: `${publishId}-${employee.id}`,
             employeeId: employee.id,
@@ -3274,7 +3503,7 @@ export default function Home() {
   }
 
   function requestTimeException(action: TimeExceptionAction) {
-    if (!needsTimeException(action, myShift, activeBreakEndTime, currentTime)) {
+    if (!needsTimeException(action, myShift, activeBreakEndTime, currentTime, scheduleEnforcement)) {
       if (action === "break_end") finishBreak();
       else clock(action);
       return;
@@ -3370,9 +3599,10 @@ export default function Home() {
           id: nextId(current.availabilityRequests ?? []),
           employeeId: activeEmployeeId,
           effectiveDate,
-          status: "pending",
+          status: scheduleEnforcement.requireAvailabilityApproval ? "pending" : "approved",
           slots,
           submittedAt: new Date().toISOString(),
+          decidedAt: scheduleEnforcement.requireAvailabilityApproval ? undefined : new Date().toISOString(),
           requestNote: note.trim() || undefined,
         },
       ],
@@ -3636,9 +3866,10 @@ export default function Home() {
                               placeholder="Write a message"
                               aria-label="New message text"
                               rows={2}
+                              disabled={!scheduleEnforcement.enableTeamMessaging}
                               required
                             />
-                            <button type="submit" disabled={!newConversationMessage.trim()}>Send</button>
+                            <button type="submit" disabled={!scheduleEnforcement.enableTeamMessaging || !newConversationMessage.trim()}>Send</button>
                             {messageError ? <p className="message-error">{messageError}</p> : null}
                           </form>
                         </div>
@@ -3681,10 +3912,11 @@ export default function Home() {
                             placeholder="Write a message"
                             aria-label="New message text"
                             rows={3}
+                            disabled={!scheduleEnforcement.enableTeamMessaging}
                             required
                           />
                           {messageError ? <p className="message-error">{messageError}</p> : null}
-                          <button type="submit" className="start-chat-button">Start chat</button>
+                          <button type="submit" className="start-chat-button" disabled={!scheduleEnforcement.enableTeamMessaging}>Start chat</button>
                         </form>
                       ) : viewingConversationInfo ? (
                         <div className="conversation-info-view">
@@ -3803,8 +4035,10 @@ export default function Home() {
                               placeholder="Write a message"
                               aria-label="Reply message"
                               rows={2}
+                              disabled={!scheduleEnforcement.enableTeamMessaging}
+                              title={!scheduleEnforcement.enableTeamMessaging ? "Messaging is disabled in location settings" : undefined}
                             />
-                            <button type="submit" disabled={!messageDraft.trim()}>Send</button>
+                            <button type="submit" disabled={!scheduleEnforcement.enableTeamMessaging || !messageDraft.trim()}>Send</button>
                           </form>
                         </div>
                       ) : (
@@ -3915,6 +4149,8 @@ export default function Home() {
                           <button
                             type="button"
                             className="new-message-button"
+                            disabled={!scheduleEnforcement.enableTeamMessaging}
+                            title={!scheduleEnforcement.enableTeamMessaging ? "Messaging is disabled in location settings" : undefined}
                             onClick={() => {
                               setIsCreatingConversation(true);
                               setPtoMessageEmployeeId(null);
@@ -4052,16 +4288,7 @@ export default function Home() {
           </header>
 
           {activeView === "profile" && !isPublicSchedule ? (
-            <section className="panel feature-panel account-profile-panel">
-              <span className="profile-avatar" aria-hidden="true">
-                {activeEmployee?.name.trim().charAt(0).toUpperCase() || "A"}
-              </span>
-              <div>
-                <p className="eyebrow">Account profile</p>
-                <h3>{activeEmployee?.name ?? "Account"}</h3>
-                <p>{activeEmployee?.role ?? capitalize(mode)}</p>
-              </div>
-            </section>
+            accountProfilePanel()
           ) : null}
 
           {activeView === "team_members" && !isPublicSchedule ? (
@@ -4158,6 +4385,218 @@ export default function Home() {
                       ))}
                     </div>
                     <button type="button" onClick={openAddLocationModal}>Add a new location</button>
+                  </section>
+                </section>
+              ) : activeSettingsTab === "Schedule enforcement" ? (
+                <ScheduleEnforcementPanel
+                  settings={scheduleEnforcementDraft}
+                  dirty={isScheduleEnforcementDirty}
+                  message={scheduleEnforcementMessage}
+                  onChange={(changes) => {
+                    setScheduleEnforcementDraft((current) => ({ ...current, ...changes }));
+                    setScheduleEnforcementMessage("");
+                    setAlertsPermissionsMessage("");
+                    setOvertimeMessage("");
+                  }}
+                  onSave={saveScheduleEnforcement}
+                />
+              ) : activeSettingsTab === "Alerts & permissions" ? (
+                <AlertsPermissionsPanel
+                  settings={scheduleEnforcementDraft}
+                  dirty={isAlertsPermissionsDirty}
+                  message={alertsPermissionsMessage}
+                  onChange={(changes) => {
+                    setScheduleEnforcementDraft(current => ({ ...current, ...changes }));
+                    setAlertsPermissionsMessage("");
+                    setScheduleEnforcementMessage("");
+                  }}
+                  onSave={saveAlertsPermissions}
+                />
+              ) : activeSettingsTab === "Events & trades" ? (
+                <EventsTradesPanel
+                  settings={scheduleEnforcementDraft}
+                  dirty={isEventsTradesDirty}
+                  message={eventsTradesMessage}
+                  onChange={changes => {
+                    setScheduleEnforcementDraft(current => ({ ...current, ...changes }));
+                    setEventsTradesMessage("");
+                  }}
+                  onSave={saveEventsTrades}
+                />
+              ) : activeSettingsTab === "Time clock options" ? (
+                <TimeClockOptionsPanel roundingMinutes={state.hoursRoundingMinutes} onLaunch={() => navigateToView("dashboard")} />
+              ) : activeSettingsTab === "Overtime" ? (
+                <OvertimeOptionsPanel
+                  weekStart={scheduleEnforcementDraft.workWeekStart}
+                  dirty={isOvertimeDirty}
+                  message={overtimeMessage}
+                  onWeekStartChange={day => {
+                    setScheduleEnforcementDraft(current => ({ ...current, workWeekStart: day }));
+                    setOvertimeMessage("");
+                    setScheduleEnforcementMessage("");
+                  }}
+                  onSave={saveOvertime}
+                />
+              ) : activeSettingsTab === "Breaks & compliance" ? (
+                <BreaksCompliancePanel
+                  afterHours={scheduleEnforcementDraft.mealBreakAfterHours}
+                  mandatory={scheduleEnforcementDraft.mandatoryMealBreak}
+                  dirty={isBreaksComplianceDirty}
+                  message={breaksComplianceMessage}
+                  onChange={changes => {
+                    setScheduleEnforcementDraft(current => ({ ...current, ...changes }));
+                    setBreaksComplianceMessage("");
+                  }}
+                  onSave={saveBreaksCompliance}
+                />
+              ) : activeSettingsTab === "Tip settings" ? (
+                <section className="panel settings-enforcement-panel settings-tips-panel">
+                  <div className="settings-panel-heading">
+                    <h3>Tip settings</h3>
+                    <button type="button" disabled>Save</button>
+                  </div>
+                  <div className="enforcement-rules">
+                    <div className="enforcement-rule">
+                      <label className="enforcement-rule-line" title="Not available yet">
+                        <input type="checkbox" disabled />
+                        <span>Import tips from timesheets when running payroll through DomBase</span>
+                      </label>
+                      <p>You&apos;ll still be able to review and edit tips before running payroll.</p>
+                    </div>
+                  </div>
+                </section>
+              ) : activeSettingsTab === "Payroll settings" ? (
+                <section className="panel settings-enforcement-panel settings-payroll-panel">
+                  <div className="settings-panel-heading">
+                    <h3>Payroll settings</h3>
+                    <button type="button" disabled>Save</button>
+                  </div>
+                  <div className="payroll-schedule-settings">
+                    <h4>Pay schedule</h4>
+                    <p>Get all your systems working together to save money and time.</p>
+                    <button type="button" className="payroll-settings-link" disabled title="Not available yet">Learn more</button>
+                    <div className="payroll-schedule-fields">
+                      <label title="Not available yet">
+                        <span>Our team gets paid</span>
+                        <select disabled defaultValue="monthly">
+                          <option value="monthly">once a month</option>
+                        </select>
+                      </label>
+                      <label title="Not available yet">
+                        <span>Our payroll periods begin on the</span>
+                        <select disabled defaultValue="1">
+                          <option value="1">1st</option>
+                        </select>
+                      </label>
+                    </div>
+                  </div>
+                  <div className="payroll-running-settings">
+                    <h4>Running payroll</h4>
+                    <div className="enforcement-rule">
+                      <label className="enforcement-rule-line" title="Not available yet">
+                        <input type="checkbox" disabled />
+                        <span>Lock timesheets after approval</span>
+                      </label>
+                      <p>With this enabled, timesheets cannot be edited after approval</p>
+                    </div>
+                  </div>
+                </section>
+              ) : activeSettingsTab === "Time off" ? (
+                <section className="panel settings-enforcement-panel settings-time-off-panel">
+                  <div className="settings-panel-heading">
+                    <h3>Time off</h3>
+                    <button type="button" disabled>Save</button>
+                  </div>
+                  <h4>Time off policy</h4>
+                  <div className="enforcement-rules">
+                    <div className="enforcement-rule-line" title="Not available yet">
+                      <label>
+                        <input type="checkbox" checked disabled />
+                        <span>Limit time off requests to no more than</span>
+                      </label>
+                      <input type="number" className="time-off-policy-number" defaultValue={2} disabled aria-label="Maximum people requesting time off per day" />
+                      <span>people per day</span>
+                    </div>
+                    <div className="enforcement-rule-line" title="Not available yet">
+                      <label>
+                        <input type="checkbox" disabled />
+                        <span>Do not allow time off requests less than</span>
+                      </label>
+                      <input type="number" className="time-off-policy-number" defaultValue={7} disabled aria-label="Minimum days in advance for time off requests" />
+                      <span>days in advance</span>
+                    </div>
+                  </div>
+                  <button type="button" className="time-off-manage-policies" onClick={() => {
+                    navigateToView("time_off");
+                    setIsViewingPtoPolicies(true);
+                  }}>Manage PTO policies in the Time off dashboard</button>
+                </section>
+              ) : activeSettingsTab === "Messages" ? (
+                <MessagesSettingsPanel
+                  enabled={scheduleEnforcementDraft.enableTeamMessaging}
+                  dirty={isMessagesSettingsDirty}
+                  message={messagesSettingsMessage}
+                  today={today}
+                  onChange={enabled => {
+                    setScheduleEnforcementDraft(current => ({ ...current, enableTeamMessaging: enabled }));
+                    setMessagesSettingsMessage("");
+                  }}
+                  onSave={saveMessagesSettings}
+                />
+              ) : activeSettingsTab === "Team permissions" ? (
+                <TeamPermissionsPanel />
+              ) : activeSettingsTab === "Manager Log" ? (
+                <section className="panel settings-enforcement-panel settings-manager-log-panel">
+                  <div className="settings-panel-heading">
+                    <h3>Manager Log</h3>
+                    <button type="button" disabled>Save</button>
+                  </div>
+                  <p className="manager-log-intro">
+                    Capture photos, track events and manage tasks in one place. Save hours on write ups, paperwork, maintenance orders and customer incidents.{" "}
+                    <button type="button" className="manager-log-link" disabled title="Not available yet">Learn more</button>
+                  </p>
+                  <div className="manager-log-option-card enforcement-rule">
+                    <label className="enforcement-rule-line" title="Not available yet">
+                      <input type="checkbox" checked disabled />
+                      <span>Manager Log</span>
+                    </label>
+                    <p>Share information from shift to shift by writing notes that are stored in DomBase. Keep sales, weather, and staff attendance information together.</p>
+                  </div>
+                  <button type="button" className="manager-log-link manager-log-dashboard-link" disabled title="Not available yet">Go to your Manager Log</button>
+                </section>
+              ) : activeSettingsTab === "Profile" ? (
+                accountProfilePanel()
+              ) : activeSettingsTab === "Locations & PINs" ? (
+                !isPublicSchedule && activeEmployee ? <LocationsPinsPanel
+                  key={`${activeEmployee.id}-${activeEmployee.pin}-${activeEmployee.location}`}
+                  locationName={activeEmployee.location.trim() || sidebarLocationName}
+                  pin={activeEmployee.pin}
+                /> : null
+              ) : activeSettingsTab === "Notifications" ? (
+                <NotificationsSettingsPanel locationName={activeEmployee?.location.trim() || sidebarLocationName} />
+              ) : activeSettingsTab === "Password & security" ? (
+                <section className="panel settings-enforcement-panel settings-security-panel">
+                  <div className="settings-panel-heading"><h3>Password &amp; security</h3></div>
+                  <section className="account-security-section" aria-labelledby="account-password-heading">
+                    <div className="account-security-section-heading">
+                      <h4 id="account-password-heading">Password</h4>
+                      <button type="button" disabled title="Password sign-in is not available yet">Change password</button>
+                    </div>
+                    <div className="account-security-status">
+                      <h5>Status</h5>
+                      <p>Your account uses a PIN to sign in.</p>
+                    </div>
+                  </section>
+                  <section className="account-security-section" aria-labelledby="account-security-heading">
+                    <h4 id="account-security-heading">Security</h4>
+                    <div className="account-security-section-heading">
+                      <p>2-Step Verification enhances your account security.</p>
+                      <button type="button" disabled title="Not available yet">Turn on 2-Step Verification</button>
+                    </div>
+                    <div className="account-security-status">
+                      <h5>Status</h5>
+                      <p className="account-verification-status"><span aria-hidden="true">−</span><strong>2-Step Verification is off</strong></p>
+                    </div>
                   </section>
                 </section>
               ) : (
@@ -4512,6 +4951,7 @@ export default function Home() {
                           type="button"
                           className="team-member-message"
                           onClick={() => messageRosterEmployee(viewingRosterEmployee.id)}
+                          disabled={!scheduleEnforcement.enableTeamMessaging}
                         >
                           Message
                         </button>
@@ -5313,6 +5753,8 @@ export default function Home() {
               </div>
               {(mode === "employee" || mode === "manager") && (
                 <div className="employee-schedule">
+                  {schedulePermissionError ? <p className="schedule-permission-message" role="alert">{schedulePermissionError}</p> : null}
+                  {isPublicSchedule && scheduleEnforcement.employeesOwnScheduleOnly ? <p className="schedule-permission-message">Sign in with your PIN to view your schedule.</p> : null}
                   <div className="employee-schedule-tabs" role="tablist" aria-label="Schedule view">
                     {(["day", "week"] as EmployeeScheduleTab[]).map((tab) => (
                       <button
@@ -5352,15 +5794,18 @@ export default function Home() {
                     />
                     {employeeScheduleTab === "day" ? (
                       visibleScheduleEmployees.length > 0 ? (
-                        <div className="schedule-chart" aria-label={`Team schedule for ${formatLongDate(scheduleDate)}`}>
+                        <div className="schedule-chart" style={{ "--schedule-hour-width": `${100 / scheduleHourLabels.length}%` } as CSSProperties} aria-label={`Team schedule for ${formatLongDate(scheduleDate)}`}>
                           <div className="schedule-chart-header">
                             <div className="shift-day-member-heading" aria-hidden="true" />
-                            <div className="schedule-time-grid">
+                            <div className="schedule-time-grid" style={{ gridTemplateColumns: `repeat(${scheduleHourLabels.length}, minmax(0, 1fr))` }}>
                               {scheduleHourLabels.map((hour) => (
                                 <span key={hour}>{formatHourLabel(hour)}</span>
                               ))}
                             </div>
                           </div>
+                          {scheduleEnforcement.enableScheduleEvents && canViewScheduleEvents ? (
+                            <div className="schedule-events-day-row"><strong>Events</strong>{scheduleEventList(scheduleDate)}</div>
+                          ) : null}
                           <div className="shift-day-section-label">Team members ({visibleScheduleEmployees.length})</div>
                           {visibleScheduleEmployees.map((employee) => {
                             const employeeShifts = scheduleDayShifts.filter((shift) => shift.employeeId === employee.id);
@@ -5400,7 +5845,7 @@ export default function Home() {
                                     <div
                                       className={`${shift.employeeId === activeEmployeeId ? "schedule-bar mine" : "schedule-bar"}${mode === "manager" ? " editable" : ""}${draftShiftIds.has(shift.id) ? " draft" : ""}`}
                                       key={shift.id}
-                                      style={scheduleBarStyle(shift)}
+                                      style={scheduleBarStyle(shift, scheduleEnforcement)}
                                       title={`${employee.name}: ${formatTimeRange(shift)} ${shift.role}`}
                                       role={mode === "manager" ? "button" : undefined}
                                       tabIndex={mode === "manager" ? 0 : undefined}
@@ -5438,7 +5883,10 @@ export default function Home() {
                           })}
                         </div>
                       ) : (
-                        <EmptyState text="No team members match the selected filters." />
+                        <>
+                          {scheduleEnforcement.enableScheduleEvents && canViewScheduleEvents ? <div className="schedule-events-day-row"><strong>Events</strong>{scheduleEventList(scheduleDate)}</div> : null}
+                          <EmptyState text="No team members match the selected filters." />
+                        </>
                       )
                     ) : employeeScheduleTab === "week" ? (
                       <div className="shift-week-board" role="table" aria-label="Weekly team schedule">
@@ -5455,6 +5903,12 @@ export default function Home() {
                             {weekday(day.date).slice(0, 3)}, {parseLocalDate(day.date).getDate()}
                           </button>
                         ))}
+                        {scheduleEnforcement.enableScheduleEvents && canViewScheduleEvents ? (
+                          <div className="shift-week-row schedule-events-week-row" role="row">
+                            <div className="shift-week-member" role="rowheader"><strong>Events</strong></div>
+                            {scheduleWeekDays.map(day => <div className="shift-week-cell schedule-events-cell" role="cell" key={day.date}>{scheduleEventList(day.date)}</div>)}
+                          </div>
+                        ) : null}
                         <div className="shift-week-section-label">Team members ({visibleScheduleEmployees.length})</div>
                         {visibleScheduleEmployees.map((employee) => {
                           const employeeWeekShifts = scheduleWeekDays.flatMap((day) => day.shifts.filter((shift) => shift.employeeId === employee.id));
@@ -5512,10 +5966,10 @@ export default function Home() {
                       </div>
                     ) : (
                       <div className="shift-month-board" aria-label={`Monthly schedule for ${formatMonthYear(scheduleDate)}`}>
-                        {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((label) => <strong className="shift-month-weekday" key={label}>{label}</strong>)}
+                        {workWeekCalendarDays(scheduleDate, scheduleEnforcement.workWeekStart).map((day) => <strong className="shift-month-weekday" key={day.date}>{parseLocalDate(day.date).toLocaleDateString("en-US", { weekday: "short" })}</strong>)}
                         {scheduleMonthDays.map((day) => {
                           const visibleDayShifts = day.shifts.filter((shift) => visibleEmployeeIds === null || visibleEmployeeIds.includes(shift.employeeId));
-                          const timeOffRequests = (state.ptoRequests ?? []).filter((request) => request.status === "approved" && request.startDate <= day.date && request.endDate >= day.date && (visibleEmployeeIds === null || visibleEmployeeIds.includes(request.employeeId)));
+                          const timeOffRequests = (state.ptoRequests ?? []).filter((request) => shiftEmployeeIds.has(request.employeeId) && request.status === "approved" && request.startDate <= day.date && request.endDate >= day.date && (visibleEmployeeIds === null || visibleEmployeeIds.includes(request.employeeId)));
                           const hasDayContent = visibleDayShifts.length > 0 || timeOffRequests.length > 0;
 
                           return (
@@ -5531,6 +5985,7 @@ export default function Home() {
                               <button type="button" className="shift-month-date" onClick={() => { setScheduleDate(day.date); setEmployeeScheduleTab("day"); }}>
                                 {day.day === "1" ? `${parseLocalDate(day.date).toLocaleDateString("en-US", { month: "short" })} 1` : day.day}
                               </button>
+                              {scheduleEnforcement.enableScheduleEvents && canViewScheduleEvents ? scheduleEventList(day.date) : null}
                               {visibleDayShifts.map((shift) => {
                                 const employee = employeeById(state.employees, shift.employeeId);
                                 return (
@@ -5622,7 +6077,7 @@ export default function Home() {
                     >
                       <span>{employee?.name ?? "Unknown"}</span>
                       <span>{employee?.role ?? "Unassigned"}</span>
-                      <span>{clockEventLabel(item.event, state.shifts)}</span>
+                      <span>{clockEventLabel(item.event, state.shifts, scheduleEnforcement)}</span>
                       <span>{formatDateTime(item.event.at)}</span>
                       <span className="event-explanation"><span>{explanation}</span></span>
                     </div>
@@ -5678,7 +6133,7 @@ export default function Home() {
                     </button>
                     <label className="shift-date-control">
                       <input type="date" value={hoursDate} onClick={openNativeDatePicker} onInput={(event) => { const date = event.currentTarget.value; if (date) setHoursDate(date); }} aria-label="Hours date" />
-                      <strong>{hoursDateLabel(activeHoursTab, hoursDate)}</strong>
+                      <strong>{hoursDateLabel(activeHoursTab, hoursDate, scheduleEnforcement.workWeekStart)}</strong>
                     </label>
                     <button type="button" className="shift-arrow-button" onClick={() => moveHoursDate(1)} aria-label={`Next ${hoursTabControlLabel(activeHoursTab)}`}>
                       <span aria-hidden="true">›</span>
@@ -6091,6 +6546,7 @@ export default function Home() {
             <AvailabilityBoard
               effectiveDate={today}
               employee={activeEmployee}
+              approvalRequired={scheduleEnforcement.requireAvailabilityApproval}
               locations={availableLocations}
               latestRequest={activeAvailabilityRequest}
               onRequestApproval={submitAvailabilityRequest}
@@ -6101,6 +6557,7 @@ export default function Home() {
             <TeamAvailabilityBoard
               employees={activeEmployees}
               initialDate={today}
+              workWeekStart={scheduleEnforcement.workWeekStart}
               locations={availableLocations}
               requests={state.availabilityRequests ?? []}
               reviewerId={activeEmployeeId}
@@ -6488,7 +6945,7 @@ export default function Home() {
                         checked={ptoPolicyForm.method === "rate"}
                         onChange={() => setPtoPolicyForm((form) => form ? { ...form, method: "rate" } : form)}
                       />
-                      <span>Rate <small>(example: 1 hour per 30 worked)</small></span>
+                      <span>Rate <small>(example: 1 hour per 30 hours worked)</small></span>
                     </label>
                   </fieldset>
                 </div>
@@ -6734,6 +7191,16 @@ export default function Home() {
         </div>
       ) : null}
 
+      {scheduleEventDraft && scheduleEnforcement.enableScheduleEvents && canViewScheduleEvents ? (
+        <ScheduleEventDialog
+          event={scheduleEventDraft}
+          editable={mode === "manager"}
+          onSave={saveScheduleEvent}
+          onDelete={deleteScheduleEvent}
+          onClose={() => setScheduleEventDraft(null)}
+        />
+      ) : null}
+
       {mode === "manager" && reviewingPtoRequest ? (
         <div
           className="modal-backdrop"
@@ -6782,7 +7249,7 @@ export default function Home() {
               </p>
             ) : (
               <>
-                <button type="button" className="pto-message-employee-action" onClick={messagePtoRequestEmployee}>
+                <button type="button" className="pto-message-employee-action" onClick={messagePtoRequestEmployee} disabled={!scheduleEnforcement.enableTeamMessaging}>
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" />
                   </svg>
@@ -6922,7 +7389,7 @@ export default function Home() {
               <div>
                 <p className="eyebrow">Edit worked time</p>
                 <h2 id="hours-edit-title">{editingHours.employee.name}</h2>
-                <p>{hoursDateLabel(activeHoursTab, hoursDate)}</p>
+                <p>{hoursDateLabel(activeHoursTab, hoursDate, scheduleEnforcement.workWeekStart)}</p>
               </div>
               <button type="button" onClick={() => setEditingHours(null)} aria-label="Close hours editor">
                 <span aria-hidden="true">&times;</span>
@@ -7058,7 +7525,7 @@ export default function Home() {
                 required
               >
                 <option value="">Select role</option>
-                {availableRoles.map((role) => (
+                {availableRoles.filter(role => canEditScheduleRole(role)).map((role) => (
                   <option value={role} key={role}>{role}</option>
                 ))}
               </select>
@@ -7068,12 +7535,12 @@ export default function Home() {
               <div>
                 {shiftWeekdayOptions.map((option) => (
                   <span className="shift-apply-day-option" key={option.value}>
-                    <span className="shift-apply-day-date">{formatShiftApplyDate(shiftForm.date, option.value)}</span>
+                    <span className="shift-apply-day-date">{formatShiftApplyDate(shiftForm.date, option.value, scheduleEnforcement.workWeekStart)}</span>
                     <button
                       type="button"
                       className={createShiftWeekdays.includes(option.value) ? "active" : ""}
                       onClick={() => toggleCreateShiftWeekday(option.value)}
-                      aria-label={`${option.label}, ${formatShiftApplyDate(shiftForm.date, option.value)}`}
+                      aria-label={`${option.label}, ${formatShiftApplyDate(shiftForm.date, option.value, scheduleEnforcement.workWeekStart)}`}
                       aria-pressed={createShiftWeekdays.includes(option.value)}
                     >
                       {option.label}
@@ -7172,7 +7639,7 @@ export default function Home() {
                 disabled={editingShiftHasStarted}
               >
                 <option value="">Select role</option>
-                {availableRoles.map((role) => (
+                {availableRoles.filter(role => canEditScheduleRole(role)).map((role) => (
                   <option value={role} key={role}>{role}</option>
                 ))}
               </select>
@@ -7184,12 +7651,12 @@ export default function Home() {
                   const isAnchorDay = option.value === weekdayForDate(editingShift.date);
                   return (
                     <span className="shift-apply-day-option" key={option.value}>
-                      <span className="shift-apply-day-date">{formatShiftApplyDate(editingShift.date, option.value)}</span>
+                      <span className="shift-apply-day-date">{formatShiftApplyDate(editingShift.date, option.value, scheduleEnforcement.workWeekStart)}</span>
                       <button
                         type="button"
                         className={editingShiftWeekdays.includes(option.value) ? "active" : ""}
                         onClick={() => toggleEditingShiftWeekday(option.value)}
-                        aria-label={`${option.label}, ${formatShiftApplyDate(editingShift.date, option.value)}`}
+                        aria-label={`${option.label}, ${formatShiftApplyDate(editingShift.date, option.value, scheduleEnforcement.workWeekStart)}`}
                         aria-pressed={editingShiftWeekdays.includes(option.value)}
                         disabled={editingShiftHasStarted || isAnchorDay}
                       >
@@ -7309,7 +7776,7 @@ function isManagerEmployee(employee: Employee) {
   return employee.accessLevel === "Admin" || employee.accessLevel === "Manager";
 }
 
-function applyAutomaticClockOuts(state: StaffState, currentTime: number): StaffState {
+function applyAutomaticClockOuts(state: StaffState, currentTime: number, settings: ScheduleEnforcement = defaultScheduleEnforcement): StaffState {
   let clockEventId = nextId(state.clockEvents);
   const automaticClockOuts = state.employees.flatMap((employee) => {
     const latestWorkEvent = lastWorkClockEvent(state.clockEvents, employee.id);
@@ -7318,15 +7785,16 @@ function applyAutomaticClockOuts(state: StaffState, currentTime: number): StaffS
     const shift = shiftForClockEvent(latestWorkEvent, state.shifts);
     if (!shift) return [];
 
-    const automaticClockOutTime = shiftEndDateTime(shift).getTime() + automaticClockOutDelayMs;
-    if (currentTime < automaticClockOutTime) return [];
+    const automaticClockOutTime = automaticClockOutAt(shiftEndDateTime(shift).getTime(), settings);
+    if (automaticClockOutTime === null || currentTime < automaticClockOutTime) return [];
 
     return [{
       id: clockEventId++,
       employeeId: employee.id,
       type: "out" as const,
       at: new Date(automaticClockOutTime).toISOString(),
-      explanation: automaticClockOutExplanation,
+      explanation: settings.automaticClockOutMinutes === 120 ? automaticClockOutExplanation : `Automatically clocked out ${settings.automaticClockOutMinutes} minutes after the scheduled shift ended.`,
+      automatic: true,
     }];
   });
 
@@ -7336,6 +7804,10 @@ function applyAutomaticClockOuts(state: StaffState, currentTime: number): StaffS
     ...state,
     clockEvents: [...automaticClockOuts, ...state.clockEvents],
   };
+}
+
+function isAutomaticClockOut(event: ClockEvent) {
+  return event.type === "out" && (event.automatic === true || event.explanation === automaticClockOutExplanation);
 }
 
 function hasClockInForShift(shift: Shift, events: ClockEvent[], shifts: Shift[]) {
@@ -7350,13 +7822,15 @@ function noShowAlertsFor(
   events: ClockEvent[],
   currentTime: number,
   lookbackStart = Number.NEGATIVE_INFINITY,
+  settings: ScheduleEnforcement = defaultScheduleEnforcement,
 ): OperationalAlert[] {
+  if (!settings.noShowAlerts) return [];
   return shifts.flatMap((shift) => {
     const employee = employees.find((entry) => entry.id === shift.employeeId);
     if (!employee?.active) return [];
 
     const scheduledStart = shiftStartDateTime(shift);
-    const alertTime = scheduledStart.getTime() + missedClockInGraceMs;
+    const alertTime = scheduledStart.getTime() + settings.noShowMinutes * 60000;
     if (alertTime > currentTime || alertTime < lookbackStart) return [];
     if (hasClockInForShift(shift, events, shifts)) return [];
 
@@ -7377,8 +7851,10 @@ function operationalAlertsFor(
   shifts: Shift[],
   events: ClockEvent[],
   currentTime: number,
+  settings: ScheduleEnforcement = defaultScheduleEnforcement,
 ): OperationalAlert[] {
   const alerts: OperationalAlert[] = [];
+  const missedBreakThresholdMs = settings.mealBreakAfterHours * 60 * 60 * 1000;
   const lookbackStart = currentTime - operationalAlertLookbackMs;
   const employeeNames = new Map(employees.map((employee) => [employee.id, employee.name]));
   const eventsAscending = [...events].sort((first, second) => first.at.localeCompare(second.at));
@@ -7407,7 +7883,7 @@ function operationalAlertsFor(
       }
 
       const scheduledTime = event.type === "in" ? shiftStartDateTime(shift) : shiftEndDateTime(shift);
-      if (event.type === "out" && event.explanation === automaticClockOutExplanation) {
+      if (event.type === "out" && isAutomaticClockOut(event)) {
         alerts.push({
           id: `automatic-clock-out-${event.id}`,
           employeeId: event.employeeId,
@@ -7421,7 +7897,7 @@ function operationalAlertsFor(
       }
 
       const isWithinAllowedWindow = event.type === "in"
-        ? isWithinClockInGrace(eventTime, scheduledTime.getTime())
+        ? isWithinClockInGrace(eventTime, scheduledTime.getTime(), settings)
         : isWithinScheduledMinute(eventTime, scheduledTime.getTime());
       if (isWithinAllowedWindow) return;
 
@@ -7472,13 +7948,13 @@ function operationalAlertsFor(
 
     const clockOutTime = new Date(event.at).getTime();
     const clockInTime = new Date(session.clockIn.at).getTime();
-    if (!session.tookBreak && clockOutTime - clockInTime >= missedBreakThresholdMs && clockOutTime >= lookbackStart) {
+    if (settings.mandatoryMealBreak && !session.tookBreak && clockOutTime - clockInTime >= missedBreakThresholdMs && clockOutTime >= lookbackStart) {
       const employeeName = employeeNames.get(event.employeeId) ?? "Employee";
       alerts.push({
         id: `missed-break-${session.clockIn.id}-${event.id}`,
         employeeId: event.employeeId,
         title: "Missed break",
-        detail: `${employeeName} worked at least five continuous hours without recording a break.`,
+        detail: `${employeeName} worked at least ${settings.mealBreakAfterHours} continuous ${settings.mealBreakAfterHours === 1 ? "hour" : "hours"} without recording a break.`,
         at: event.at,
         severity: "danger",
         eventTargetId: `clock-${event.id}`,
@@ -7490,20 +7966,20 @@ function operationalAlertsFor(
   openWorkSessions.forEach((session, employeeId) => {
     const clockInTime = new Date(session.clockIn.at).getTime();
     const alertTime = clockInTime + missedBreakThresholdMs;
-    if (session.tookBreak || alertTime > currentTime || alertTime < lookbackStart) return;
+    if (!settings.mandatoryMealBreak || session.tookBreak || alertTime > currentTime || alertTime < lookbackStart) return;
 
     alerts.push({
       id: `missed-break-open-${session.clockIn.id}`,
       employeeId,
       title: "Missed break",
-      detail: `${employeeNames.get(employeeId) ?? "Employee"} has worked at least five continuous hours without recording a break.`,
+      detail: `${employeeNames.get(employeeId) ?? "Employee"} has worked at least ${settings.mealBreakAfterHours} continuous ${settings.mealBreakAfterHours === 1 ? "hour" : "hours"} without recording a break.`,
       at: new Date(alertTime).toISOString(),
       severity: "danger",
       eventTargetId: `clock-${session.clockIn.id}`,
     });
   });
 
-  alerts.push(...noShowAlertsFor(employees, shifts, eventsAscending, currentTime, lookbackStart));
+  alerts.push(...noShowAlertsFor(employees, shifts, eventsAscending, currentTime, lookbackStart, settings));
 
   return alerts
     .filter((alert, index, allAlerts) => allAlerts.findIndex((entry) => entry.id === alert.id) === index)
@@ -7547,9 +8023,9 @@ function breakEndTime(event: ClockEvent) {
   return new Date(new Date(event.at).getTime() + durationMs);
 }
 
-function clockEventLabel(event: ClockEvent, shifts: Shift[]) {
+function clockEventLabel(event: ClockEvent, shifts: Shift[], settings: ScheduleEnforcement = defaultScheduleEnforcement) {
   if (event.type === "in" || event.type === "out") {
-    if (event.type === "out" && event.explanation === automaticClockOutExplanation) {
+    if (event.type === "out" && isAutomaticClockOut(event)) {
       return "Automatic clock-out";
     }
 
@@ -7563,7 +8039,7 @@ function clockEventLabel(event: ClockEvent, shifts: Shift[]) {
       : shiftEndDateTime(shift).getTime();
     const eventTime = new Date(event.at).getTime();
     const isWithinAllowedWindow = event.type === "in"
-      ? isWithinClockInGrace(eventTime, scheduledTime)
+      ? isWithinClockInGrace(eventTime, scheduledTime, settings)
       : isWithinScheduledMinute(eventTime, scheduledTime);
     if (isWithinAllowedWindow) return action;
 
@@ -7623,23 +8099,23 @@ function needsTimeException(
   shift: Shift | undefined,
   breakEnd: Date | undefined,
   currentTime: number,
+  settings: ScheduleEnforcement = defaultScheduleEnforcement,
 ) {
   if (action === "break_end") {
     return breakEnd ? currentTime >= breakEnd.getTime() + 60000 : true;
   }
 
-  if (!shift) return true;
+  if (!shift) return settings.requireUnscheduledExplanation;
 
   const scheduledTime = action === "in" ? shiftStartDateTime(shift) : shiftEndDateTime(shift);
-  return action === "in"
-    ? !isWithinClockInGrace(currentTime, scheduledTime.getTime())
-    : !isWithinScheduledMinute(currentTime, scheduledTime.getTime());
+  if (action === "out") return settings.requireClockOutExplanation && !isWithinScheduledMinute(currentTime, scheduledTime.getTime());
+  const timing = clockInTiming(currentTime, scheduledTime.getTime(), settings);
+  return timing === "early" ? settings.requireEarlyClockInExplanation
+    : timing === "late" && settings.requireLateClockInExplanation;
 }
 
-function isWithinClockInGrace(currentTime: number, scheduledTime: number) {
-  const scheduledMinuteEnd = Math.floor(scheduledTime / 60000) * 60000 + 60000;
-  return currentTime >= scheduledTime - earlyClockInGraceMs
-    && currentTime < scheduledMinuteEnd;
+function isWithinClockInGrace(currentTime: number, scheduledTime: number, settings: ScheduleEnforcement = defaultScheduleEnforcement) {
+  return clockInTiming(currentTime, scheduledTime, settings) === "on-time";
 }
 
 function isWithinScheduledMinute(currentTime: number, scheduledTime: number) {
@@ -7776,6 +8252,16 @@ function readDismissedNotificationIds(): Record<number, string[]> {
   }
 }
 
+function readStoredScheduleEnforcement(): ScheduleEnforcement {
+  if (typeof window === "undefined") return { ...defaultScheduleEnforcement };
+  try {
+    const stored = window.localStorage.getItem(scheduleEnforcementStorageKey);
+    return normalizeScheduleEnforcement(stored ? JSON.parse(stored) : null);
+  } catch {
+    return { ...defaultScheduleEnforcement };
+  }
+}
+
 function readStoredBasicInfo(): BasicInfo {
   if (typeof window === "undefined") return defaultBasicInfo;
 
@@ -7885,9 +8371,7 @@ function readStoredState() {
     const parsed = JSON.parse(rawState) as StaffState;
     const employees = (Array.isArray(parsed.employees) ? parsed.employees : [])
       .map((employee) => {
-        const normalizedEmployee = employee.id === 1 && employee.pin === managerPin
-          ? { ...employee, name: "Serge Vakulchik" }
-          : employee;
+        const normalizedEmployee = employee;
         const savedPhone = clearRosterPlaceholder(normalizedEmployee.phone);
         return {
           ...normalizedEmployee,
@@ -8054,6 +8538,7 @@ function readStoredState() {
       employees,
       departments,
       shifts: publishedShifts,
+      scheduleEvents: normalizeScheduleEvents(parsed.scheduleEvents),
       clockEvents: (Array.isArray(parsed.clockEvents) ? parsed.clockEvents : [])
         .filter((event) => employeeIds.has(event.employeeId)),
       hoursAdjustments: (parsed.hoursAdjustments ?? []).filter((adjustment) => employeeIds.has(adjustment.employeeId)),
@@ -8255,9 +8740,10 @@ function shiftsForCalendarRange(
   employeeIds: Set<number>,
   today: string,
   tab: CalendarTab,
+  weekStart = 1,
 ) {
   const currentDate = parseLocalDate(today);
-  const { start, end } = dateRangeForCalendarTab(currentDate, tab);
+  const { start, end } = dateRangeForCalendarTab(currentDate, tab, weekStart);
 
   return shifts.filter((shift) => {
     if (!employeeIds.has(shift.employeeId)) return false;
@@ -8267,14 +8753,14 @@ function shiftsForCalendarRange(
   });
 }
 
-function dateRangeForCalendarTab(date: Date, tab: CalendarTab) {
+function dateRangeForCalendarTab(date: Date, tab: CalendarTab, weekStart = 1) {
   if (tab === "today") {
     return { start: startOfDay(date), end: startOfDay(date) };
   }
 
   if (tab === "week") {
     const start = startOfDay(date);
-    start.setDate(start.getDate() - start.getDay());
+    start.setDate(start.getDate() - workWeekOffset(start.getDay(), weekStart));
     const end = startOfDay(start);
     end.setDate(start.getDate() + 6);
 
@@ -8307,18 +8793,18 @@ function shiftDateByCalendarTab(date: string, tab: CalendarTab, direction: -1 | 
   return toDateInputValue(selectedDate);
 }
 
-function hoursDateRange(date: string, tab: CalendarTab) {
+function hoursDateRange(date: string, tab: CalendarTab, weekStart = 1) {
   if (tab === "week") {
-    const days = mondayWeekCalendarDays(date);
+    const days = workWeekCalendarDays(date, weekStart);
     return { start: parseLocalDate(days[0].date), end: parseLocalDate(days[6].date) };
   }
   return dateRangeForCalendarTab(parseLocalDate(date), tab);
 }
 
-function hoursDateLabel(tab: CalendarTab, date: string) {
+function hoursDateLabel(tab: CalendarTab, date: string, weekStart = 1) {
   if (tab === "today") return formatLongDate(date);
   if (tab === "week") {
-    const days = mondayWeekCalendarDays(date);
+    const days = workWeekCalendarDays(date, weekStart);
     return `${formatShortDate(days[0].date)} – ${formatShortDate(days[6].date)}`;
   }
   return formatMonthYear(date);
@@ -8341,10 +8827,10 @@ function weekCalendarDays(date: string) {
   });
 }
 
-function mondayWeekCalendarDays(date: string) {
+function workWeekCalendarDays(date: string, weekStartDay = 1) {
   const selectedDate = parseLocalDate(date);
   const weekStart = startOfDay(selectedDate);
-  weekStart.setDate(selectedDate.getDate() - ((selectedDate.getDay() + 6) % 7));
+  weekStart.setDate(selectedDate.getDate() - workWeekOffset(selectedDate.getDay(), weekStartDay));
 
   return Array.from({ length: 7 }, (_, index) => {
     const calendarDate = startOfDay(weekStart);
@@ -8353,15 +8839,15 @@ function mondayWeekCalendarDays(date: string) {
   });
 }
 
-function scheduleMonthCalendarDays(date: string) {
+function scheduleMonthCalendarDays(date: string, weekStartDay = 1) {
   const selectedDate = parseLocalDate(date);
   const monthStart = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1);
   const monthEnd = new Date(selectedDate.getFullYear(), selectedDate.getMonth() + 1, 0);
   const gridStart = startOfDay(monthStart);
-  const mondayOffset = (monthStart.getDay() + 6) % 7;
+  const mondayOffset = workWeekOffset(monthStart.getDay(), weekStartDay);
   gridStart.setDate(gridStart.getDate() - mondayOffset);
   const gridEnd = startOfDay(monthEnd);
-  const daysUntilSunday = (7 - monthEnd.getDay()) % 7;
+  const daysUntilSunday = 6 - workWeekOffset(monthEnd.getDay(), weekStartDay);
   gridEnd.setDate(gridEnd.getDate() + daysUntilSunday);
   const calendarDayCount = Math.round((gridEnd.getTime() - gridStart.getTime()) / 86400000) + 1;
 
@@ -8392,24 +8878,24 @@ function weekdayForDate(date: string) {
   return parseLocalDate(date).getDay();
 }
 
-function shiftDateForWeekday(anchorDate: string, weekday: number) {
+function shiftDateForWeekday(anchorDate: string, weekday: number, weekStartDay = 1) {
   const anchor = parseLocalDate(anchorDate);
   const monday = new Date(anchor);
-  monday.setDate(anchor.getDate() - ((anchor.getDay() + 6) % 7));
+  monday.setDate(anchor.getDate() - workWeekOffset(anchor.getDay(), weekStartDay));
   const date = new Date(monday);
-  date.setDate(monday.getDate() + ((weekday + 6) % 7));
+  date.setDate(monday.getDate() + workWeekOffset(weekday, weekStartDay));
   return toDateInputValue(date);
 }
 
-function formatShiftApplyDate(anchorDate: string, weekday: number) {
-  const date = parseLocalDate(shiftDateForWeekday(anchorDate, weekday));
+function formatShiftApplyDate(anchorDate: string, weekday: number, weekStartDay = 1) {
+  const date = parseLocalDate(shiftDateForWeekday(anchorDate, weekday, weekStartDay));
   return `${date.getMonth() + 1}/${date.getDate()}`;
 }
 
-function shiftDatesForWeekdays(anchorDate: string, weekdays: number[]) {
+function shiftDatesForWeekdays(anchorDate: string, weekdays: number[], weekStartDay = 1) {
   return shiftWeekdayOptions
     .filter((option) => weekdays.includes(option.value))
-    .map((option) => shiftDateForWeekday(anchorDate, option.value));
+    .map((option) => shiftDateForWeekday(anchorDate, option.value, weekStartDay));
 }
 
 function startOfDay(date: Date) {
@@ -8634,11 +9120,11 @@ function timeToMinutes(time: string) {
   return hour * 60 + minute;
 }
 
-function scheduleBarStyle(shift: Shift) {
+function scheduleBarStyle(shift: Shift, settings: ScheduleEnforcement = defaultScheduleEnforcement) {
   const startMinutes = timeToMinutes(shift.start);
   const endMinutes = timeToMinutes(shift.end);
-  const scheduleStartMinutes = scheduleStartHour * 60;
-  const scheduleEndMinutes = scheduleEndHour * 60;
+  const scheduleStartMinutes = settings.scheduleStartHour * 60;
+  const scheduleEndMinutes = settings.scheduleEndHour * 60;
   const totalMinutes = scheduleEndMinutes - scheduleStartMinutes;
 
   if (startMinutes === null || endMinutes === null) return {};
@@ -8646,6 +9132,7 @@ function scheduleBarStyle(shift: Shift) {
   const adjustedEndMinutes = endMinutes >= startMinutes ? endMinutes : endMinutes + 24 * 60;
   const visibleStart = Math.max(startMinutes, scheduleStartMinutes);
   const visibleEnd = Math.min(adjustedEndMinutes, scheduleEndMinutes);
+  if (visibleEnd <= visibleStart) return { display: "none" };
   const left = ((visibleStart - scheduleStartMinutes) / totalMinutes) * 100;
   const width = Math.max(((visibleEnd - visibleStart) / totalMinutes) * 100, 2);
 
@@ -8708,6 +9195,7 @@ function employeePerformanceFor(
   state: StaffState,
   employeeId: number,
   currentTime: number,
+  settings: ScheduleEnforcement = defaultScheduleEnforcement,
 ): EmployeePerformance {
   const now = new Date(currentTime);
   const monthStart = startOfDay(new Date(now.getFullYear(), now.getMonth(), 1));
@@ -8747,16 +9235,17 @@ function employeePerformanceFor(
     return Boolean(firstClockIn) && isWithinClockInGrace(
       new Date(firstClockIn.at).getTime(),
       shiftStartDateTime(shift).getTime(),
+      settings,
     );
   });
   const missedClockOuts = completedWorkedShifts.filter((shift) => {
     const clockOuts = (eventsByShift.get(shift.id) ?? []).filter((event) => event.type === "out");
     return clockOuts.length === 0
-      || clockOuts.some((event) => event.explanation === automaticClockOutExplanation);
+      || clockOuts.some((event) => isAutomaticClockOut(event));
   }).length;
   const missedBreaks = completedWorkedShifts.filter((shift) => {
     const scheduledDuration = shiftEndDateTime(shift).getTime() - shiftStartDateTime(shift).getTime();
-    return scheduledDuration >= missedBreakThresholdMs
+    return settings.mandatoryMealBreak && scheduledDuration >= settings.mealBreakAfterHours * 60 * 60 * 1000
       && !(eventsByShift.get(shift.id) ?? []).some((event) => event.type === "break");
   }).length;
   const roleTotals = new Map<string, number>();
@@ -9079,6 +9568,267 @@ function SidebarNavIcon({ icon }: { icon: string }) {
     <span className="nav-icon" aria-hidden="true">
       <svg viewBox="0 0 24 24">{paths}</svg>
     </span>
+  );
+}
+
+function EventsTradesPanel({ settings, dirty, message, onChange, onSave }: {
+  settings: ScheduleEnforcement;
+  dirty: boolean;
+  message: string;
+  onChange: (changes: Partial<ScheduleEnforcement>) => void;
+  onSave: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  return (
+    <form className="panel settings-enforcement-panel" onSubmit={onSave}>
+      <div className="settings-panel-heading">
+        <h3>Events &amp; trades</h3>
+        <button type="submit" disabled={!dirty}>Save</button>
+      </div>
+      <p className="enforcement-intro">Display special events and days on the schedule.</p>
+      <div className="enforcement-rules">
+        <div className="enforcement-rule">
+          <label className="enforcement-rule-line">
+            <input type="checkbox" checked={settings.enableScheduleEvents} onChange={event => onChange({ enableScheduleEvents: event.target.checked })} />
+            <span>Enable events on the schedule</span>
+          </label>
+          <p>Managers can add special events in day, week, and month views. Turning this off hides events without deleting them.</p>
+        </div>
+      </div>
+      {message ? <p className="enforcement-save-message" role="status">{message}</p> : null}
+    </form>
+  );
+}
+
+function ScheduleEventList({ events, date, canAdd, onOpen }: {
+  events: ScheduleEvent[];
+  date: string;
+  canAdd: boolean;
+  onOpen: (date: string, event?: ScheduleEvent) => void;
+}) {
+  return (
+    <div className="schedule-event-list">
+      {events.map(event => <button className="schedule-event-chip" type="button" key={event.id} onClick={() => onOpen(date, event)} aria-haspopup="dialog" title={event.notes || event.title}>{event.title}</button>)}
+      {canAdd ? <button className="schedule-event-add" type="button" onClick={() => onOpen(date)} aria-label={`Add event on ${formatLongDate(date)}`}>+ Add event</button> : null}
+    </div>
+  );
+}
+
+function ScheduleEventDialog({ event, editable, onSave, onDelete, onClose }: {
+  event: ScheduleEvent;
+  editable: boolean;
+  onSave: (event: ScheduleEvent) => void;
+  onDelete: (id: number) => void;
+  onClose: () => void;
+}) {
+  const [draft, setDraft] = useState(event);
+  const dialogRef = useRef<HTMLFormElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const onCloseRef = useRef(onClose);
+  useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
+  useEffect(() => {
+    const previousFocus = document.activeElement;
+    const dialog = dialogRef.current;
+    (editable ? dialog?.querySelector<HTMLInputElement>("input") : closeRef.current)?.focus();
+    function handleKey(event: KeyboardEvent) {
+      if (event.key === "Escape") { event.preventDefault(); onCloseRef.current(); }
+      if (event.key !== "Tab" || !dialog) return;
+      const controls = Array.from(dialog.querySelectorAll<HTMLElement>("button, input, textarea")).filter(control => !control.hasAttribute("disabled"));
+      const first = controls[0], last = controls[controls.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    }
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("keydown", handleKey);
+      if (previousFocus instanceof HTMLElement && previousFocus.isConnected) previousFocus.focus();
+    };
+  }, [editable]);
+  return (
+    <div className="modal-backdrop" onClick={click => { if (click.target === click.currentTarget) onClose(); }}>
+      <form className="schedule-event-dialog" ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="schedule-event-title" onSubmit={submit => { submit.preventDefault(); if (editable) onSave(draft); }}>
+        <div className="modal-heading">
+          <h2 id="schedule-event-title">{editable ? event.id ? "Edit event" : "Add event" : event.title}</h2>
+          <button type="button" ref={closeRef} aria-label="Close event" onClick={onClose}>×</button>
+        </div>
+        {editable ? <>
+          <label><span>Name</span><input required maxLength={100} value={draft.title} onChange={change => setDraft(current => ({ ...current, title: change.target.value }))} /></label>
+          <label><span>Date</span><input type="date" required value={draft.date} onClick={click => { try { click.currentTarget.showPicker?.(); } catch { click.currentTarget.focus(); } }} onChange={change => setDraft(current => ({ ...current, date: change.target.value }))} /></label>
+          <label><span>Notes (optional)</span><textarea maxLength={500} value={draft.notes} onChange={change => setDraft(current => ({ ...current, notes: change.target.value }))} /></label>
+          <p className="schedule-event-help">Saved events appear immediately for everyone who can view the schedule.</p>
+          <div className="schedule-event-actions">
+            {event.id ? <button type="button" className="danger-action" onClick={() => onDelete(event.id)}>Delete event</button> : null}
+            <button type="button" onClick={onClose}>Cancel</button>
+            <button type="submit" className="primary-action" disabled={!draft.title.trim() || !validEventDate(draft.date)}>Save event</button>
+          </div>
+        </> : <><p>{formatLongDate(event.date)}</p>{event.notes ? <p className="schedule-event-notes">{event.notes}</p> : null}</>}
+      </form>
+    </div>
+  );
+}
+
+function AlertsPermissionsPanel({ settings, dirty, message, onChange, onSave }: {
+  settings: ScheduleEnforcement;
+  dirty: boolean;
+  message: string;
+  onChange: (changes: Partial<ScheduleEnforcement>) => void;
+  onSave: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  return (
+    <form className="panel settings-enforcement-panel settings-alerts-panel" onSubmit={onSave}>
+      <div className="settings-panel-heading">
+        <h3>Alerts &amp; permissions</h3>
+        <button type="submit" disabled={!dirty}>Save</button>
+      </div>
+      <p className="enforcement-intro">Stay on top of your team&apos;s activity with in-app alerts and customized permissions.</p>
+      <section className="alerts-permissions-group" aria-labelledby="employee-alert-settings">
+        <h4 id="employee-alert-settings">Employee</h4>
+        <div className="enforcement-rules">
+          <div className="enforcement-rule">
+            <label className="enforcement-rule-line">
+              <input type="checkbox" checked={settings.notifyScheduleChanges} onChange={event => onChange({ notifyScheduleChanges: event.target.checked })} />
+              <span>Notify team members when a schedule is published</span>
+            </label>
+            <p>Send an in-app notification to active team members who have location alerts enabled.</p>
+          </div>
+          <div className="enforcement-rule">
+            <label className="enforcement-rule-line">
+              <input type="checkbox" checked={settings.employeesOwnScheduleOnly} onChange={event => onChange({ employeesOwnScheduleOnly: event.target.checked })} />
+              <span>Employees can only view their own schedule</span>
+            </label>
+            <p>Managers and admins see the whole team&apos;s schedule. Public schedule access requires sign-in when this is enabled.</p>
+          </div>
+        </div>
+      </section>
+      <section className="alerts-permissions-group" aria-labelledby="manager-alert-settings">
+        <h4 id="manager-alert-settings">Manager</h4>
+        <div className="enforcement-rules">
+          <div className="enforcement-rule">
+            <div className="enforcement-rule-line">
+              <label>
+                <input type="checkbox" checked={settings.noShowAlerts} onChange={event => onChange({ noShowAlerts: event.target.checked })} />
+                <span>Notify managers when an employee hasn&apos;t clocked in after</span>
+              </label>
+              <input type="number" className="enforcement-minutes" aria-label="Missed clock-in alert delay in minutes" value={settings.noShowMinutes} min={0} max={120} step={1} required disabled={!settings.noShowAlerts} onChange={event => onChange({ noShowMinutes: Number(event.target.value) })} />
+              <span>minutes</span>
+            </div>
+            <p>Show an in-app no-show alert and an Events entry for the missed clock-in.</p>
+          </div>
+          <div className="enforcement-rule">
+            <label className="enforcement-rule-line">
+              <input type="checkbox" checked={settings.requireAvailabilityApproval} onChange={event => onChange({ requireAvailabilityApproval: event.target.checked })} />
+              <span>Managers must approve your team&apos;s availability requests</span>
+            </label>
+            <p>When turned off, submitted availability is approved immediately.</p>
+          </div>
+          <div className="enforcement-rule">
+            <label className="enforcement-rule-line">
+              <input type="checkbox" checked={settings.restrictManagerDepartments} onChange={event => onChange({ restrictManagerDepartments: event.target.checked })} />
+              <span>Managers can only build and publish schedules for their departments</span>
+            </label>
+            <p>Uses manager and role assignments in Departments and Roles. Admins can schedule across all departments.</p>
+          </div>
+        </div>
+      </section>
+      {message ? <p className="enforcement-save-message" role="status">{message}</p> : null}
+    </form>
+  );
+}
+
+function ScheduleEnforcementPanel({ settings, dirty, message, onChange, onSave }: {
+  settings: ScheduleEnforcement;
+  dirty: boolean;
+  message: string;
+  onChange: (changes: Partial<ScheduleEnforcement>) => void;
+  onSave: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  const minuteInput = (field: "lateMinutes" | "earlyClockInMinutes" | "noShowMinutes" | "automaticClockOutMinutes", label: string, disabled = false) => (
+    <input
+      type="number"
+      aria-label={label}
+      className="enforcement-minutes"
+      value={settings[field]}
+      min={field === "automaticClockOutMinutes" || field === "lateMinutes" ? 1 : 0}
+      max={field === "automaticClockOutMinutes" ? 1440 : 120}
+      step={1}
+      required
+      disabled={disabled}
+      onChange={(event) => onChange({ [field]: Number(event.target.value) })}
+    />
+  );
+  const checkbox = (field: "requireEarlyClockInExplanation" | "requireLateClockInExplanation" | "requireClockOutExplanation" | "requireUnscheduledExplanation" | "noShowAlerts" | "automaticClockOut", label: string) => (
+    <input type="checkbox" aria-label={label} checked={settings[field]} onChange={(event) => onChange({ [field]: event.target.checked })} />
+  );
+  return (
+    <form className="panel settings-enforcement-panel" onSubmit={onSave}>
+      <div className="settings-panel-heading">
+        <h3>Schedule enforcement</h3>
+        <button type="submit" disabled={!dirty}>Save</button>
+      </div>
+      <p className="enforcement-intro">Manage scheduling hours and how your team records time around their shifts.</p>
+      <div className="enforcement-basics">
+        <label className="enforcement-field-row">
+          <span>Start of work week</span>
+          <select value={settings.workWeekStart} onChange={(event) => onChange({ workWeekStart: Number(event.target.value) })}>
+            {Array.from({ length: 7 }, (_, index) => (index + 1) % 7).map((day) => (
+              <option value={day} key={day}>{["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][day]}</option>
+            ))}
+          </select>
+        </label>
+        <div className="enforcement-field-row">
+          <span id="scheduling-hours-label">Scheduling hours</span>
+          <div className="enforcement-time-range" role="group" aria-labelledby="scheduling-hours-label">
+            <SchedulingHourSelect label="Scheduling start time" value={settings.scheduleStartHour} onChange={hour => onChange({ scheduleStartHour: hour })} />
+            <span aria-hidden="true">–</span>
+            <SchedulingHourSelect label="Scheduling end time" value={settings.scheduleEndHour} endOfDay onChange={hour => onChange({ scheduleEndHour: hour })} />
+          </div>
+        </div>
+        <p className="enforcement-help">Sets the visible hours in the day schedule. Shifts outside this window remain available in week and month views.</p>
+        <div className="enforcement-inline-setting">
+          <span>Mark employee as late</span>
+          {minuteInput("lateMinutes", "Late clock-in threshold in minutes")}
+          <span>minutes after their shift is scheduled to start</span>
+        </div>
+      </div>
+      <div className="enforcement-rules">
+        <div className="enforcement-rule">
+          <div className="enforcement-rule-line">
+            <label>{checkbox("requireEarlyClockInExplanation", "Require explanations for early clock-ins")}<span>Require an explanation for clocking in more than</span></label>
+            {minuteInput("earlyClockInMinutes", "Early clock-in allowance in minutes")}
+            <span>minutes before the scheduled start</span>
+          </div>
+          <p>Team members can still clock in early after explaining why. The explanation appears in Events for manager review.</p>
+        </div>
+        <div className="enforcement-rule">
+          <label className="enforcement-rule-line">{checkbox("requireLateClockInExplanation", "Require explanations for late clock-ins")}<span>Require an explanation for late clock-ins</span></label>
+          <p>Uses the late threshold above. Late entries remain visible in Events and employee performance.</p>
+        </div>
+        <div className="enforcement-rule">
+          <label className="enforcement-rule-line">{checkbox("requireClockOutExplanation", "Require explanations for early or late clock-outs")}<span>Require an explanation for early or late clock-outs</span></label>
+          <p>Ask for an explanation when a team member clocks out outside their scheduled end minute.</p>
+        </div>
+        <div className="enforcement-rule">
+          <label className="enforcement-rule-line">{checkbox("requireUnscheduledExplanation", "Require explanations for unscheduled clock-ins and clock-outs")}<span>Require an explanation for unscheduled clock-ins and clock-outs</span></label>
+          <p>Team members without a shift can record their time after explaining why they are working.</p>
+        </div>
+        <div className="enforcement-rule">
+          <div className="enforcement-rule-line">
+            <label>{checkbox("noShowAlerts", "Show no-show alerts")}<span>Show no-show alerts</span></label>
+            {minuteInput("noShowMinutes", "No-show alert delay in minutes", !settings.noShowAlerts)}
+            <span>minutes after a missed clock-in</span>
+          </div>
+          <p>Show managers an in-app notification and an Events entry if no clock-in is recorded for the shift.</p>
+        </div>
+        <div className="enforcement-rule">
+          <div className="enforcement-rule-line">
+            <label>{checkbox("automaticClockOut", "Automatically clock out team members")}<span>Automatically clock out team members</span></label>
+            {minuteInput("automaticClockOutMinutes", "Automatic clock-out delay in minutes", !settings.automaticClockOut)}
+            <span>minutes after their scheduled shift ends</span>
+          </div>
+          <p>Records the automatic clock-out time in Timesheets and flags the entry in Events for manager review.</p>
+        </div>
+      </div>
+      {message ? <p className="enforcement-save-message" role="status">{message}</p> : null}
+    </form>
   );
 }
 
@@ -9426,12 +10176,14 @@ function formatAvailabilityHour(hour: number) {
 function AvailabilityBoard({
   effectiveDate,
   employee,
+  approvalRequired,
   locations,
   latestRequest,
   onRequestApproval,
 }: {
   effectiveDate: string;
   employee?: Employee;
+  approvalRequired: boolean;
   locations: string[];
   latestRequest?: AvailabilityRequest;
   onRequestApproval: (effectiveDate: string, slots: AvailabilityRequestSlot[], note: string) => void;
@@ -9544,7 +10296,7 @@ function AvailabilityBoard({
 
   function notifyManager() {
     onRequestApproval(scheduleEffectiveDate, availabilitySlots, managerNote);
-    setStatus("pending");
+    setStatus(approvalRequired ? "pending" : "approved");
     setIsNotifyManagerOpen(false);
     setManagerNote("");
   }
@@ -9579,7 +10331,7 @@ function AvailabilityBoard({
     ? formatAvailabilityDate(draftEffectiveDate)
     : null;
   const versionLabel = version === "current" ? "Current" : version === "draft" && draftEffectiveLabel ? draftEffectiveLabel : currentEffectiveLabel;
-  const approvalButtonLabel = status === "unsubmitted" || status === "rejected"
+  const approvalButtonLabel = !approvalRequired ? "Save availability" : status === "unsubmitted" || status === "rejected"
     ? "Request approval"
     : status === "pending"
       ? "Approval requested"
@@ -9636,8 +10388,8 @@ function AvailabilityBoard({
           <button
             type="button"
             className="availability-notify-button"
-            onClick={() => setIsNotifyManagerOpen(true)}
-            disabled={status === "pending" || status === "rejected"}
+            onClick={() => approvalRequired ? setIsNotifyManagerOpen(true) : notifyManager()}
+            disabled={approvalRequired && (status === "pending" || status === "rejected")}
           >
             {approvalButtonLabel}
           </button>
@@ -9862,6 +10614,7 @@ function AvailabilityBoard({
 function TeamAvailabilityBoard({
   employees,
   initialDate,
+  workWeekStart,
   locations,
   requests,
   reviewerId,
@@ -9870,6 +10623,7 @@ function TeamAvailabilityBoard({
 }: {
   employees: Employee[];
   initialDate: string;
+  workWeekStart: number;
   locations: string[];
   requests: AvailabilityRequest[];
   reviewerId: number;
@@ -9891,8 +10645,8 @@ function TeamAvailabilityBoard({
   const [isWeekCalendarOpen, setIsWeekCalendarOpen] = useState(false);
   const [pendingWeekDate, setPendingWeekDate] = useState(initialDate);
   const [weekCalendarMonth, setWeekCalendarMonth] = useState(() => `${initialDate.slice(0, 7)}-01`);
-  const weekDays = mondayWeekCalendarDays(weekDate);
-  const pendingWeekDays = mondayWeekCalendarDays(pendingWeekDate);
+  const weekDays = workWeekCalendarDays(weekDate, workWeekStart);
+  const pendingWeekDays = workWeekCalendarDays(pendingWeekDate, workWeekStart);
   const orderedEmployees = [...employees].sort((first, second) => first.name.localeCompare(second.name));
   const editingEmployee = editingAvailability ? employees.find((employee) => employee.id === editingAvailability.employeeId) : undefined;
   const editingAvailabilityKey = editingAvailability ? `${editingAvailability.employeeId}-${editingAvailability.date}` : null;
@@ -9906,7 +10660,7 @@ function TeamAvailabilityBoard({
   const weekCalendarYear = weekCalendarMonthDate.getFullYear();
   const weekCalendarMonthIndex = weekCalendarMonthDate.getMonth();
   const weekCalendarMonthLabel = new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric" }).format(weekCalendarMonthDate);
-  const weekCalendarLeadingDays = (new Date(weekCalendarYear, weekCalendarMonthIndex, 1).getDay() + 6) % 7;
+  const weekCalendarLeadingDays = workWeekOffset(new Date(weekCalendarYear, weekCalendarMonthIndex, 1).getDay(), workWeekStart);
   const weekCalendarDaysInMonth = new Date(weekCalendarYear, weekCalendarMonthIndex + 1, 0).getDate();
   const weekCalendarCellCount = Math.ceil((weekCalendarLeadingDays + weekCalendarDaysInMonth) / 7) * 7;
   const weekCalendarDays = Array.from({ length: weekCalendarCellCount }, (_, index) => {
@@ -9936,7 +10690,7 @@ function TeamAvailabilityBoard({
   }
 
   function chooseAvailabilityWeek(date: string) {
-    setPendingWeekDate(mondayWeekCalendarDays(date)[0].date);
+    setPendingWeekDate(workWeekCalendarDays(date, workWeekStart)[0].date);
   }
 
   function cancelWeekCalendar() {
@@ -10034,7 +10788,7 @@ function TeamAvailabilityBoard({
                   </div>
                 </div>
                 <div className="team-availability-week-calendar-weekdays" aria-hidden="true">
-                  {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day) => <span key={day}>{day}</span>)}
+                  {weekDays.map((day) => <span key={day.date}>{parseLocalDate(day.date).toLocaleDateString("en-US", { weekday: "short" })}</span>)}
                 </div>
                 <div className="team-availability-week-calendar-days">
                   {weekCalendarDays.map((date, index) => date ? (
@@ -10042,7 +10796,7 @@ function TeamAvailabilityBoard({
                       type="button"
                       className={`${date >= pendingWeekStart && date <= pendingWeekEnd ? "in-range" : ""}${date === pendingWeekStart ? " range-start" : ""}${date === pendingWeekEnd ? " range-end" : ""}`.trim()}
                       onClick={() => chooseAvailabilityWeek(date)}
-                      aria-label={`Week of ${formatLongDate(mondayWeekCalendarDays(date)[0].date)}`}
+                      aria-label={`Week of ${formatLongDate(workWeekCalendarDays(date, workWeekStart)[0].date)}`}
                       aria-pressed={date >= pendingWeekStart && date <= pendingWeekEnd}
                       key={date}
                     >

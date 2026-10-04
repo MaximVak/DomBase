@@ -138,7 +138,7 @@ test("shift editor uses clear time labels and available role options", async () 
 
   assert.match(page, /placeholder="Start time"/);
   assert.match(page, /placeholder="End time"/);
-  assert.match(page, /aria-label="Shift role"[^]*availableRoles\.map\(\(role\)/);
+  assert.match(page, /aria-label="Shift role"[^]*availableRoles\.filter\(role => canEditScheduleRole\(role\)\)\.map\(\(role\)/);
   assert.doesNotMatch(page, /placeholder="Start shift"|placeholder="End shift"/);
   assert.doesNotMatch(page, /aria-label="Edit shift employee"/);
   assert.match(page, /<span>Date<\/span>/);
@@ -200,13 +200,13 @@ test("shift editor uses clear time labels and available role options", async () 
   assert.match(page, /className="time-input-hint"/);
   assert.doesNotMatch(page, /suggestion && !isPickerOpen/);
   assert.doesNotMatch(page, /copy-calendar|Copy shift range|repeatDates/);
-  assert.match(page, /const shiftDates = shiftDatesForWeekdays\(shiftForm\.date, createShiftWeekdays\)/);
+  assert.match(page, /const shiftDates = shiftDatesForWeekdays\(shiftForm\.date, createShiftWeekdays, scheduleEnforcement\.workWeekStart\)/);
   assert.match(page, /const shiftWeekdayOptions = \[/);
   assert.match(page, /function shiftDatesForWeekdays/);
-  assert.match(page, /function shiftDateForWeekday\(anchorDate: string, weekday: number\)/);
-  assert.match(page, /function formatShiftApplyDate\(anchorDate: string, weekday: number\)/);
-  assert.match(page, /className="shift-apply-day-date">\{formatShiftApplyDate\(shiftForm\.date, option\.value\)\}/);
-  assert.match(page, /className="shift-apply-day-date">\{formatShiftApplyDate\(editingShift\.date, option\.value\)\}/);
+  assert.match(page, /function shiftDateForWeekday\(anchorDate: string, weekday: number, weekStartDay = 1\)/);
+  assert.match(page, /function formatShiftApplyDate\(anchorDate: string, weekday: number, weekStartDay = 1\)/);
+  assert.match(page, /className="shift-apply-day-date">\{formatShiftApplyDate\(shiftForm\.date, option\.value, scheduleEnforcement\.workWeekStart\)\}/);
+  assert.match(page, /className="shift-apply-day-date">\{formatShiftApplyDate\(editingShift\.date, option\.value, scheduleEnforcement\.workWeekStart\)\}/);
   assert.match(page, /function toggleCreateShiftWeekday/);
   assert.match(page, /function toggleEditingShiftWeekday/);
   assert.match(page, /<legend>Apply to:<\/legend>/);
@@ -714,11 +714,11 @@ test("manager can persist manual worked-hour adjustments", async () => {
   assert.match(page, /Are you sure you want to change/);
 });
 
-test("employee Hours view is read-only and filtered to the signed-in employee", async () => {
+test("employee Timesheets view is read-only and filtered to the signed-in employee", async () => {
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
   const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
 
-  assert.match(page, /id: "hours", label: "Hours", icon: "clock"/);
+  assert.match(page, /id: "hours", label: "Timesheets", icon: "clock"/);
   assert.match(page, /employee\.id === activeEmployeeId/);
   assert.match(page, /mode === "manager" \? \(/);
   assert.match(page, /type HoursDisplay = "actual" \| "rounded"/);
@@ -904,13 +904,11 @@ test("signed-in users have a header account menu instead of a sidebar logout pan
   assert.match(page, /notificationRequests = activeUserCanManage/);
   assert.match(page, /operationalAlerts = activeUserCanManage/);
   assert.match(page, /function operationalAlertsFor/);
-  assert.match(page, /const earlyClockInGraceMs = 5 \* 60 \* 1000;/);
-  assert.match(page, /const automaticClockOutDelayMs = 2 \* 60 \* 60 \* 1000;/);
   assert.match(page, /function isWithinClockInGrace/);
-  assert.match(page, /\? !isWithinClockInGrace\(currentTime, scheduledTime\.getTime\(\)\)/);
+  assert.match(page, /clockInTiming\(currentTime, scheduledTime\.getTime\(\), settings\)/);
   assert.match(page, /function applyAutomaticClockOuts/);
-  assert.match(page, /shiftEndDateTime\(shift\)\.getTime\(\) \+ automaticClockOutDelayMs/);
-  assert.match(page, /explanation: automaticClockOutExplanation/);
+  assert.match(page, /automaticClockOutAt\(shiftEndDateTime\(shift\)\.getTime\(\), settings\)/);
+  assert.match(page, /automatic: true/);
   assert.match(page, /title: "Automatic clock-out"/);
   assert.match(page, /return "Automatic clock-out";/);
   assert.match(page, /title: `\$\{timing\} \$\{action\}`/);
@@ -929,7 +927,7 @@ test("signed-in users have a header account menu instead of a sidebar logout pan
   assert.match(page, /areEventsExpanded \? "Less" : "More"/);
   assert.match(page, /<span>No-show<\/span>/);
   assert.match(page, /const explanation = item\.event\.explanation\?\.trim\(\) \|\| "n\/a"/);
-  assert.match(page, /clockEventLabel\(item\.event, state\.shifts\)/);
+  assert.match(page, /clockEventLabel\(item\.event, state\.shifts, scheduleEnforcement\)/);
   assert.match(page, /return `\$\{pastAction\} \$\{eventTime < scheduledTime \? "early" : "late"\}`/);
   assert.doesNotMatch(page, /event-explanation exception|event-explanation-panel|SelectedEventExplanation|selectedEventExplanation/);
   assert.match(page, /title="Employee events"/);
@@ -989,7 +987,7 @@ test("signed-in users have a header account menu instead of a sidebar logout pan
   assert.match(page, /notification\.employeeId === activeEmployeeId/);
   assert.doesNotMatch(page, /const employeeScheduleNotifications = !activeUserCanManage/);
   assert.match(page, /scheduleHasBeenPublished: true/);
-  assert.match(page, /\.\.\.current\.employees\s*\.map\(\(employee\) => \(\{/);
+  assert.match(page, /\.\.\.current\.employees\s*\.filter\(employee => scheduleEnforcement\.notifyScheduleChanges && employee\.active && employee\.locationSettings\.sendLocationAlerts\)\s*\.map\(\(employee\) => \(\{/);
   assert.doesNotMatch(page, /current\.employees\s*\.filter\(\(employee\) => employee\.active\)\s*\.map\(\(employee\) => \(\{/);
   assert.match(page, /\.\.\.\(current\.scheduleUpdates \?\? \[\]\)\.slice\(-200\),\s*\.\.\.current\.employees/);
   assert.match(page, /title: "New schedule published"/);
@@ -1110,7 +1108,6 @@ test("manager settings includes a gear icon, copied tabs, and the basic info tem
   const expectedTabs = [
     "Basic info",
     "POS connection",
-    "Plan & billing",
     "Schedule enforcement",
     "Alerts & permissions",
     "Events & trades",
@@ -1118,7 +1115,6 @@ test("manager settings includes a gear icon, copied tabs, and the basic info tem
     "Overtime",
     "Breaks & compliance",
     "Tip settings",
-    "Tip Manager",
     "Payroll settings",
     "Time off",
     "Messages",
@@ -1128,7 +1124,6 @@ test("manager settings includes a gear icon, copied tabs, and the basic info tem
     "Locations & PINs",
     "Notifications",
     "Password & security",
-    "API access (read only)",
   ];
 
   assert.match(page, /id: "settings", label: "Settings", icon: "gear", managerOnly: true/);
