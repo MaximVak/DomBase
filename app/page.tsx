@@ -20,12 +20,14 @@ import { LocationsPinsPanel } from "./locations-pins";
 import { NotificationsSettingsPanel } from "./notifications-settings";
 import { SchedulingHourSelect } from "./scheduling-hour-select";
 import { profileUpdate, profileValues } from "./account-profile";
+import { TimesheetsPanel } from "./timesheets-panel";
+import { timeCardEvents, validateTimeCard } from "./timesheets-model";
+import type { TimeCardDraft, TimeCardEdit } from "./timesheets-model";
 import type { ProfileValues } from "./account-profile";
 
 type Mode = "manager" | "employee";
 type ViewId = "dashboard" | "employees" | "departments_roles" | "schedule" | "time_off" | "my_availability" | "team_availability" | "clockins" | "hours" | "settings" | "profile" | "team_members";
 type CalendarTab = "today" | "week" | "month";
-type HoursSectionTab = "hours" | "pto";
 type SettingsTab =
   | "Basic info"
   | "POS connection"
@@ -178,6 +180,8 @@ type ClockEvent = {
   durationSeconds?: 5;
   explanation?: string;
   automatic?: boolean;
+  role?: string;
+  cardId?: number;
 };
 
 type OperationalAlert = {
@@ -308,6 +312,7 @@ type StaffState = {
   scheduleEvents: ScheduleEvent[];
   clockEvents: ClockEvent[];
   hoursAdjustments: HoursAdjustment[];
+  timeCardEdits?: TimeCardEdit[];
   ptoRequests: PtoRequest[];
   ptoPolicies: PtoPolicy[];
   conversations: TeamConversation[];
@@ -524,6 +529,7 @@ export default function Home() {
   const [mode, setMode] = useState<Mode>("employee");
   const [pin, setPin] = useState("");
   const [activeEmployeeId, setActiveEmployeeId] = useState<number>(1);
+  const [isTimesheetSummary, setIsTimesheetSummary] = useState(false);
   const [activeView, setActiveView] = useState<ViewId>("dashboard");
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isTeamNavOpen, setIsTeamNavOpen] = useState(false);
@@ -580,12 +586,8 @@ export default function Home() {
   const ptoHistoryEmployeeFilterRef = useRef<HTMLDivElement>(null);
   const [activeCalendarTab, setActiveCalendarTab] = useState<CalendarTab>("today");
   const [activeHoursTab, setActiveHoursTab] = useState<CalendarTab>("today");
-  const [activeHoursSectionTab, setActiveHoursSectionTab] = useState<HoursSectionTab>("hours");
   const [hoursRounding, setHoursRounding] = useState<HoursRounding>("actual");
   const [hoursDisplay, setHoursDisplay] = useState<HoursDisplay>("actual");
-  const [hoursSortBy, setHoursSortBy] = useState<"name" | "hours">("name");
-  const [hoursSortDirections, setHoursSortDirections] = useState<Record<"name" | "hours", "asc" | "desc">>({ name: "asc", hours: "asc" });
-  const hoursSortDirection = hoursSortDirections[hoursSortBy];
   const [authMessage, setAuthMessage] = useState("");
   const [employeeForm, setEmployeeForm] = useState(emptyEmployeeForm);
   const [employeeMessage, setEmployeeMessage] = useState("");
@@ -1202,10 +1204,6 @@ export default function Home() {
     () => activeEmployees.filter(employee => canViewTeamSchedule(employee.id, activeEmployeeId, mode === "manager", isPublicSchedule, scheduleEnforcement.employeesOwnScheduleOnly)),
     [activeEmployees, activeEmployeeId, mode, isPublicSchedule, scheduleEnforcement.employeesOwnScheduleOnly],
   );
-  const hoursEmployees = useMemo(
-    () => [...activeEmployees].sort((first, second) => first.name.localeCompare(second.name, undefined, { sensitivity: "base" })),
-    [activeEmployees],
-  );
   const shiftEmployeeIds = useMemo(
     () => new Set(shiftEmployees.map((employee) => employee.id)),
     [shiftEmployees],
@@ -1300,39 +1298,6 @@ export default function Home() {
   const timeExceptionMessage = pendingTimeException
     ? timeExceptionWarningMessage(pendingTimeException, myShift, activeBreakEndTime, currentTime)
     : "";
-  const hoursRows = useMemo(
-    () => {
-      const range = hoursDateRange(hoursDate, activeHoursTab, scheduleEnforcement.workWeekStart);
-      const selectedRounding = activeUserIsAdmin && mode === "manager"
-        ? hoursRounding
-        : hoursDisplay === "rounded"
-          ? state.hoursRoundingMinutes
-          : "actual";
-
-      return hoursEmployees.map((employee) => ({
-        employee,
-        hours: roundHoursToMinutes(
-          adjustedWorkedHoursForRange(
-            state.clockEvents,
-            state.hoursAdjustments ?? [],
-            employee.id,
-            range,
-            currentTime,
-          ),
-          selectedRounding,
-        ),
-      }));
-    },
-    [activeHoursTab, activeUserIsAdmin, currentTime, hoursDate, hoursDisplay, hoursEmployees, hoursRounding, mode, state.clockEvents, state.hoursAdjustments, state.hoursRoundingMinutes, scheduleEnforcement.workWeekStart],
-  );
-  const sortedHoursRows = useMemo(() => [...hoursRows].sort((first, second) => {
-    const nameOrder = first.employee.name.localeCompare(second.employee.name, undefined, { sensitivity: "base" });
-    if (hoursSortBy === "hours") {
-      const hoursOrder = first.hours - second.hours;
-      return (hoursSortDirection === "asc" ? hoursOrder : -hoursOrder) || nameOrder;
-    }
-    return hoursSortDirection === "asc" ? nameOrder : -nameOrder;
-  }), [hoursRows, hoursSortBy, hoursSortDirection]);
   const ptoRows = useMemo(() => {
     const yearToDate = yearToDateRange(new Date(currentTime));
     const ptoPolicyByEmployeeId = new Map<number, PtoPolicy>();
@@ -2031,6 +1996,7 @@ export default function Home() {
   }
 
   function navigateToView(view: ViewId) {
+    setIsTimesheetSummary(false);
     setScheduleEventDraft(null);
     if (view !== activeView) {
       setRosterSearch("");
@@ -2064,7 +2030,6 @@ export default function Home() {
       setScheduleDate(today);
     }
     if (view === "hours") {
-      setActiveHoursSectionTab("hours");
       setActiveHoursTab("today");
       setHoursDate(today);
     }
@@ -2073,7 +2038,6 @@ export default function Home() {
       setTeamMemberProfileTab("job");
       setEditingPayrollEmployeeId(null);
     }
-    if (view === "time_off") setActiveHoursSectionTab("pto");
     if (view === "settings") setActiveSettingsTab("Basic info");
     setIsTeamNavOpen(view === "employees" || view === "departments_roles");
     setIsScheduleNavOpen(["schedule", "time_off", "my_availability", "team_availability"].includes(view));
@@ -2913,10 +2877,6 @@ export default function Home() {
     setScheduleDate(toDateInputValue(nextDate));
   }
 
-  function moveHoursDate(direction: -1 | 1) {
-    setHoursDate((date) => shiftDateByCalendarTab(date, activeHoursTab, direction));
-  }
-
   function setHoursRoundingPolicy() {
     if (!activeUserIsAdmin || hoursRounding === "actual") return;
 
@@ -2924,6 +2884,26 @@ export default function Home() {
       ...current,
       hoursRoundingMinutes: hoursRounding,
     }));
+  }
+
+  function saveTimeCard(draft: TimeCardDraft) {
+    if (mode !== "manager" || !activeEmployee) return;
+    setState((current) => {
+      if (!current.employees.some((employee) => employee.id === draft.employeeId)) return current;
+      if (validateTimeCard(draft, current.clockEvents, Date.now())) return current;
+      const originalEvents = current.clockEvents.filter((event) => draft.eventIds.includes(event.id));
+      const description = (events: ClockEvent[]) => events.map((event) => `${event.type}: ${formatDateTime(event.at)}${event.explanation ? ` (${event.explanation})` : ""}`).join("; ");
+      const updatedEvents = timeCardEvents({ ...draft, note: draft.note || originalEvents.find((event) => event.explanation)?.explanation || "" }, nextId(current.clockEvents));
+      return {
+        ...current,
+        clockEvents: [...current.clockEvents.filter((event) => !draft.eventIds.includes(event.id)), ...updatedEvents],
+        timeCardEdits: [...(current.timeCardEdits ?? []), {
+          id: nextId(current.timeCardEdits ?? []), employeeId: draft.employeeId, date: draft.date,
+          at: new Date().toISOString(), actor: activeEmployee.name, cardId: updatedEvents[0].cardId,
+          before: description(originalEvents), after: description(updatedEvents),
+        }],
+      };
+    });
   }
 
   function editWorkedHours(employee: Employee, displayedHours: number) {
@@ -3293,6 +3273,12 @@ export default function Home() {
 
     setState((current) => ({
       ...current,
+      timeCardEdits: [...(current.timeCardEdits ?? []), {
+        id: nextId(current.timeCardEdits ?? []), employeeId: editingHours.employee.id,
+        date: adjustmentDateForRange(hoursDate, range), at: new Date().toISOString(),
+        actor: activeEmployee?.name ?? "Manager",
+        before: `Worked hours: ${currentHours.toFixed(2)}`, after: `Worked hours: ${requestedHours.toFixed(2)}`,
+      }],
       hoursAdjustments: [
         ...(current.hoursAdjustments ?? []),
         {
@@ -3774,7 +3760,7 @@ export default function Home() {
           <header className="topbar">
             <div>
               <p className="eyebrow">{formatLongDate(today)}</p>
-              <h2>{activeViewLabel(activeView, mode)}</h2>
+              <h2>{activeView === "hours" && isTimesheetSummary ? "Timesheet summary" : activeViewLabel(activeView, mode)}</h2>
             </div>
             {!isPublicSchedule ? (
               <div className="header-actions">
@@ -4679,10 +4665,7 @@ export default function Home() {
                     <button type="button" onClick={() => navigateToView("employees")}>Manage employees</button>
                     <button type="button" onClick={() => navigateToView("schedule")}>Manage schedule</button>
                     <button type="button" onClick={() => navigateToView("clockins")}>View clock-ins</button>
-                    <button type="button" onClick={() => {
-                      navigateToView("hours");
-                      setActiveHoursSectionTab("pto");
-                    }}>View PTO</button>
+                    <button type="button" onClick={() => navigateToView("time_off")}>View PTO</button>
                   </div>
                 </section>
               ) : null}
@@ -6098,150 +6081,70 @@ export default function Home() {
             </section>
           )}
 
-          {activeView === "hours" && !isPublicSchedule ? (
-            <div className="hours-section-tabs" role="tablist" aria-label="Hours and PTO views">
-              <button
-                type="button"
-                className={activeHoursSectionTab === "hours" ? "active" : ""}
-                onClick={() => setActiveHoursSectionTab("hours")}
-                role="tab"
-                aria-selected={activeHoursSectionTab === "hours"}
-              >
-                View hours
-              </button>
-              <button
-                type="button"
-                className={activeHoursSectionTab === "pto" ? "active" : ""}
-                onClick={() => setActiveHoursSectionTab("pto")}
-                role="tab"
-                aria-selected={activeHoursSectionTab === "pto"}
-              >
-                View PTO
-              </button>
-            </div>
-          ) : null}
-
-          {activeView === "hours" && activeHoursSectionTab === "hours" && !isPublicSchedule && (
-            <section className="panel feature-panel">
-              <div className="panel-heading calendar-heading hours-calendar-heading">
-                <div className="hours-date-and-sort">
-                <div className="hours-date-controls">
-                  <button type="button" className="shift-today-button" onClick={() => setHoursDate(today)}>Today</button>
-                  <div className="shift-date-navigation">
-                    <button type="button" className="shift-arrow-button" onClick={() => moveHoursDate(-1)} aria-label={`Previous ${hoursTabControlLabel(activeHoursTab)}`}>
-                      <span aria-hidden="true">‹</span>
-                    </button>
-                    <label className="shift-date-control">
-                      <input type="date" value={hoursDate} onClick={openNativeDatePicker} onInput={(event) => { const date = event.currentTarget.value; if (date) setHoursDate(date); }} aria-label="Hours date" />
-                      <strong>{hoursDateLabel(activeHoursTab, hoursDate, scheduleEnforcement.workWeekStart)}</strong>
-                    </label>
-                    <button type="button" className="shift-arrow-button" onClick={() => moveHoursDate(1)} aria-label={`Next ${hoursTabControlLabel(activeHoursTab)}`}>
-                      <span aria-hidden="true">›</span>
-                    </button>
-                  </div>
-                </div>
-                {mode === "manager" ? (
-                  <div className="hours-sort-toolbar" role="group" aria-label="Sort hours">
-                    {(["name", "hours"] as const).map((sortBy) => {
-                      const active = hoursSortBy === sortBy;
-                      const label = sortBy === "name" ? "Name" : "Hours";
-                      const direction = hoursSortDirections[sortBy];
-                      const order = sortBy === "name" ? (direction === "asc" ? "A–Z" : "Z–A") : (direction === "desc" ? "Most hours first" : "Least hours first");
-                      return (
-                        <button
-                          type="button"
-                          key={sortBy}
-                          className="hours-sort-button"
-                          aria-pressed={active}
-                          title={active ? `${label}: ${order}. Click to reverse order.` : `Sort by ${label.toLowerCase()}`}
-                          onClick={() => {
-                            setHoursSortBy(sortBy);
-                            setHoursSortDirections((directions) => ({ ...directions, [sortBy]: active && directions[sortBy] === "asc" ? "desc" : "asc" }));
-                          }}
-                        >
-                          {label} <span aria-hidden="true">{direction === "asc" ? "↑" : "↓"}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                ) : null}
-                </div>
-                <div className="hours-controls">
-                  <div className="shift-view-control">
-                    <select className="shift-view-select" value={activeHoursTab} onChange={(event) => setActiveHoursTab(event.target.value as CalendarTab)} aria-label="Hours view">
-                      <option value="today">Day</option>
-                      <option value="week">Week</option>
-                      <option value="month">Month</option>
+          {activeView === "hours" && !isPublicSchedule && (
+            <TimesheetsPanel
+              summary={isTimesheetSummary}
+              onSummaryChange={setIsTimesheetSummary}
+              onPayrollId={(employeeId, payrollId) => {
+                if (mode !== "manager") return;
+                setState(current => ({ ...current, employees: current.employees.map(employee => employee.id === employeeId ? { ...employee, payrollId } : employee) }));
+              }}
+              employees={state.employees}
+              events={state.clockEvents}
+              shifts={state.shifts}
+              adjustments={state.hoursAdjustments ?? []}
+              pto={state.ptoRequests ?? []}
+              departments={state.departments}
+              history={state.timeCardEdits ?? []}
+              today={today}
+              now={currentTime}
+              manager={mode === "manager"}
+              activeEmployeeId={activeEmployeeId}
+              weekStart={scheduleEnforcement.workWeekStart}
+              mandatoryMealBreak={scheduleEnforcement.mandatoryMealBreak}
+              mealBreakAfterHours={scheduleEnforcement.mealBreakAfterHours}
+              rounding={activeUserIsAdmin && mode === "manager" ? hoursRounding : hoursDisplay === "rounded" ? state.hoursRoundingMinutes : "actual"}
+              roundingControl={activeUserIsAdmin && mode === "manager" ? (
+                <div className="hours-rounding-actions">
+                  <label className="hours-rounding-control">
+                    <span>Round</span>
+                    <select value={hoursRounding} aria-label="Preview rounded time worked" onChange={(event) => {
+                      const value = event.target.value;
+                      setHoursRounding(value === "actual" ? "actual" : Number(value) as HoursRounding);
+                    }}>
+                      <option value="actual">Actual</option>
+                      <option value={5}>5 min</option>
+                      <option value={10}>10 min</option>
+                      <option value={15}>15 min</option>
                     </select>
-                    <span aria-hidden="true">▾</span>
-                  </div>
-                  {activeUserIsAdmin && mode === "manager" ? (
-                    <div className="hours-rounding-actions">
-                      <label className="hours-rounding-control">
-                        <span>Round</span>
-                        <select
-                          value={hoursRounding}
-                          onChange={(event) => {
-                            const value = event.target.value;
-                            setHoursRounding(value === "actual" ? "actual" : Number(value) as HoursRounding);
-                          }}
-                          aria-label="Preview rounded time worked"
-                        >
-                          <option value="actual">Actual</option>
-                          <option value={5}>5 min</option>
-                          <option value={10}>10 min</option>
-                          <option value={15}>15 min</option>
-                        </select>
-                      </label>
-                      <button
-                        type="button"
-                        className="hours-rounding-set-button"
-                        onClick={setHoursRoundingPolicy}
-                        disabled={hoursRounding === "actual" || hoursRounding === state.hoursRoundingMinutes}
-                      >
-                        Set
-                      </button>
-                    </div>
-                  ) : (
-                    <label className="hours-rounding-control">
-                      <span>View</span>
-                      <select
-                        value={hoursDisplay}
-                        onChange={(event) => setHoursDisplay(event.target.value as HoursDisplay)}
-                        aria-label="View actual or rounded time worked"
-                      >
-                        <option value="actual">Actual</option>
-                        <option value="rounded">Rounded ({state.hoursRoundingMinutes} min)</option>
-                      </select>
-                    </label>
-                  )}
+                  </label>
+                  <button type="button" className="hours-rounding-set-button" onClick={setHoursRoundingPolicy} disabled={hoursRounding === "actual" || hoursRounding === state.hoursRoundingMinutes}>Set</button>
                 </div>
-              </div>
-              <div className="hours-list">
-                {sortedHoursRows
-                  .filter(({ employee }) => mode === "manager" || employee.id === activeEmployeeId)
-                  .map(({ employee, hours }) => (
-                  <article className="hours-row" key={employee.id}>
-                    <div>
-                      <span className="schedule-avatar" aria-hidden="true">{employeeInitials(employee.name)}</span>
-                      <div>
-                        <strong>{employee.name}</strong>
-                        <span>{employee.role}</span>
-                      </div>
-                    </div>
-                    <div className="hours-value">
-                      <strong>{formatWorkedHours(hours)}</strong>
-                      {mode === "manager" ? (
-                        <button type="button" onClick={() => editWorkedHours(employee, hours)}>Edit</button>
-                      ) : null}
-                    </div>
-                  </article>
-                ))}
-              </div>
-            </section>
+              ) : (
+                <label className="hours-rounding-control">
+                  <span>Hours</span>
+                  <select value={hoursDisplay} onChange={(event) => setHoursDisplay(event.target.value as HoursDisplay)} aria-label="View actual or rounded time worked">
+                    <option value="actual">Actual</option>
+                    <option value="rounded">Rounded ({state.hoursRoundingMinutes} min)</option>
+                  </select>
+                </label>
+              )}
+              onAddTeamMember={() => { navigateToView("employees"); openAddEmployeeModal(); }}
+              onSaveCard={saveTimeCard}
+              onAdjust={(employeeId, date, hours) => {
+                const employee = state.employees.find((member) => member.id === employeeId);
+                if (!employee || mode !== "manager") return;
+                setHoursDate(date);
+                setActiveHoursTab("today");
+                editWorkedHours(employee, hours);
+              }}
+              locationName={sidebarLocationName}
+              onBreakSettings={() => { navigateToView("settings"); setActiveSettingsTab("Breaks & compliance"); }}
+              onSettings={() => { navigateToView("settings"); setActiveSettingsTab("Time clock options"); }}
+            />
           )}
 
-          {(activeView === "time_off" || (activeView === "hours" && activeHoursSectionTab === "pto")) && !isPublicSchedule && (
+          {activeView === "time_off" && !isPublicSchedule && (
             <section className="panel feature-panel pto-timeoff-panel">
               {!isViewingPtoHistory ? (
                 <>
@@ -8542,6 +8445,7 @@ function readStoredState() {
       clockEvents: (Array.isArray(parsed.clockEvents) ? parsed.clockEvents : [])
         .filter((event) => employeeIds.has(event.employeeId)),
       hoursAdjustments: (parsed.hoursAdjustments ?? []).filter((adjustment) => employeeIds.has(adjustment.employeeId)),
+      timeCardEdits: (Array.isArray(parsed.timeCardEdits) ? parsed.timeCardEdits : []).filter((edit) => employeeIds.has(edit.employeeId)),
       ptoRequests: (parsed.ptoRequests ?? [])
         .filter((request) => employeeIds.has(request.employeeId))
         .map((request) => ({
@@ -8810,10 +8714,6 @@ function hoursDateLabel(tab: CalendarTab, date: string, weekStart = 1) {
   return formatMonthYear(date);
 }
 
-function hoursTabControlLabel(tab: CalendarTab) {
-  if (tab === "today") return "day";
-  return tab;
-}
 
 function weekCalendarDays(date: string) {
   const selectedDate = parseLocalDate(date);
@@ -9536,16 +9436,6 @@ function formatPtoChartHours(hours: number) {
   return `${Math.trunc(hours)} hrs`;
 }
 
-function roundHoursToMinutes(hours: number, minutes: HoursRounding) {
-  if (minutes === "actual") return hours;
-
-  const totalMinutes = hours * 60;
-  const lowerMinutes = Math.floor(totalMinutes / minutes) * minutes;
-  const shouldRoundUp = totalMinutes - lowerMinutes >= minutes / 2;
-  const roundedMinutes = shouldRoundUp ? lowerMinutes + minutes : lowerMinutes;
-
-  return roundedMinutes / 60;
-}
 
 function SidebarNavIcon({ icon }: { icon: string }) {
   let paths;

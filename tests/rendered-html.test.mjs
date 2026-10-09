@@ -654,9 +654,9 @@ test("manager PTO view supports configurable fixed and rate policies", async () 
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
 
   assert.doesNotMatch(page, /id: "pto", label: "PTO"/);
-  assert.match(page, /HoursSectionTab/);
-  assert.match(page, /View hours/);
-  assert.match(page, /View PTO/);
+  assert.doesNotMatch(page, /HoursSectionTab|hours-section-tabs|Hours and PTO views/);
+  assert.match(page, /activeView === "time_off" && !isPublicSchedule && \(/);
+  assert.match(page, /onClick=\{\(\) => navigateToView\("time_off"\)\}>View PTO<\/button>/);
   assert.match(page, /ptoHours: ptoHoursEarnedForPolicy\(accrualHoursWorked, ptoPolicy, employee\.id\)/);
   assert.match(page, /const ptoPolicyByEmployeeId = new Map<number, PtoPolicy>\(\)/);
   assert.match(page, /ptoPolicyByEmployeeId\.set\(employeeId, policy\)/);
@@ -732,7 +732,7 @@ test("employee Timesheets view is read-only and filtered to the signed-in employ
   assert.match(page, />\s*Set\s*<\/button>/);
   assert.match(styles, /\.hours-rounding-actions \{[^}]*display: flex;/s);
   assert.match(styles, /\.hours-rounding-set-button \{[^}]*background: var\(--blue-deep\);/s);
-  assert.match(page, /if \(view === "hours"\) \{[\s\S]*?setActiveHoursSectionTab\("hours"\)/);
+  assert.match(page, /activeView === "hours" && !isPublicSchedule && \(/);
 });
 
 test("employees can submit persistent PTO requests with required details", async () => {
@@ -822,7 +822,7 @@ test("section navigation resets nested views to their main page", async () => {
   assert.match(page, /setIsViewingPtoHistory\(false\)/);
   assert.match(page, /setIsViewingPtoPolicies\(false\)/);
   assert.match(page, /setEmployeeScheduleTab\("week"\)/);
-  assert.match(page, /setActiveHoursSectionTab\("hours"\)/);
+  assert.match(page, /if \(view === "hours"\) \{\s*setActiveHoursTab\("today"\);\s*setHoursDate\(today\);/);
   assert.match(page, /setActiveSettingsTab\("Basic info"\)/);
 });
 
