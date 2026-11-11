@@ -10974,3 +10974,10 @@ button[aria-label^="Remove"]:focus-visible,
   .team-p2 tr { break-inside: avoid; }
   .team-p2 thead { display: table-header-group; }
 }
+
+.backup-screen { max-width: 52rem; }
+.backup-screen section { border-top: 1px solid var(--line); padding-block: 1.5rem; }
+.backup-facts { display: grid; grid-template-columns: minmax(6rem, 1fr) minmax(0, 3fr); gap: .75rem 1rem; }
+.backup-facts dt { font-weight: 600; }
+.backup-facts dd { margin: 0; overflow-wrap: anywhere; }
+@media (max-width: 480px) { .backup-facts { grid-template-columns: 1fr; gap: .375rem; } .backup-facts dd { margin-bottom: .75rem; } }

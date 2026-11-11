@@ -6,7 +6,7 @@ import { randomBytes } from "node:crypto";
 
 test("built Worker routes an employee password session to only their personal profile", { timeout: 120000 }, async t => {
   const app = await startAuthApp({ seed: seedWorkforceFixture }); t.after(app.close);
-  const call = (path, cookie = "", body, extra = {}) => fetch(`${app.origin}${path}`, { redirect: "manual", headers: { Cookie: cookie,
+  const call = (path, cookie = "", body, extra = {}) => fetch(`${app.origin}${path}`, { redirect: "manual", signal: AbortSignal.timeout(15000), headers: { Cookie: cookie, Connection: "close",
     ...(body === undefined ? {} : { Origin: app.origin, "Content-Type": "application/json" }), ...extra },
     ...(body === undefined ? {} : { method: "POST", body: JSON.stringify(body) }) });
   const data = async r => { const body = await r.json(); assert.equal(r.status, 200, JSON.stringify(body)); return body; };

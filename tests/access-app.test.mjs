@@ -7,7 +7,7 @@ test("built Worker applies saved permissions to real HTTP reads and writes", { t
   const app = await startAuthApp({ seed: seedAccessFixture });
   t.after(app.close);
   const f = app.fixtureData;
-  const call = (path, cookie = "", body) => fetch(`${app.origin}${path}`, { headers: { Cookie: cookie,
+  const call = (path, cookie = "", body) => fetch(`${app.origin}${path}`, { signal: AbortSignal.timeout(15000), headers: { Cookie: cookie, Connection: "close",
     ...(body === undefined ? {} : { Origin: app.origin, "Content-Type": "application/json" }) },
     ...(body === undefined ? {} : { method: "POST", body: JSON.stringify(body) }) });
   const json = async response => { assert.equal(response.status, 200); return response.json(); };

@@ -58,3 +58,37 @@ Use separate development/staging secrets. Never commit environment files, setup
 links, passwords, employee PINs, database exports, recovery keys or runtime state.
 Daily hosted backup automation, real invitation delivery, hardware acceptance
 and independent release approval must be configured and verified separately.
+
+
+## Automatic hosted backups
+
+The optional private backup Worker uses native D1/R2 bindings and the app's
+scheduled event. It saves one completed encrypted backup per Pacific calendar day
+after 2AM, retries failed attempts after 15 minutes and retains every completed
+backup. It has no public Worker/preview URL, no live restore endpoint and no
+platform API token. Database/file data and matching application keys are encrypted
+with a fresh AES-GCM key; only a public RSA encryption key is deployed. Keep the
+separate private recovery file outside the development machine.
+
+After configuring your private staging account/database and enabling R2:
+
+```sh
+pnpm run backup:configure:staging
+pnpm run backup:deploy:staging
+pnpm run build:staging
+pnpm run staging:deploy
+pnpm run backup:status:staging
+pnpm run backup:verify:staging -- --day YYYY-MM-DD
+```
+
+Configuration creates a separate non-public backup bucket and private recovery
+file; it refuses to replace a missing recovery key when the bucket already exists.
+The app's Owner menu links to `/backups` for success/failure/staleness status.
+Managers, employees and registered kiosks cannot view it. Email alerts and automatic
+backup deletion are disabled. Keep real configuration/recovery material out of Git.
+
+Verification downloads only the chosen encrypted daily archive, checks its files,
+restores into a fresh isolated local database/bucket, verifies exact data/files and
+private-field decryption, and invalidates old access only in that restored copy.
+It never overwrites the working database or promotes a restored copy. Preserve
+application source separately for deliberate incident recovery/cutover.

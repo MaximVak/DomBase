@@ -1,4 +1,4 @@
-export { createAuthService } from "../../auth/service";
+export { createAuthService, issueSetupToken } from "../../auth/service";
 export { createAccessService } from "../../access/service";
 export { createWorkforceService } from "../../workforce/service";
 export { encryptSsn, decryptSsn } from "../../workforce/private";
@@ -15,3 +15,5 @@ export { createInvitationService } from "../../team/invitations";
 
 export { createTeamInsights } from "../../team/insights";
 export { createCommunityService } from "../../community/service";
+
+export { createBackupStatusService } from "../../backup/status";

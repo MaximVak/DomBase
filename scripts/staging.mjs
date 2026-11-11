@@ -10,13 +10,14 @@ export const stagingAccount = process.env.DOMBASE_STAGING_ACCOUNT_ID ?? privateC
 if (typeof stagingAccount !== "string" || !/^[0-9a-f]{32}$/i.test(stagingAccount)) throw new Error("Set DOMBASE_STAGING_ACCOUNT_ID or create the private staging configuration first.");
 export const stagingName = "dombase-staging";
 export const stagingBucket = "dombase-staging-files";
+export const stagingBackupName = "dombase-staging-backups";
 
 process.env.WRANGLER_SEND_METRICS = "false";
 process.env.WRANGLER_WRITE_LOGS = "false";
 process.env.WRANGLER_LOG_PATH = resolve(projectRoot, ".wrangler/logs");
 process.env.MINIFLARE_REGISTRY_PATH = resolve(projectRoot, ".wrangler/registry");
 
-export function stagingConfig(databaseId, { files = false, maintenance = false } = {}) {
+export function stagingConfig(databaseId, { files = false, maintenance = false, backups = false } = {}) {
   if (!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(databaseId) || databaseId === "00000000-0000-4000-8000-000000000000") {
     throw new Error("Staging requires a real Cloudflare D1 database ID.");
   }
@@ -27,6 +28,7 @@ export function stagingConfig(databaseId, { files = false, maintenance = false }
     assets: { directory: "./dist/client", binding: "ASSETS" },
     d1_databases: [{ binding: "DB", database_name: stagingName, database_id: databaseId, migrations_dir: "./drizzle" }],
     ...(files ? { r2_buckets: [{ binding: "FILES", bucket_name: stagingBucket }] } : {}),
+    ...(backups ? { services: [{ binding: "BACKUP_SERVICE", service: stagingBackupName }] } : {}),
     ...(maintenance ? { triggers: { crons: ["* * * * *"] } } : {}),
   };
 }
@@ -34,11 +36,12 @@ export function stagingConfig(databaseId, { files = false, maintenance = false }
 export async function readStagingConfig() {
   // The generated file is JSON (valid JSONC), deliberately without secrets.
   const config = JSON.parse(await readFile(stagingPath, "utf8"));
-  const expected = stagingConfig(config.d1_databases?.[0]?.database_id ?? "", { files: config.r2_buckets !== undefined, maintenance: config.triggers !== undefined });
+  const expected = stagingConfig(config.d1_databases?.[0]?.database_id ?? "", { files: config.r2_buckets !== undefined, maintenance: config.triggers !== undefined, backups: config.services !== undefined });
   for (const key of ["name", "account_id", "main", "compatibility_date", "workers_dev"]) {
     if (config[key] !== expected[key]) throw new Error(`Unexpected staging ${key}; refusing to change a different target.`);
   }
   if (JSON.stringify(config.r2_buckets) !== JSON.stringify(expected.r2_buckets)
+    || JSON.stringify(config.services) !== JSON.stringify(expected.services)
     || JSON.stringify(config.triggers) !== JSON.stringify(expected.triggers)
     || JSON.stringify(config.d1_databases) !== JSON.stringify(expected.d1_databases)
     || JSON.stringify(config.assets) !== JSON.stringify(expected.assets)
@@ -115,7 +118,8 @@ async function main() {
     if (config.name !== stagingName || config.account_id !== stagingAccount
       || config.d1_databases?.[0]?.database_id !== intended.d1_databases[0].database_id
       || JSON.stringify(config.triggers?.crons ?? []) !== JSON.stringify(intended.triggers?.crons ?? [])
-      || JSON.stringify(config.r2_buckets ?? []) !== JSON.stringify(intended.r2_buckets ?? [])) throw new Error("Build the staging target before deploying; the current build targets a different environment.");
+      || JSON.stringify(config.r2_buckets ?? []) !== JSON.stringify(intended.r2_buckets ?? [])
+      || JSON.stringify(config.services ?? []) !== JSON.stringify(intended.services ?? [])) throw new Error("Build the staging target before deploying; the current build targets a different environment.");
     if ((await environmentCopies(resolve(projectRoot, "dist"))).length) throw new Error("Run build:staging to remove local environment copies before deployment.");
     await wrangler(["deploy", "--config", built]);
   } else if (action === "secret") {

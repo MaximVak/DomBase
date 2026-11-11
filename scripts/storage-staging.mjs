@@ -18,7 +18,7 @@ export async function configureStorage() {
   const config = await readStagingConfig(); let status = await storageStatus();
   if (!status.exists) { await wrangler(["r2", "bucket", "create", stagingBucket, "--config", stagingPath], { capture: true }); status = await storageStatus(); }
   if (!status.private) throw new Error("The approved bucket must have no public access before it can be bound.");
-  await writeFile(stagingPath, JSON.stringify(stagingConfig(config.d1_databases[0].database_id, { files: true, maintenance: Boolean(config.triggers) }), null, 2) + "\n");
+  await writeFile(stagingPath, JSON.stringify(stagingConfig(config.d1_databases[0].database_id, { files: true, maintenance: Boolean(config.triggers), backups: Boolean(config.services) }), null, 2) + "\n");
   return { bucket: stagingBucket, private: true, bindingPrepared: true, deployed: false };
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

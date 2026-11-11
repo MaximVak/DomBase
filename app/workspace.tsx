@@ -3593,6 +3593,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                       <button type="button" role="menuitem" onClick={() => navigateToView("profile")}>Profile</button>
                       <button type="button" role="menuitem" onClick={() => window.location.assign("/access")}>Your access</button>
                       <button type="button" role="menuitem" onClick={() => navigateToView("team_members")}>Team members</button>
+                      {account.accessLevel === "owner" && <button type="button" role="menuitem" onClick={() => window.location.assign("/backups")}>Backups</button>}
                       <button type="button" role="menuitem" className="account-sign-out" disabled={isSigningOut} onClick={signOut}>Sign out</button>
                       <button type="button" role="menuitem" disabled={isSigningOut} onClick={signOutEverywhere}>Sign out everywhere</button>
                       {authMessage ? <p role="alert">{authMessage}</p> : null}

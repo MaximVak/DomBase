@@ -60,3 +60,5 @@ yarn-error.log*
 /self/README.md
 /team/README.md
 /workforce/README.md
+
+/wrangler.backup.jsonc

@@ -6,9 +6,11 @@ import { registeredDevice } from "../kiosk/device";
 import * as schema from "../db/schema";
 import { runScheduledMaintenance } from "../workforce/maintenance";
 import { cleanupDocumentUploads } from "../documents/maintenance";
+import { scheduleHostedBackup } from "../backup/schedule";
+import type { BackupScheduleEnv } from "../backup/schedule";
 import type { DocumentBucket } from "../documents/types";
 
-interface Env {
+interface Env extends BackupScheduleEnv {
   ASSETS: Fetcher;
   DB: D1Database;
   FILES?: DocumentBucket;
@@ -34,6 +36,7 @@ interface ExecutionContext {
 
 const worker = {
   async scheduled(_event: unknown, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(scheduleHostedBackup(env));
     const db = drizzle(env.DB, { schema });
     ctx.waitUntil(runScheduledMaintenance(db).then(recorded => {
       // Scheduled-only, non-personal evidence that background work ran without a browser.
@@ -44,7 +47,7 @@ const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
-    if (["/", "/login", "/setup", "/access", "/kiosk-admin", "/me", "/team", "/team/reports", "/community", "/invite"].includes(url.pathname)) {
+    if (["/", "/login", "/setup", "/access", "/kiosk-admin", "/me", "/team", "/team/reports", "/community", "/invite", "/backups"].includes(url.pathname)) {
       try {
         if (await registeredDevice(drizzle(env.DB, { schema }), request.headers.get("cookie"), url)) {
           return new Response(null, { status: 303, headers: { Location: "/kiosk", "Cache-Control": "private, no-store", "Referrer-Policy": "no-referrer" } });
@@ -66,7 +69,7 @@ const worker = {
     }
 
     const response = await handler.fetch(request, env, ctx);
-    if (["/", "/login", "/setup", "/access", "/kiosk", "/kiosk-admin", "/me", "/team", "/team/reports", "/community", "/invite"].includes(url.pathname) || /^\/api\/(auth|access|workforce|workspace|documents|kiosk|kiosk-admin|self|team|community|invitations)\//.test(url.pathname)) {
+    if (["/", "/login", "/setup", "/access", "/kiosk", "/kiosk-admin", "/me", "/team", "/team/reports", "/community", "/invite", "/backups"].includes(url.pathname) || /^\/api\/(auth|access|workforce|workspace|documents|kiosk|kiosk-admin|self|team|community|invitations|backups)\//.test(url.pathname)) {
       const headers = new Headers(response.headers);
       headers.set("Cache-Control", "private, no-store");
       headers.set("Referrer-Policy", "no-referrer");
