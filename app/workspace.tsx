@@ -5,6 +5,7 @@ import type { CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { useSharedWorkspace } from "./shared-workspace";
 import { equal, newRecordId } from "../workforce/contract";
+import { PrintTable } from "./print-table";
 import { rosterCopyHeaders, rosterCopyRows, rosterCsv } from "./roster-export";
 import { alertsPermissionsFields, automaticClockOutAt, canManageScheduleRole, canViewTeamSchedule, clockInTiming, defaultScheduleEnforcement, normalizeScheduleEnforcement, scheduleDraftIsAllowed, scheduleEnforcementFields, schedulingSettingsForSave, workWeekOffset } from "./schedule-enforcement";
 import type { ScheduleEnforcement } from "./schedule-enforcement";
@@ -5782,10 +5783,10 @@ export default function Home({ account }: { account: DashboardAccount }) {
         <section className="roster-print-sheet" aria-hidden="true">
           <h1>Team roster</h1>
           <p>{sidebarLocationName} · {filteredRosterEmployees.length} team {filteredRosterEmployees.length === 1 ? "member" : "members"} · {formatNumericDate(`${today}T12:00:00`)}</p>
-          <table>
-            <thead><tr>{rosterCopyHeaders.map((header) => <th key={header} scope="col">{header}</th>)}</tr></thead>
-            <tbody>{rosterRowsForCopy.map((row, index) => <tr key={filteredRosterEmployees[index].id}>{row.map((value, column) => <td key={column}>{value}</td>)}</tr>)}</tbody>
-          </table>
+          <PrintTable
+            header={<tr>{rosterCopyHeaders.map((header) => <th key={header} scope="col">{header}</th>)}</tr>}
+            rows={rosterRowsForCopy.map((row, index) => <tr key={filteredRosterEmployees[index].id}>{row.map((value, column) => <td key={column}>{value}</td>)}</tr>)}
+          />
           {filteredRosterEmployees.length === 0 ? <p>No team members match your search or filters.</p> : null}
         </section>, document.body,
       ) : null}

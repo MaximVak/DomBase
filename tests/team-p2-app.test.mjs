@@ -5,7 +5,7 @@ import { startAuthApp } from "./support/auth-app-fixture.mjs";
 import { seedP2Fixture } from "./support/p2-fixture.mjs";
 test("built Worker serves protected P2 reports and own employee recognition across fresh sign-ins",{timeout:120000},async t=>{
   const app=await startAuthApp({seed:seedP2Fixture});t.after(app.close);const f=app.fixtureData;
-  const call=(path,cookie="",body,headers={})=>fetch(app.origin+path,{redirect:"manual",method:body===undefined?"GET":"POST",headers:{Cookie:cookie,...(body===undefined?{}:{Origin:app.origin,"Content-Type":"application/json"}),...headers},...(body===undefined?{}:{body:JSON.stringify(body)})});
+  const call=(path,cookie="",body,headers={})=>fetch(app.origin+path,{redirect:"manual",signal:AbortSignal.timeout(20000),method:body===undefined?"GET":"POST",headers:{Cookie:cookie,Connection:"close",...(body===undefined?{}:{Origin:app.origin,"Content-Type":"application/json"}),...headers},...(body===undefined?{}:{body:JSON.stringify(body)})});
   const ok=async response=>{assert.equal(response.status,200,await response.clone().text());return response.json();};
   const login=async email=>{const res=await call("/api/auth/login","",{email,password:app.password});await ok(res);return res.headers.get("set-cookie").split(";")[0];};
   const owner=await login(app.email),employee=await login(f.employeeAccount.email);

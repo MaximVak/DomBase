@@ -5865,7 +5865,7 @@ label.enforcement-rule-line {
   .roster-print-sheet p { margin: 0 0 18px; }
   .roster-print-sheet table { width: 100%; border-collapse: collapse; table-layout: fixed; }
   .roster-print-sheet thead { display: table-header-group; }
-  .roster-print-sheet tr { break-inside: avoid; }
+  .roster-print-sheet tr, .roster-print-sheet th, .roster-print-sheet td { break-inside: avoid; page-break-inside: avoid; }
   .roster-print-sheet th, .roster-print-sheet td { border: 1px solid #cccccc; padding: 8px; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
   .roster-print-sheet th { background: #eeeeee; font-weight: 700; }
 }
@@ -10974,7 +10974,7 @@ button[aria-label^="Remove"]:focus-visible,
   .team-p2 .team-table-scroll { overflow: visible; }
   .team-p2 table { width: 100%; table-layout: fixed; font-size: 9pt; }
   .team-p2 :is(th,td) { overflow-wrap: anywhere; padding: 6px 4px; }
-  .team-p2 tr { break-inside: avoid; }
+  .team-p2 tr, .team-p2 th, .team-p2 td { break-inside: avoid; page-break-inside: avoid; }
   .team-p2 thead { display: table-header-group; }
 }
 
@@ -11052,4 +11052,17 @@ button[aria-label^="Remove"]:focus-visible,
   .shift-week-card strong, .shift-week-card span { font-size: .8125rem; line-height: 1.3; }
   .schedule-event-list button { min-height: 44px; overflow-wrap: normal; }
   .schedule-scroll-hint { font-size: .75rem; }
+}
+
+/* Small print table groups retain full rows and nearby column headings in
+   native engines that do not paginate a long table as a unit. */
+.report-print-groups { display: none; }
+@media print {
+  .report-screen-table { display: none !important; }
+  .report-print-groups { display: block; }
+  .report-print-group { break-inside: avoid; page-break-inside: avoid; margin-bottom: 12pt; }
+  .report-print-group:last-child { margin-bottom: 0; }
+  .report-print-group table { margin: 0; }
+  .p2-event-list li { break-inside: avoid; page-break-inside: avoid; }
+  .team-p2 :is(h2,h3) { break-after: avoid; page-break-after: avoid; }
 }
