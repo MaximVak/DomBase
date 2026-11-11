@@ -8,6 +8,76 @@
       "when": 1786168523238,
       "tag": "0000_wise_princess_powerful",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1793435340149,
+      "tag": "0001_shared_foundation",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1793435340436,
+      "tag": "0002_preserve_punch_history",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1793435803475,
+      "tag": "0003_preserve_referenced_records",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1793483090260,
+      "tag": "0004_account_setup_tokens",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1793485126740,
+      "tag": "0005_account_access_revision",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1793606888561,
+      "tag": "0006_kiosk_access",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1793609445575,
+      "tag": "0007_shared_workforce",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1793661007215,
+      "tag": "0008_protected_documents",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1793858531284,
+      "tag": "0009_striped_hawkeye",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1793860924061,
+      "tag": "0010_silky_baron_strucker",
+      "breakpoints": true
     }
   ]
 }

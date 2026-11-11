@@ -1,0 +1,44 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { startAuthApp } from "./support/auth-app-fixture.mjs";
+import { seedWorkforceFixture, newEmployee } from "./support/workforce-fixture.mjs";
+import { cookiesOf, employeePin } from "./support/kiosk-fixture.mjs";
+import { loadServerModule } from "../scripts/server-runtime.mjs";
+
+test("built Worker shares workforce records across independent logins and includes real tablet punches", { timeout: 120000 }, async t => {
+  const app = await startAuthApp({ seed: seedWorkforceFixture }); t.after(app.close); const f = app.fixtureData;
+  const { stateChanges, saveBody, newToken } = await loadServerModule("tests/support/workforce-runtime.ts");
+  const call = (path, cookie = "", body, headers = {}) => fetch(app.origin + path, { redirect: "manual", headers: { Cookie: cookie, ...(body === undefined ? {} : { Origin: app.origin, "Content-Type": "application/json" }), ...(path === "/api/workspace/commit" ? { Prefer: "return=minimal" } : {}), ...headers }, ...(body === undefined ? {} : { method: "POST", body: JSON.stringify(body) }) });
+  const ok = async response => { assert.equal(response.status, 200); return response.json(); };
+  const login = async email => { const response = await call("/api/auth/login", "", { email, password: app.password }); await ok(response); return cookiesOf(response)[0]; };
+  const snapshot = cookie => call("/api/workspace/state", cookie).then(ok);
+  const owner = await login(app.email); let peer = await login(f.owner.email); const manager = await login(f.manager.email);
+  assert.equal((await call("/api/workspace/state")).status, 401);
+  assert.equal((await call("/api/workspace/state", `dombase-kiosk-device=${f.deviceToken}; ${owner}`)).status, 403);
+  const first = await snapshot(owner); assert.ok(first.state.employees.length > 0);
+  const next = structuredClone(first.state); next.employees.push(newEmployee(80001, f.roleA.name, first.basicInfo.locationName, "HTTP shared worker"));
+  const body = saveBody(first, stateChanges(first.state, next, -1), newToken());
+  const saved = await call("/api/workspace/commit", owner, body); assert.match(saved.headers.get("cache-control"), /no-store/);
+  assert.deepEqual(await ok(saved), { saved: true, id: body.id, revision: first.revision + 1 });
+  assert.deepEqual(await ok(await call("/api/workspace/commit", owner, body)), { saved: true, id: body.id, revision: first.revision + 1 });
+  assert.ok((await snapshot(peer)).state.employees.some(e => e.id === 80001));
+  const newSession = await login(app.email); assert.ok((await snapshot(newSession)).state.employees.some(e => e.id === 80001));
+  const view = await snapshot(owner); // An unlinked Owner uses its authenticated account key.
+  const account = await ok(await call("/api/auth/session", owner)); const ownKey = account.account.employeeId ?? -account.account.id;
+  const date = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  const draft = { upsertedShifts: [{ id: 81001, employeeId: f.a.id, date, start: "00:00", end: "23:59", role: f.roleA.name, station: "Floor", notes: "Published over HTTP" }], deletedShiftIds: [], affectedEmployeeIds: [f.a.id] };
+  const draftState = structuredClone(view.state); draftState.scheduleDraftsByManager[ownKey] = draft;
+  await ok(await call("/api/workspace/commit", owner, saveBody(view, stateChanges(view.state, draftState, ownKey), newToken())));
+  const ready = await snapshot(owner); await ok(await call("/api/workspace/commit", owner, saveBody(ready, [{ entity: "schedule-publish", id: 1, before: ready.state.scheduleDraftsByManager[ownKey], after: { publish: true } }], newToken())));
+  assert.ok((await snapshot(peer)).state.shifts.some(shift => shift.id === 81001));
+  await ok(await call("/api/kiosk-admin/employee-pin", owner, { employeeId: f.a.id, pin: employeePin, password: app.password }));
+  const registration = await call("/api/kiosk-admin/register", owner, { name: "HTTP shared tablet", password: app.password }); await ok(registration);
+  const device = cookiesOf(registration).find(cookie => cookie.startsWith("dombase-kiosk-device=")); assert.ok(device);
+  const signed = await call("/api/kiosk/pin", device, { pin: employeePin }); await ok(signed); const person = `${device}; ${cookiesOf(signed)[0]}`;
+  await ok(await call("/api/kiosk/clock", person, { eventType: "in", roleId: f.roleA.id, explanation: "HTTP shared clock" }));
+  const otherView = await snapshot(peer); assert.ok(otherView.state.clockEvents.some(event => event.employeeId === f.a.id && event.type === "in" && event.explanation === "HTTP shared clock"));
+  const managerView = await snapshot(manager); assert.equal(managerView.state.employees.some(e => e.id === f.b.id), false); assert.equal(managerView.state.employees.some(e => e.socialSecurityNumber || e.wage), false);
+  assert.equal((await call("/api/workspace/commit", manager, saveBody(managerView, [{ entity: "employee", id: f.a.id, before: managerView.state.employees.find(e => e.id === f.a.id), after: { ...managerView.state.employees.find(e => e.id === f.a.id), wage: "$99.00/hr" } }], newToken()))).status, 403);
+  const current = await snapshot(peer); assert.equal((await call("/api/workspace/commit", peer, saveBody(current, [{ entity: "business", id: 1, before: current.basicInfo, after: { ...current.basicInfo, companyName: "evil" } }], newToken()), { Origin: "https://attacker.test" })).status, 403);
+  peer = await login(f.owner.email); assert.ok((await snapshot(peer)).state.shifts.some(shift => shift.id === 81001));
+});

@@ -1,0 +1,30 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { createHash, randomBytes } from "node:crypto";
+import { startAuthApp } from "./support/auth-app-fixture.mjs";
+import { seedWorkforceFixture } from "./support/workforce-fixture.mjs";
+import { cookiesOf } from "./support/kiosk-fixture.mjs";
+
+test("built Worker uploads and downloads protected document bytes across fresh logins", { timeout: 120000 }, async t => {
+  const app = await startAuthApp({ seed: seedWorkforceFixture }); t.after(app.close); const f = app.fixtureData;
+  const call = (path, cookie = "", body, method = body === undefined ? "GET" : "POST", headers = {}) => fetch(app.origin + path, { method, redirect: "manual", headers: { Cookie: cookie, ...(body === undefined ? {} : { Origin: app.origin, "Content-Type": body instanceof Uint8Array ? "image/png" : "application/json" }), ...headers }, ...(body === undefined ? {} : { body: body instanceof Uint8Array ? body : JSON.stringify(body) }) });
+  const ok = async response => { assert.equal(response.status, 200, await response.clone().text()); return response.json(); };
+  const login = async email => { const response = await call("/api/auth/login", "", { email, password: app.password }); await ok(response); return cookiesOf(response)[0]; };
+  const bytes = new Uint8Array(Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII=", "base64"));
+  let owner = await login(app.email); const peer = await login(f.owner.email); const manager = await login(f.manager.email);
+  const body = { id: randomBytes(32).toString("base64url"), employeeId: f.a.id, kind: "certificate", title: "HTTP certificate fixture", expirationDate: "2027-11-01", fileName: "certificate-fixture.png", contentType: "image/png", sizeBytes: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") };
+  assert.equal((await call("/api/documents/prepare", "", body)).status, 401);
+  const before = await ok(await call("/api/workspace/state", peer));
+  await ok(await call("/api/documents/prepare", owner, body));
+  const saved = await call(`/api/documents/${body.id}/content`, owner, bytes, "PUT"); await ok(saved); assert.match(saved.headers.get("cache-control"), /no-store/);
+  const view = await ok(await call("/api/workspace/state", peer)); assert.ok(view.revision > before.revision);
+  const certificate = view.state.employees.find(e => e.id === f.a.id).certificates.find(c => c.fileId === body.id); assert.equal(certificate.name, body.title); assert.equal(certificate.fileName, body.fileName);
+  owner = await login(app.email);
+  const download = await call(`/api/documents/${body.id}/download`, owner); assert.equal(download.status, 200); assert.deepEqual(new Uint8Array(await download.arrayBuffer()), bytes); assert.match(download.headers.get("content-disposition"), /attachment/); assert.equal(download.headers.get("x-content-type-options"), "nosniff");
+  assert.equal((await call(`/api/documents/${body.id}/download`, manager)).status, 403);
+  assert.equal((await call(`/api/documents/${body.id}/download`, `dombase-kiosk-device=${f.deviceToken}; ${owner}`)).status, 403);
+  assert.equal((await call("/api/documents/prepare", owner, { ...body, id: randomBytes(32).toString("base64url") }, "POST", { Origin: "https://attacker.test" })).status, 403);
+  const onboarding = { ...body, id: randomBytes(32).toString("base64url"), kind: "onboarding", title: "W-4 Form", expirationDate: undefined };
+  await ok(await call("/api/documents/prepare", owner, onboarding)); await ok(await call(`/api/documents/${onboarding.id}/content`, owner, bytes, "PUT"));
+  const latest = await ok(await call("/api/workspace/state", peer)); assert.equal(latest.state.employees.find(e => e.id === f.a.id).onboardingFileIds["W-4 Form"], onboarding.id);
+});

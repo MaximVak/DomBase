@@ -1,0 +1,3 @@
+import type { Milestone, ShiftScore, reliabilityTotals } from "./insights-rules";
+export type CertificationRow = { employeeId: number; name: string; active: boolean; certificateId: number; title: string; expirationDate: string | null; status: string };
+export type TeamInsightsData = { today: string; start: string; end: string; zone: string; revision: number; canCertificates: boolean; canReliability: boolean; certificates: CertificationRow[]; certificateWarnings: CertificationRow[]; milestones: Milestone[]; shifts: ShiftScore[]; totals: ReturnType<typeof reliabilityTotals> | null; people: ({ id: number; name: string } & ReturnType<typeof reliabilityTotals>)[] };

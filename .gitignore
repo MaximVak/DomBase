@@ -31,6 +31,7 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+.dev.vars*
 
 # vercel
 .vercel
@@ -39,3 +40,23 @@ yarn-error.log*
 /.wrangler/
 /outputs/
 /work/
+
+# Private deployment configuration and operational notes
+/wrangler.staging.jsonc
+/HOSTING.md
+/NOW.md
+/STAGE-0-ACCEPTANCE.md
+/STAGE-0-INVENTORY.md
+/STAGE-1-LOCAL-ACCEPTANCE.md
+/WORK-LOG.md
+/access/README.md
+/auth/README.md
+/backup/README.md
+/community/README.md
+/db/README.md
+/demo/README.md
+/documents/README.md
+/kiosk/README.md
+/self/README.md
+/team/README.md
+/workforce/README.md

@@ -28,7 +28,7 @@ export function AccountProfilePanel({ values, name, companyName, position, start
   values: ProfileValues; name: string; companyName: string; position: string; startDate: string; endDate?: string;
   certificates: Certificate[]; certificateError: string; addCertificateRef: RefObject<HTMLButtonElement | null>;
   onAddCertificate: () => void; onDownloadCertificate: (certificate: Certificate) => void;
-  onSave: (values: ProfileValues) => string | null; formatPhone: (value: string) => string;
+  onSave: (values: ProfileValues) => string | null | Promise<string | null>; formatPhone: (value: string) => string;
 }) {
   const [editedValues, setEditedValues] = useState<ProfileValues | null>(null);
   const [editing, setEditing] = useState<"profile" | "emergency" | null>(null);
@@ -44,10 +44,10 @@ export function AccountProfilePanel({ values, name, companyName, position, start
     setError("");
     window.requestAnimationFrame(() => inputRefs.current[field]?.focus());
   }
-  function submit(event: FormEvent<HTMLFormElement>) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!dirty) return;
-    const result = onSave(draft);
+    const result = await onSave(draft);
     if (result) { setError(result); return; }
     setEditedValues(null);
     setEditing(null);
@@ -63,7 +63,7 @@ export function AccountProfilePanel({ values, name, companyName, position, start
       {editing === section ? <input id={`account-profile-${field.key}`} ref={element => { inputRefs.current[field.key] = element; }}
         type={field.type ?? "text"} autoComplete={field.autoComplete} value={value}
         required={field.key === "firstName"} maxLength={field.key === "socialSecurityNumber" ? 11 : undefined}
-        onClick={field.type === "date" ? event => { try { event.currentTarget.showPicker?.(); } catch {} } : undefined}
+        onClick={field.type === "date" ? event => { try { event.currentTarget.showPicker?.(); } catch { /* Browsers without a native picker keep the date input usable. */ } } : undefined}
         onChange={event => {
           let next = event.target.value;
           if (field.key === "socialSecurityNumber") {

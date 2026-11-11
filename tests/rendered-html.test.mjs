@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
+async function workspaceSource() {
+  return (await Promise.all(["../app/workspace.tsx", "../workforce/model.ts"].map(path => readFile(new URL(path, import.meta.url), "utf8")))).join("\n");
+}
+
 async function rosterExportModule() {
   const { transpileModule, ModuleKind } = await import("typescript");
   const source = await readFile(new URL("../app/roster-export.ts", import.meta.url), "utf8");
@@ -16,7 +20,7 @@ test("roster copies contain visible roster fields and omit employee credentials"
     { id: 2, name: "Former member", email: "", phone: "", accessLevel: "Employee", location: "Main", role: "Sales", wage: "$25/hr", active: false, terminated: true },
     { id: 3, name: "Inactive member", email: "", phone: "", accessLevel: "Manager", location: "Main", role: "Sales", wage: "", active: false },
   ]);
-  assert.equal(rows[0][3], "Admin");
+  assert.equal(rows[0][3], "Employee");
   assert.equal(rows[0][7], "Active");
   assert.equal(rows[1][7], "Terminated");
   assert.equal(rows[2][7], "Inactive");
@@ -33,13 +37,13 @@ test("roster CSV preserves punctuation and Unicode and protects spreadsheet form
   assert.equal(rosterCsv([]).split("\r\n").length, 2);
 });
 
-async function render() {
+async function render(path = "/login") {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
   workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
   const { default: worker } = await import(workerUrl.href);
 
   return worker.fetch(
-    new Request("http://localhost/", {
+    new Request(`http://localhost${path}`, {
       headers: { accept: "text/html" },
     }),
     {
@@ -54,19 +58,22 @@ async function render() {
   );
 }
 
-test("server-renders the DomBase staff shell", async () => {
+test("server-renders email/password login and protects the staff shell", async () => {
   const response = await render();
-  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const page = await workspaceSource();
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
   assert.match(html, /<title>DomBase<\/title>/i);
   assert.match(html, /DomBase/);
-  assert.match(html, /PIN/);
-  assert.match(page, /setPin\(event\.target\.value\.replace\(\/\\D\/g, ""\)\.slice\(0, 4\)\)/);
-  assert.match(page, /aria-label="Access PIN"[^]*?maxLength=\{4\}[^]*?pattern="\[0-9\]\{4\}"/);
-  assert.match(html, /Enter/);
+  assert.match(html, /Sign in/);
+  assert.match(html, /type="email"/);
+  assert.match(html, /type="password"/);
+  assert.doesNotMatch(page, /managerPin|pin: "0000"|function signIn\(/);
+  const dashboard = await render("/");
+  assert.ok([302, 303, 307].includes(dashboard.status));
+  assert.equal(dashboard.headers.get("location"), "/login");
   assert.doesNotMatch(html, /Workforce/);
   assert.doesNotMatch(html, /Unlock/);
   assert.doesNotMatch(html, /Manager mode/);
@@ -75,7 +82,7 @@ test("server-renders the DomBase staff shell", async () => {
 });
 
 test("dashboard navigation is labeled Home and shows the signed-in mode", async () => {
-  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const page = await workspaceSource();
 
   assert.match(page, /id: "dashboard", label: "Home", icon: "home"/);
   assert.match(page, /mode === "manager" \? "Manager mode" : "Employee mode"/);
@@ -87,7 +94,7 @@ test("dashboard navigation is labeled Home and shows the signed-in mode", async 
 });
 
 test("Team is a sidebar dropdown beneath Home with roster and role routes", async () => {
-  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const page = await workspaceSource();
 
   assert.match(page, /label: "Home", icon: "home"[^]*label: "Team", icon: "person"[^]*label: "Schedule", icon: "calendar"/);
   assert.match(page, /className="sidebar-nav-group"/);
@@ -99,7 +106,7 @@ test("Team is a sidebar dropdown beneath Home with roster and role routes", asyn
 });
 
 test("Schedule is a sidebar dropdown with scheduling routes", async () => {
-  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const page = await workspaceSource();
 
   assert.match(page, /aria-controls="schedule-sidebar-menu"/);
   assert.match(page, />Shifts<\/button>/);
@@ -121,7 +128,7 @@ test("Schedule is a sidebar dropdown with scheduling routes", async () => {
 });
 
 test("manager schedule can open the shared add-team-member modal below the planner", async () => {
-  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const page = await workspaceSource();
   const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
 
   assert.match(page, /className="shift-planner-layout"/);
@@ -133,7 +140,7 @@ test("manager schedule can open the shared add-team-member modal below the plann
 });
 
 test("shift editor uses clear time labels and available role options", async () => {
-  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const page = await workspaceSource();
   const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
 
   assert.match(page, /placeholder="Start time"/);
@@ -270,9 +277,7 @@ test("shift editor uses clear time labels and available role options", async () 
   assert.match(page, /disabled=\{unpublishedShiftCount === 0\}/);
   assert.match(page, /type ScheduleDraft = \{/);
   assert.match(page, /scheduleDraftsByManager: Record<number, ScheduleDraft>/);
-  assert.match(page, /const stateBackupStorageKey = "dombase-staff-state-backup-v1"/);
-  assert.match(page, /isRecoverableStaffRecord\(previousState\)/);
-  assert.match(page, /return normalizeStoredState\(backupState\)/);
+  assert.doesNotMatch(page, /localStorage/);
   assert.doesNotMatch(page, /localStorage\.removeItem\(storageKey\)/);
   assert.match(page, /const activeScheduleDraft = mode === "manager"/);
   assert.match(page, /const draftShiftIds = new Set\(activeScheduleDraft\?\.upsertedShifts\.map\(\(shift\) => shift\.id\) \?\? \[\]\)/);
@@ -296,7 +301,7 @@ test("shift editor uses clear time labels and available role options", async () 
   assert.match(styles, /\.time-input-picker \{[^}]*position: absolute;[^}]*grid-template-columns: repeat\(3, minmax\(88px, 1fr\)\);/s);
   assert.match(styles, /\.time-input-picker-options \{[^}]*height: 138px;[^}]*max-height: 138px;[^}]*overflow-y: auto;[^}]*scroll-snap-type: y mandatory;/s);
   assert.match(styles, /\.time-input-picker-options \{[^}]*scrollbar-width: none;[^}]*-ms-overflow-style: none;/s);
-  assert.match(styles, /\.time-input-picker-options::\-webkit-scrollbar \{[^}]*display: none;/s);
+  assert.match(styles, /\.time-input-picker-options::-webkit-scrollbar \{[^}]*display: none;/s);
   assert.match(styles, /\.time-input-picker-option\[aria-selected="true"\] \{[^}]*background: #e7f1fb;/s);
   assert.match(styles, /html \{[^}]*scrollbar-gutter: stable;/s);
   assert.match(styles, /\.shift-date-navigation \{[^}]*grid-template-columns: 42px minmax\(250px, auto\) 42px;/s);
@@ -321,7 +326,7 @@ test("shift editor uses clear time labels and available role options", async () 
 });
 
 test("sidebar dropdowns collapse when another section is selected", async () => {
-  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const page = await workspaceSource();
 
   assert.match(page, /setIsTeamNavOpen\(view === "employees" \|\| view === "departments_roles"\)/);
   assert.match(page, /setIsScheduleNavOpen\(\["schedule", "time_off", "my_availability", "team_availability"\]\.includes\(view\)\)/);
@@ -330,7 +335,7 @@ test("sidebar dropdowns collapse when another section is selected", async () => 
 });
 
 test("Roster includes complete team fields without placeholders for contact, location, or role", async () => {
-  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const page = await workspaceSource();
   const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
 
   [
@@ -347,22 +352,16 @@ test("Roster includes complete team fields without placeholders for contact, loc
   assert.doesNotMatch(page, /location: "To be added"/);
   assert.doesNotMatch(page, /wage: "To be added"/);
   assert.match(page, /className="roster-table"/);
-  assert.match(page, /clearRosterPlaceholder\(normalizedEmployee\.email\)/);
-  assert.match(page, /role: clearRosterPlaceholder\(normalizedEmployee\.role\)/);
-  assert.match(page, /wage: formatWageInput\(clearRosterPlaceholder\(normalizedEmployee\.wage\)\)/);
+  assert.doesNotMatch(page, /localStorage/);
   assert.doesNotMatch(page, /<small>Email<\/small>/);
   assert.doesNotMatch(page, /<small>Phone number<\/small>/);
   assert.match(page, /type="email"[\s\S]*?value=\{employeeForm\.email\}/);
   assert.match(page, /type="tel"[\s\S]*?value=\{employeeForm\.phone\}/);
   assert.match(page, /availableLocations\.map\(\(location\)/);
   assert.match(page, /locationNamesFromBasicInfo\(savedBasicInfo\)/);
-  assert.match(page, /employee\.location === previousLocationName/);
   assert.doesNotMatch(page, /!availableLocations\.includes\(employee\.location\)/);
   assert.match(page, /availableRoles\.map\(\(role\)/);
   assert.match(page, /<option value="">Select<\/option>/);
-  assert.match(page, /employee\.id === 1 \? <span>Admin<\/span> : employee\.accessLevel/);
-  assert.match(page, /<span>Admin<\/span>/);
-  assert.match(page, /normalizedEmployee\.id === 1[^]*\? "Admin"/);
   assert.match(page, />\s*Add team member\s*<\/button>/);
   assert.match(page, /className="roster-heading"/);
   assert.match(page, /isAddingEmployee \? \(/);
@@ -394,23 +393,17 @@ test("Roster includes complete team fields without placeholders for contact, loc
   assert.match(page, /openEditEmployeeModal\(rosterActionEmployee\)/);
   assert.match(page, /editingEmployeeId === null \? "Add team member" : "Edit team member"/);
   assert.match(page, /editingEmployeeId === null \? "Add team member" : "Save changes"/);
-  assert.match(page, /findEmployeeWithPin\(state\.employees, pin, editingEmployeeId \?\? undefined\)/);
   assert.match(page, /hasEmployeeWithName\(state\.employees, name, editingEmployeeId \?\? undefined\)/);
-  assert.match(page, /employee\.id === editingEmployeeId[\s\S]*?name,[\s\S]*?email: employeeForm\.email\.trim\(\)/);
   assert.match(page, /className="roster-action-button"/);
   assert.match(page, /aria-haspopup="menu"/);
   assert.match(page, /role="menuitem"[^]*?>Edit<\/button>/);
   assert.doesNotMatch(page, /roster-row-remove|employeePendingDeletion/);
-  assert.match(page, /const activeUserIsAdmin = activeEmployee\?\.accessLevel === "Admin"/);
+  assert.match(page, /const activeUserIsAdmin = account\.accessLevel === "owner"/);
   assert.doesNotMatch(page, /window\.confirm\("Are you sure you want to remove this employee\?"\)/);
   assert.doesNotMatch(page, /data-editing-employee-row/);
   assert.doesNotMatch(page, /function finishRosterEditing/);
   assert.doesNotMatch(page, /aria-label=\{`Name for \$\{employee\.name\}`\}/);
-  assert.match(page, /pin: event\.target\.value\.replace\(\/\\D\/g, ""\)\.slice\(0, 4\)/);
-  assert.match(page, /pattern="\[0-9\]\{4\}"/);
-  assert.match(page, /maxLength=\{4\}/);
-  assert.match(page, /placeholder="\*\*\*\*"/);
-  assert.match(page, /type="text"[\s\S]*?value=\{employeeForm\.pin\}[\s\S]*?aria-label="Employee PIN"/);
+  assert.match(page, /Tablet &amp; PIN access/);
   assert.match(page, /className="team-member-add-role-button"/);
   assert.match(page, /function addRoleFromEmployeeForm/);
   assert.match(page, /aria-label="New role name"/);
@@ -419,7 +412,6 @@ test("Roster includes complete team fields without placeholders for contact, loc
   assert.match(page, /event\.key === "Enter"[^]*addRoleFromEmployeeForm\(\)/);
   assert.match(page, /onBlur=\{\(\) => \{[^]*setIsAddingEmployeeRole\(false\)/);
   assert.doesNotMatch(page, /team-member-role-creator/);
-  assert.match(page, /accessLevel: employeeForm\.accessLevel/);
   assert.match(page, /className="team-member-pill-options team-member-access-options"/);
   assert.match(page, /type="radio"/);
   assert.match(page, /name="new-team-member-access-level"/);
@@ -437,7 +429,7 @@ test("Roster includes complete team fields without placeholders for contact, loc
   assert.match(page, /const filteredRosterEmployees = useMemo\([\s\S]*?\.sort\(\(first, second\) => first\.name\.localeCompare\(second\.name, undefined, \{ sensitivity: "base" \}\)\)/);
   assert.match(page, /filteredRosterEmployees\.map\(\(employee\) => \(/);
   assert.match(page, /className="roster-name-link" onClick=\{\(\) => openRosterEmployeeProfile\(employee\.id\)\}/);
-  assert.match(page, /const accountOwnerEmployeeId = state\.employees\.find/);
+  assert.match(page, /const accountOwnerEmployeeId = shared\.data\.primaryOwnerEmployeeId/);
   assert.match(page, /employee\.id === accountOwnerEmployeeId \? <span className="roster-account-owner">Account Owner<\/span>/);
   assert.match(page, /className="team-member-profile-back" onClick=\{closeRosterEmployeeProfile\}/);
   assert.match(page, /className="team-member-profile-back-label">Back<\/span>/);
@@ -487,20 +479,22 @@ test("Roster includes complete team fields without placeholders for contact, loc
   assert.match(styles, /\.team-availability-week-controls > button > span \{[^}]*transform: translateY\(-2px\);/s);
   assert.match(styles, /\.team-availability-date-control \{[^}]*min-width: 250px;[^}]*min-height: 42px;[^}]*justify-content: center;[^}]*border-radius: 10px;[^}]*font-weight: 800;[^}]*text-align: center;/s);
   assert.match(styles, /\.team-availability-date-control span \{[^}]*font-size: \.88rem;[^}]*text-align: center;/s);
-  assert.match(page, /<h3>Attendance • this month<\/h3>/);
+  const performance = await readFile(new URL("../app/team/employee-reliability.tsx", import.meta.url), "utf8");
+  assert.match(page, /<EmployeeReliabilityPanel/);
+  assert.match(performance, /Attendance • this month/);
   [
     "On time rate",
-    "Average hours/week",
+    "Attendance rate",
     "Missed clock outs",
     "No shows",
-    "Average shift rating",
+    "On-time shift score",
     "Shifts worked",
     "Missed breaks",
     "Role breakdown",
-    "Manager notes",
-  ].forEach((performanceLabel) => assert.match(page, new RegExp(performanceLabel)));
+  ].forEach((performanceLabel) => assert.match(performance, new RegExp(performanceLabel)));
+  assert.match(page, /Manager notes/);
   assert.doesNotMatch(page, /shoutouts/i);
-  assert.match(page, /function employeePerformanceFor/);
+  assert.doesNotMatch(performance, /Average shift rating|aria-label="stars"/);
   assert.match(page, /function addManagerNote/);
   assert.match(page, /managerNotes: \[/);
   assert.match(styles, /\.performance-metric-grid \{[^}]*grid-template-columns: repeat\(4, minmax\(0, 1fr\)\);/s);
@@ -554,7 +548,6 @@ test("Roster includes complete team fields without placeholders for contact, loc
   assert.match(page, /viewingRosterEmployee\.employmentHistory \?\? \[\]/);
   assert.match(page, /Terminated from \$\{viewingRosterEmployee\.location \|\| sidebarLocationName\}/);
   assert.match(page, /Rehired at \$\{viewingRosterEmployee\.location \|\| sidebarLocationName\}/);
-  assert.match(page, /employmentHistory: Array\.isArray\(normalizedEmployee\.employmentHistory\)/);
   assert.match(styles, /\.roster-name-link \{[^}]*color: var\(--blue-accent\);[^}]*text-decoration: underline;/s);
   assert.match(styles, /\.team-member-profile-layout \{[^}]*grid-template-columns: 250px minmax\(0, 1fr\);/s);
   assert.match(styles, /\.team-member-profile-summary,[\s\S]*?\.team-member-profile-tabs \{[^}]*background: #ffffff;/s);
@@ -585,8 +578,8 @@ test("Roster includes complete team fields without placeholders for contact, loc
   assert.match(styles, /\[role="columnheader"\] \{[^}]*font-size: calc\(1em \+ 2px\);[^}]*font-weight: 600;/s);
 });
 
-test("Departments and Roles keeps an unassigned row and supports editable roles and managers", async () => {
-  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+test("Departments and Roles uses shared records and supports editable roles and managers", async () => {
+  const page = await workspaceSource();
 
   assert.match(page, /<h3>Departments and Roles<\/h3>/);
   assert.match(page, />Add new department<\/button>/);
@@ -610,7 +603,7 @@ test("Departments and Roles keeps an unassigned row and supports editable roles 
   assert.match(page, /assignableManagers\.length > 0 \? \(/);
   assert.match(page, /\{assignableManagers\.map\(\(manager\) => \(/);
   assert.match(page, /departments: Department\[\]/);
-  assert.match(page, /unassignedDepartment \?\? fallbackDepartment/);
+  assert.match(page, /shared\.data\.state/);
   assert.match(page, /function rolesForDepartment/);
   assert.match(page, /rolesForDepartment\(department, state\.departments, rosterRoles\)/);
   assert.match(page, /state\.departments\.flatMap\(\(department\) => department\.roles\), \.\.\.rosterRoles/);
@@ -640,7 +633,7 @@ test("Departments and Roles keeps an unassigned row and supports editable roles 
 
 test("starter preview code is no longer wired into DomBase", async () => {
   const [page, layout, packageJson] = await Promise.all([
-    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/workspace.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
   ]);
@@ -651,7 +644,7 @@ test("starter preview code is no longer wired into DomBase", async () => {
 });
 
 test("manager PTO view supports configurable fixed and rate policies", async () => {
-  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const page = await workspaceSource();
 
   assert.doesNotMatch(page, /id: "pto", label: "PTO"/);
   assert.doesNotMatch(page, /HoursSectionTab|hours-section-tabs|Hours and PTO views/);
@@ -670,7 +663,7 @@ test("manager PTO view supports configurable fixed and rate policies", async () 
   assert.match(page, /"Starting balances"/);
   assert.match(page, />PTO start balance</);
   assert.match(page, /startingBalances:/);
-  assert.match(page, /earnedHours: 1,[^]*workedHours: 30/);
+  assert.match(page, /earnedHours: "1",[^]*workedHours: "30"/);
   assert.match(page, />Fixed <small>/);
   assert.match(page, />Rate <small>/);
   assert.match(page, /className="pto-policy-primary-fields"/);
@@ -700,7 +693,7 @@ test("manager PTO view supports configurable fixed and rate policies", async () 
 });
 
 test("manager can persist manual worked-hour adjustments", async () => {
-  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const page = await workspaceSource();
 
   assert.match(page, /type HoursAdjustment/);
   assert.match(page, /function editWorkedHours/);
@@ -715,7 +708,7 @@ test("manager can persist manual worked-hour adjustments", async () => {
 });
 
 test("employee Timesheets view is read-only and filtered to the signed-in employee", async () => {
-  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const page = await workspaceSource();
   const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
 
   assert.match(page, /id: "hours", label: "Timesheets", icon: "clock"/);
@@ -736,7 +729,7 @@ test("employee Timesheets view is read-only and filtered to the signed-in employ
 });
 
 test("employees can submit persistent PTO requests with required details", async () => {
-  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const page = await workspaceSource();
   const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
 
   assert.match(page, /type PtoRequest/);
@@ -796,7 +789,7 @@ test("employees can submit persistent PTO requests with required details", async
 });
 
 test("request history supports month, status, and employee filters", async () => {
-  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const page = await workspaceSource();
 
   assert.match(page, /ptoHistoryMonth/);
   assert.match(page, /ptoHistoryStatusFilter/);
@@ -816,7 +809,7 @@ test("request history supports month, status, and employee filters", async () =>
 });
 
 test("section navigation resets nested views to their main page", async () => {
-  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const page = await workspaceSource();
 
   assert.match(page, /function navigateToView\(view: ViewId\)/);
   assert.match(page, /setIsViewingPtoHistory\(false\)/);
@@ -827,7 +820,7 @@ test("section navigation resets nested views to their main page", async () => {
 });
 
 test("managers can approve or deny pending PTO requests", async () => {
-  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const page = await workspaceSource();
   const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
 
   assert.match(page, /function decidePtoRequest/);
@@ -886,7 +879,7 @@ test("managers can approve or deny pending PTO requests", async () => {
 });
 
 test("signed-in users have a header account menu instead of a sidebar logout panel", async () => {
-  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const page = await workspaceSource();
   const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
 
   assert.doesNotMatch(page, /className="pin-panel"/);
@@ -900,7 +893,7 @@ test("signed-in users have a header account menu instead of a sidebar logout pan
   assert.match(page, /aria-label="Stopwatch"/);
   assert.doesNotMatch(page, /aria-label="Notification categories"/);
   assert.doesNotMatch(page, /activeNotificationTab/);
-  assert.match(page, /activeUserCanManage = Boolean\(activeEmployee && isManagerEmployee\(activeEmployee\)\)/);
+  assert.match(page, /activeUserCanManage = shared\.data\.permissions/);
   assert.match(page, /notificationRequests = activeUserCanManage/);
   assert.match(page, /operationalAlerts = activeUserCanManage/);
   assert.match(page, /function operationalAlertsFor/);
@@ -1011,7 +1004,7 @@ test("signed-in users have a header account menu instead of a sidebar logout pan
 });
 
 test("team messaging supports filters, group chats, and persisted replies", async () => {
-  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const page = await workspaceSource();
   const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
 
   assert.match(page, /type TeamConversation/);
@@ -1038,7 +1031,7 @@ test("team messaging supports filters, group chats, and persisted replies", asyn
   assert.match(page, /selectedConversation\.creatorEmployeeId === activeEmployeeId/);
   assert.match(page, /conversation\.creatorEmployeeId === activeEmployeeId/);
   assert.match(page, />\s*Edit name\s*<\/button>/);
-  assert.match(page, /permanently erase all message history/);
+  assert.match(page, /Archive this conversation/);
   assert.match(page, /function conversationHasUnreadMessages/);
   assert.match(page, /function conversationUnreadMessageCount/);
   assert.match(page, /const unreadConversationCount = teamConversations\.filter\(\s*\(conversation\) => conversationHasUnreadMessages\(conversation, activeEmployeeId\),\s*\)\.length;/);
@@ -1084,11 +1077,10 @@ test("team messaging supports filters, group chats, and persisted replies", asyn
   assert.match(styles, /\.message-dropdown-close \{[^}]*top: 10px;[^}]*right: 10px;/s);
   assert.match(styles, /\.message-dropdown-close > span::before,[^}]*top: 50%;[^}]*left: 50%;[^}]*translate\(-50%, -50%\) rotate\(45deg\)/s);
   assert.match(page, /document\.addEventListener\("pointerdown", closeMessages\)/);
-  assert.match(page, /conversations: \(parsed\.conversations \?\? \[\]\)/);
 });
 
 test("dismissible popups close from the backdrop while required forms stay protected", async () => {
-  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const page = await workspaceSource();
   const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
 
   assert.match(page, /function dismissModalFromBackdrop\(event: ReactMouseEvent<HTMLDivElement>, dismiss: \(\) => void\)/);
@@ -1103,7 +1095,7 @@ test("dismissible popups close from the backdrop while required forms stay prote
 });
 
 test("manager settings includes a gear icon, copied tabs, and the basic info template", async () => {
-  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const page = await workspaceSource();
   const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
   const expectedTabs = [
     "Basic info",
@@ -1139,7 +1131,7 @@ test("manager settings includes a gear icon, copied tabs, and the basic info tem
   assert.doesNotMatch(page, /Plus Plan/);
   assert.match(page, /function updateBasicInfo/);
   assert.match(page, /function saveBasicInfo/);
-  assert.match(page, /basicInfoStorageKey/);
+  assert.match(page, /entity: "business"/);
   assert.match(page, /className=\{info\[field\] \? "settings-value-button" : "settings-add-button"\}/);
   assert.match(page, /onClick=\{\(\) => onEdit\(field\)\}/);
   assert.match(page, /disabled=\{!isBasicInfoDirty\}/);
@@ -1148,7 +1140,7 @@ test("manager settings includes a gear icon, copied tabs, and the basic info tem
   assert.match(page, /maxLength=\{inputType === "tel" \? 14 : undefined\}/);
   assert.match(page, /className="settings-field-pencil"/);
   assert.match(page, /aria-label=\{`Edit \$\{label\}`\}/);
-  assert.match(page, /onClick=\{openAddLocationModal\}>Add a new location<\/button>/);
+  assert.match(page, /onClick=\{openAddLocationModal\} disabled/);
   assert.match(page, /We&apos;re glad you&apos;re adding a new location!/);
   assert.match(page, /New Location Name/);
   assert.match(page, /New Location Zip/);
@@ -1160,7 +1152,7 @@ test("manager settings includes a gear icon, copied tabs, and the basic info tem
   assert.match(page, /newLocationDrafts\.length < maximumNewLocations/);
   assert.match(page, />\s*<span aria-hidden="true">\+<\/span> Add Another Location\s*<\/button>/);
   assert.match(page, /className="add-location-submit" disabled=\{!canAddNewLocations\}>Add Location<\/button>/);
-  assert.match(page, /window\.localStorage\.setItem\(companyLocationsStorageKey, JSON\.stringify\(updatedLocations\)\)/);
+  assert.match(page, /agreed single location/);
   assert.match(page, /\.\.\.companyLocations\.map\(\(location\) => location\.name\.trim\(\)\)\.filter\(Boolean\)/);
   assert.match(styles, /\.brand-lockup \{[^}]*width: 100%;[^}]*align-items: center;/s);
   assert.match(styles, /\.brand-lockup > div \{[^}]*flex: 1 1 auto;[^}]*min-width: 0;/s);

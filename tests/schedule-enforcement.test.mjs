@@ -15,7 +15,7 @@ const profileSource = await readFile(new URL("../app/account-profile.ts", import
 const profileCode = ts.transpileModule(profileSource, { compilerOptions: { module: ts.ModuleKind.ESNext } }).outputText
   .replace('"./schedule-events"', JSON.stringify(`data:text/javascript;base64,${Buffer.from(eventsCode).toString("base64")}`));
 const accountProfile = await import(`data:text/javascript;base64,${Buffer.from(profileCode).toString("base64")}`);
-const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+const page = await readFile(new URL("../app/workspace.tsx", import.meta.url), "utf8");
 const ast = ts.createSourceFile("page.tsx", page, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const helpers = new Map();
 function visit(node) {
@@ -30,14 +30,14 @@ function runtime(extra = {}) {
     "applyAutomaticClockOuts", "isAutomaticClockOut", "hasClockInForShift", "noShowAlertsFor", "needsTimeException",
     "isWithinScheduledMinute", "workWeekCalendarDays", "hoursDateRange", "hoursDateLabel", "dateRangeForCalendarTab",
     "parseLocalDate", "startOfDay", "toDateInputValue", "shiftDateForWeekday", "shiftDatesForWeekdays",
-    "formatShortDate", "formatLongDate", "formatMonthYear", "formatClockTime", "saveScheduleEnforcement", "readStoredScheduleEnforcement",
+    "formatShortDate", "formatLongDate", "formatMonthYear", "formatClockTime", "saveScheduleEnforcement",
     "saveAlertsPermissions", "publishSchedule", "applyScheduleDraft", "submitAvailabilityRequest", "saveEventsTrades", "saveScheduleEvent", "deleteScheduleEvent", "saveOvertime",
     "saveBreaksCompliance", "operationalAlertsFor", "matchingBreakStartEvent", "breakEndTime", "breakDurationMs", "isWithinClockInGrace",
-    "employeePerformanceFor", "timeToMinutes", "adjustedWorkedHoursForRange", "workedHoursForRange", "clockIntervals", "breakIntervalsForEvents",
+    "timeToMinutes", "adjustedWorkedHoursForRange", "workedHoursForRange", "clockIntervals", "breakIntervalsForEvents",
     "clippedDuration", "overlapDuration", "startOfNextDay", "saveMessagesSettings", "createTeamConversation", "sendTeamMessage",
     "messagePtoRequestEmployee", "messageRosterEmployee", "saveAccountProfile", "hasEmployeeWithName", "normalizeEmployeeName",
-    "formatPhoneNumberInput", "readStoredState", "clearRosterPlaceholder", "formatWageInput", "isStarterPlaceholderEmployee", "isManagerEmployee"];
-  const context = vm.createContext({ ...rules, ...scheduleEvents, ...accountProfile, Date, console,
+    "formatPhoneNumberInput", "formatWageInput", "isManagerEmployee"];
+  const context = vm.createContext({ ...rules, ...scheduleEvents, ...accountProfile, Date, console, newRecordId: () => Math.floor(Math.random() * 1000000000) + 100000,
     automaticClockOutExplanation: "Automatically clocked out two hours after the scheduled shift ended.",
     scheduleEnforcementStorageKey: "test-enforcement",
     operationalAlertLookbackMs: 7 * 24 * 60 * 60 * 1000,
@@ -121,23 +121,7 @@ test("work-week settings keep shift apply dates and timesheet week ranges aligne
   }
 });
 
-test("saving and reloading settings preserves choices; invalid drafts never apply", () => {
-  const stored = new Map();
-  let saved, message;
-  const app = runtime({ window: { localStorage: { setItem: (key, value) => stored.set(key, value), getItem: key => stored.get(key) } },
-    scheduleEnforcementDraft: { ...defaults, workWeekStart: 0, lateMinutes: 5, automaticClockOut: false },
-    setScheduleEnforcement: value => { saved = value; }, setScheduleEnforcementMessage: value => { message = value; },
-  });
-  app.saveScheduleEnforcement({ preventDefault() {} });
-  assert.deepEqual(JSON.parse(JSON.stringify(app.readStoredScheduleEnforcement())), saved);
-  assert.match(message, /saved/);
-  app.scheduleEnforcementDraft = { ...defaults, scheduleStartHour: 17, scheduleEndHour: 7 };
-  app.saveScheduleEnforcement({ preventDefault() {} });
-  assert.deepEqual(JSON.parse(JSON.stringify(app.readStoredScheduleEnforcement())), saved);
-  assert.match(message, /end time after/);
-  stored.set("test-enforcement", "invalid JSON");
-  assert.deepEqual(JSON.parse(JSON.stringify(app.readStoredScheduleEnforcement())), defaults);
-});
+
 
 test("invalid stored settings fall back safely without accepting strings or out-of-range values", () => {
   assert.deepEqual(rules.normalizeScheduleEnforcement({ lateMinutes: -1, automaticClockOutMinutes: Infinity, workWeekStart: 7, automaticClockOut: "false" }), defaults);
@@ -218,45 +202,9 @@ test("availability submissions persist pending or approved status according to t
   }
 });
 
-test("alerts permissions save and reload without applying unsaved enforcement changes", () => {
-  const stored = new Map();
-  let saved, message;
-  const app = runtime({ window: { localStorage: { setItem: (key, value) => stored.set(key, value), getItem: key => stored.get(key) } },
-    scheduleEnforcementDraft: { ...defaults, workWeekStart: 0, noShowMinutes: 15, employeesOwnScheduleOnly: true },
-    setScheduleEnforcement: value => { saved = value; }, setAlertsPermissionsMessage: value => { message = value; },
-  });
-  app.saveAlertsPermissions({ preventDefault() {} });
-  assert.equal(saved.workWeekStart, defaults.workWeekStart);
-  assert.equal(saved.noShowMinutes, 15);
-  assert.equal(saved.employeesOwnScheduleOnly, true);
-  assert.match(message, /saved/);
-  assert.deepEqual(JSON.parse(JSON.stringify(app.readStoredScheduleEnforcement())), JSON.parse(JSON.stringify(saved)));
-});
 
-test("events setting saves independently, survives reload, and hides without deleting events", () => {
-  const stored = new Map();
-  let saved, message;
-  const app = runtime({ window: { localStorage: { setItem: (key, value) => stored.set(key, value), getItem: key => stored.get(key) } },
-    scheduleEnforcementDraft: { ...defaults, enableScheduleEvents: false, employeesOwnScheduleOnly: true, workWeekStart: 0 },
-    setScheduleEnforcement: value => { saved = value; }, setEventsTradesMessage: value => { message = value; },
-  });
-  app.saveEventsTrades({ preventDefault() {} });
-  assert.equal(saved.enableScheduleEvents, false);
-  assert.equal(saved.employeesOwnScheduleOnly, defaults.employeesOwnScheduleOnly);
-  assert.equal(saved.workWeekStart, defaults.workWeekStart);
-  assert.match(message, /saved/);
-  assert.equal(app.readStoredScheduleEnforcement().enableScheduleEvents, false);
-  assert.equal(rules.normalizeScheduleEnforcement({}).enableScheduleEvents, true);
-  const records = [{ id: 1, date: "2026-10-03", title: "Team day", notes: "Details" }];
-  assert.equal(scheduleEvents.scheduleEventsForDate(records, "2026-10-03", saved.enableScheduleEvents).length, 0);
-  assert.equal(scheduleEvents.scheduleEventsForDate(records, "2026-10-03", true).length, 1);
-  assert.equal(scheduleEvents.scheduleEventsForDate(records, "2026-10-04", true).length, 0);
-  const previous = saved;
-  app.window.localStorage.setItem = () => { throw new Error("Storage unavailable"); };
-  app.saveEventsTrades({ preventDefault() {} });
-  assert.equal(saved, previous);
-  assert.match(message, /could not be saved/);
-});
+
+
 
 test("schedule events support manager create, edit, and delete with valid records", () => {
   let state = { scheduleEvents: [] };
@@ -272,15 +220,15 @@ test("schedule events support manager create, edit, and delete with valid record
   assert.equal(state.scheduleEvents.length, 1);
   app.mode = "employee";
   app.saveScheduleEvent({ id: 0, date: "2026-10-03", title: "Not allowed", notes: "" });
-  app.deleteScheduleEvent(1);
+  app.deleteScheduleEvent(state.scheduleEvents[0].id);
   assert.equal(state.scheduleEvents.length, 1);
   app.mode = "manager";
   app.scheduleEnforcement = { ...defaults, enableScheduleEvents: false };
-  app.deleteScheduleEvent(1);
+  app.deleteScheduleEvent(state.scheduleEvents[0].id);
   assert.equal(state.scheduleEvents.length, 1);
   app.scheduleEnforcement = defaults;
   assert.deepEqual(scheduleEvents.normalizeScheduleEvents(JSON.parse(JSON.stringify(state.scheduleEvents))), JSON.parse(JSON.stringify(state.scheduleEvents)));
-  app.deleteScheduleEvent(1);
+  app.deleteScheduleEvent(state.scheduleEvents[0].id);
   assert.equal(state.scheduleEvents.length, 0);
 });
 
@@ -293,59 +241,9 @@ test("older and malformed event records normalize safely", () => {
   assert.equal(scheduleEvents.validEventDate("2026-02-29"), false);
 });
 
-test("Overtime saves the shared workweek without applying unrelated drafts", () => {
-  const stored = new Map();
-  let saved, message;
-  const app = runtime({ window: { localStorage: { setItem: (key, value) => stored.set(key, value), getItem: key => stored.get(key) } },
-    scheduleEnforcementDraft: { ...defaults, workWeekStart: 0, noShowMinutes: 30, enableScheduleEvents: false },
-    setScheduleEnforcement: value => { saved = value; }, setOvertimeMessage: value => { message = value; },
-  });
-  app.saveOvertime({ preventDefault() {} });
-  assert.equal(saved.workWeekStart, 0);
-  assert.equal(saved.noShowMinutes, defaults.noShowMinutes);
-  assert.equal(saved.enableScheduleEvents, defaults.enableScheduleEvents);
-  assert.equal(app.readStoredScheduleEnforcement().workWeekStart, 0);
-  assert.match(message, /saved/);
-  const previous = saved;
-  app.scheduleEnforcementDraft.workWeekStart = 7;
-  app.saveOvertime({ preventDefault() {} });
-  assert.equal(saved, previous);
-  assert.match(message, /valid/);
-  app.scheduleEnforcementDraft.workWeekStart = 2;
-  app.window.localStorage.setItem = () => { throw new Error("Storage unavailable"); };
-  app.saveOvertime({ preventDefault() {} });
-  assert.equal(saved, previous);
-  assert.match(message, /could not be saved/);
-});
 
-test("break settings save independently, reload, and reject invalid frequencies", () => {
-  const stored = new Map();
-  let saved, message;
-  const app = runtime({ window: { localStorage: { setItem: (key, value) => stored.set(key, value), getItem: key => stored.get(key) } },
-    scheduleEnforcementDraft: { ...defaults, mealBreakAfterHours: 4, mandatoryMealBreak: false, workWeekStart: 0 },
-    setScheduleEnforcement: value => { saved = value; }, setBreaksComplianceMessage: value => { message = value; },
-  });
-  app.saveBreaksCompliance({ preventDefault() {} });
-  assert.equal(saved.mealBreakAfterHours, 4);
-  assert.equal(saved.mandatoryMealBreak, false);
-  assert.equal(saved.workWeekStart, defaults.workWeekStart);
-  assert.equal(app.readStoredScheduleEnforcement().mealBreakAfterHours, 4);
-  assert.equal(app.readStoredScheduleEnforcement().mandatoryMealBreak, false);
-  assert.match(message, /saved/);
-  const previous = saved;
-  for (const invalid of [0, 25, 4.5, NaN]) {
-    app.scheduleEnforcementDraft.mealBreakAfterHours = invalid;
-    app.saveBreaksCompliance({ preventDefault() {} });
-    assert.equal(saved, previous);
-    assert.match(message, /1 to 24/);
-  }
-  app.scheduleEnforcementDraft.mealBreakAfterHours = 6;
-  app.window.localStorage.setItem = () => { throw new Error("Storage unavailable"); };
-  app.saveBreaksCompliance({ preventDefault() {} });
-  assert.equal(saved, previous);
-  assert.match(message, /could not be saved/);
-  assert.equal(rules.normalizeScheduleEnforcement({}).mealBreakAfterHours, 5);
-});
+
+
 
 test("missed-break alerts use the saved threshold and mandatory switch for open and completed sessions", () => {
   const app = runtime();
@@ -369,35 +267,7 @@ test("missed-break alerts use the saved threshold and mandatory switch for open 
   assert.equal(missed([clockIn, recordedBreak, fullClockOut], scheduledEnd).length, 0);
 });
 
-test("messages setting saves independently and survives reload without deleting conversations", () => {
-  const stored = new Map();
-  let saved, message;
-  const conversations = [{ id: 1, participantIds: [1, 2], messages: [{ id: 1, body: "Existing message" }] }];
-  const app = runtime({ mode: "manager", state: { conversations },
-    window: { localStorage: { setItem: (key, value) => stored.set(key, value), getItem: key => stored.get(key) } },
-    scheduleEnforcementDraft: { ...defaults, enableTeamMessaging: false, mandatoryMealBreak: false, workWeekStart: 0 },
-    setScheduleEnforcement: value => { saved = value; }, setMessagesSettingsMessage: value => { message = value; },
-    setIsCreatingConversation() {}, setPtoMessageEmployeeId() {}, setIsPtoMessageContext() {},
-  });
-  app.saveMessagesSettings({ preventDefault() {} });
-  assert.equal(saved.enableTeamMessaging, false);
-  assert.equal(saved.mandatoryMealBreak, defaults.mandatoryMealBreak);
-  assert.equal(saved.workWeekStart, defaults.workWeekStart);
-  assert.equal(app.readStoredScheduleEnforcement().enableTeamMessaging, false);
-  assert.equal(app.state.conversations, conversations);
-  assert.match(message, /saved/);
-  assert.equal(rules.normalizeScheduleEnforcement({}).enableTeamMessaging, true);
-  assert.equal(rules.normalizeScheduleEnforcement({ enableTeamMessaging: "false" }).enableTeamMessaging, true);
-  const previous = saved;
-  app.window.localStorage.setItem = () => { throw new Error("Storage unavailable"); };
-  app.saveMessagesSettings({ preventDefault() {} });
-  assert.equal(saved, previous);
-  assert.match(message, /could not be saved/);
-  app.mode = "employee";
-  message = "";
-  app.saveMessagesSettings({ preventDefault() {} });
-  assert.equal(message, "");
-});
+
 
 test("disabled messaging blocks new chats, replies, and profile or PTO shortcuts", () => {
   const state = { conversations: [{ id: 1, participantIds: [1, 2], messages: [{ id: 1, body: "Existing" }] }] };
@@ -466,15 +336,15 @@ test("profile updates validate personal fields and cannot change access, PINs, o
   assert.ok(accountProfile.profileUpdate({ ...values, dateOfBirth: "2000-02-29", homePostalCode: "90000-1234" }, "2026-10-03").update);
 });
 
-test("self-profile saves update only the signed-in employee and reject duplicate names or public access", () => {
+test("self-profile saves wait for confirmation and update only the linked employee", async () => {
   const other = { ...profileEmployee, id: 3, name: "Other Person" };
   let state = { employees: [profileEmployee, other], conversations: [] };
   let writes = 0;
   const app = runtime({ state, activeEmployee: profileEmployee, activeEmployeeId: 2, accountOwnerEmployeeId: 1, isPublicSchedule: false, today: "2026-10-03",
-    setState(updater) { state = updater(state); writes++; },
+    setState(updater) { state = updater(state); writes++; return true; },
   });
   const values = accountProfile.profileValues(profileEmployee);
-  assert.equal(app.saveAccountProfile({ ...values, firstName: "Updated", phone: "2025550100", emergencyContactPhone: "2025550101", legalLastName: "Legal", homeCity: "Sample City", homeStateProvince: "CA", homePostalCode: "90000" }), null);
+  assert.equal(await app.saveAccountProfile({ ...values, firstName: "Updated", phone: "2025550100", emergencyContactPhone: "2025550101", legalLastName: "Legal", homeCity: "Sample City", homeStateProvince: "CA", homePostalCode: "90000" }), null);
   assert.equal(state.employees[0].name, "Updated Person");
   assert.equal(state.employees[0].phone, "(202) 555-0100");
   assert.equal(state.employees[0].emergencyContactPhone, "(202) 555-0101");
@@ -483,51 +353,47 @@ test("self-profile saves update only the signed-in employee and reject duplicate
   assert.equal(state.employees[0].pin, "9999");
   assert.equal(state.employees[0].certificates, profileEmployee.certificates);
   assert.equal(state.employees[1], other);
-  assert.match(app.saveAccountProfile({ ...values, firstName: "Other", lastName: "Person" }), /already in use/);
+  assert.match(await app.saveAccountProfile({ ...values, firstName: "Other", lastName: "Person" }), /already in use/);
   assert.equal(writes, 1);
-  app.isPublicSchedule = true;
-  assert.match(app.saveAccountProfile(values), /Sign in/);
+  app.activeEmployee = undefined;
+  assert.match(await app.saveAccountProfile(values), /not linked/);
   assert.equal(writes, 1);
 });
 
-test("account owner profile renames preserve ownership and survive staff-state reload", () => {
-  const owner = { ...profileEmployee, id: 1, name: "Original Owner", accessLevel: "Admin", pin: "0000" };
-  let state = { employees: [owner], shifts: [], clockEvents: [], scheduleDraftsByManager: {} };
-  let draftInfo = { accountOwner: "Original Owner", locationName: "Unsaved location" };
-  let snapshot = JSON.stringify({ accountOwner: "Original Owner", locationName: "Saved location" });
-  const stored = new Map();
-  const app = runtime({ state, activeEmployee: owner, activeEmployeeId: 1, accountOwnerEmployeeId: 1, isPublicSchedule: false, today: "2026-10-03",
-    savedBasicInfoSnapshot: snapshot, basicInfoStorageKey: "basic", storageKey: "staff", stateBackupStorageKey: "backup", starterState: { employees: [] },
-    defaultEmployeeLocationSettings: () => ({}),
-    window: { localStorage: { setItem: (key, value) => stored.set(key, value), getItem: key => stored.get(key) } },
-    setBasicInfo(updater) { draftInfo = updater(draftInfo); }, setSavedBasicInfoSnapshot(value) { snapshot = value; },
-    setState(updater) { state = updater(state); },
-  });
-  assert.equal(app.saveAccountProfile({ ...accountProfile.profileValues(owner), firstName: "Updated" }), null);
-  assert.equal(draftInfo.accountOwner, "Updated Owner");
-  assert.equal(draftInfo.locationName, "Unsaved location");
-  assert.equal(JSON.parse(snapshot).locationName, "Saved location");
-  assert.equal(JSON.parse(stored.get("basic")).accountOwner, "Updated Owner");
-  stored.set("staff", JSON.stringify(state));
-  const reloaded = app.readStoredState();
-  assert.equal(reloaded.employees[0].name, "Updated Owner");
-  assert.equal(reloaded.employees[0].accessLevel, "Admin");
-  assert.equal(accountProfile.profileValues(reloaded.employees[0]).firstName, "Updated");
-  const previous = state;
-  app.window.localStorage.setItem = () => { throw new Error("Storage unavailable"); };
-  assert.match(app.saveAccountProfile({ ...accountProfile.profileValues(owner), firstName: "Another" }), /could not be saved/);
-  assert.equal(state, previous);
-});
 
-test("employee performance respects the same missed-break threshold and mandatory switch", () => {
-  const app = runtime();
-  const state = { shifts: [{ ...shift, role: "Sales" }], hoursAdjustments: [], clockEvents: [
+
+test("employee performance respects the same missed-break threshold and mandatory switch", async () => {
+  const { loadServerModule } = await import("../scripts/server-runtime.mjs");
+  const { reliabilityFor } = await loadServerModule("team/insights-rules.ts");
+  const state = { employees: [{id:1,name:"Fictional"}], shifts: [{ ...shift, role: "Sales" }], ptoRequests: [], clockEvents: [
     { id: 1, employeeId: 1, type: "in", at: new Date(scheduledStart).toISOString() },
     { id: 2, employeeId: 1, type: "out", at: new Date(scheduledEnd).toISOString() },
   ] };
-  assert.equal(app.employeePerformanceFor(state, 1, scheduledEnd, defaults).missedBreaks, 1);
-  assert.equal(app.employeePerformanceFor(state, 1, scheduledEnd, { ...defaults, mealBreakAfterHours: 9 }).missedBreaks, 0);
-  assert.equal(app.employeePerformanceFor(state, 1, scheduledEnd, { ...defaults, mandatoryMealBreak: false }).missedBreaks, 0);
-  state.clockEvents.push({ id: 3, employeeId: 1, type: "break", durationMinutes: 30, at: new Date(scheduledStart + 2 * 60 * 60 * 1000).toISOString() });
-  assert.equal(app.employeePerformanceFor(state, 1, scheduledEnd, defaults).missedBreaks, 0);
+  const result = settings => reliabilityFor(state, shift.date, shift.date, scheduledEnd, settings, Intl.DateTimeFormat().resolvedOptions().timeZone)[0];
+  assert.equal(result(defaults).missedBreak, true);
+  assert.equal(result({...defaults,mealBreakAfterHours:9}).missedBreak, false);
+  assert.equal(result({...defaults,mandatoryMealBreak:false}).missedBreak, false);
+  state.clockEvents.push({ id:3, employeeId:1, type:"break", at:new Date(scheduledStart+2*3600000).toISOString() }, { id:4, employeeId:1, type:"break_end", at:new Date(scheduledStart+2.5*3600000).toISOString() });
+  assert.equal(result(defaults).missedBreak, false);
+});
+
+// Browser-persistence tests were replaced by real D1 persistence/restart checks
+// in workforce.test.mjs. These controller checks cover acknowledgement behavior.
+test("settings controllers submit only their own fields and await server confirmation", async t => {
+  const cases = [["saveScheduleEnforcement", "setScheduleEnforcementMessage", "lateMinutes", 8], ["saveAlertsPermissions", "setAlertsPermissionsMessage", "noShowMinutes", 12], ["saveEventsTrades", "setEventsTradesMessage", "enableScheduleEvents", false], ["saveOvertime", "setOvertimeMessage", "workWeekStart", 0], ["saveBreaksCompliance", "setBreaksComplianceMessage", "mealBreakAfterHours", 4], ["saveMessagesSettings", "setMessagesSettingsMessage", "enableTeamMessaging", false]];
+  for (const [name, feedback, field, value] of cases) await t.test(name, async () => {
+    let release; let body; let message;
+    const app = runtime({ state: { hoursRoundingMinutes: 15 }, scheduleEnforcementDraft: { ...defaults, [field]: value },
+      shared: { save: changes => { body = changes; return new Promise(resolve => { release = resolve; }); } }, [feedback]: value => { message = value; } });
+    const pending = app[name]({ preventDefault() {} });
+    assert.equal(body[0].entity, "settings"); assert.equal(body[0].after[field], value); assert.equal(message, undefined);
+    release(true); await pending; assert.match(message, /saved/);
+  });
+});
+
+test("employee profiles can display missing or invalid optional start dates", () => {
+  const context = runtime();
+  assert.equal(context.formatShortDate(""), "—");
+  assert.equal(context.formatShortDate("invalid"), "—");
+  assert.match(context.formatShortDate("2026-11-02"), /Nov/);
 });

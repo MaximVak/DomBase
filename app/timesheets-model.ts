@@ -1,4 +1,6 @@
-export type TimesheetEmployee = { id: number; name: string; role: string; wage: string; active: boolean; payrollId?: string; legalFirstName?: string; legalMiddleName?: string; legalLastName?: string };
+import { hourlyRate, rateFor } from "../team/rules";
+import type { WageRate } from "../team/rules";
+export type TimesheetEmployee = { id: number; name: string; role: string; wage: string; active: boolean; terminated?: boolean; terminationDate?: string; wageRates?: WageRate[]; jobs?: { id: number; name: string }[]; payrollId?: string; legalFirstName?: string; legalMiddleName?: string; legalLastName?: string };
 export type TimesheetEvent = { id: number; employeeId: number; type: "in" | "out" | "break" | "break_end"; at: string; explanation?: string; automatic?: boolean; role?: string; cardId?: number };
 export type TimesheetShift = { employeeId: number; date: string; start: string; end: string; role: string };
 export type TimesheetAdjustment = { id: number; employeeId: number; date: string; hours: number };
@@ -22,6 +24,7 @@ export const defaultTimesheetColumns: ColumnId[] = ["role", "card", "issues", "s
 export type TimeCard = {
   id: string; employeeId: number; date: string; role: string; start?: string; end?: string; eventIds: number[];
   issues: string[]; notes: string[]; adjustment: number; metrics: Record<string, number | null>;
+  wageLabel?: string;
 };
 const HOUR = 3600000;
 export function localDate(date: Date) { return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`; }
@@ -41,6 +44,7 @@ export function buildTimeCards(input: {
 }): TimeCard[] {
   const output: TimeCard[] = [];
   const contextStart = weekStartFor(input.start, input.weekStart);
+  const contextEnd = addDays(weekStartFor(input.end, input.weekStart), 6);
   for (const employee of input.employees) {
     const cards: TimeCard[] = [];
     const events = input.events.filter(event => event.employeeId === employee.id).sort((a, b) => Date.parse(a.at) - Date.parse(b.at) || a.id - b.id);
@@ -56,7 +60,7 @@ export function buildTimeCards(input: {
         if (event.type === "break_end" && breakStart !== null) { breaks.push([breakStart, Date.parse(event.at)]); breakStart = null; }
       }
       if (breakStart !== null) breaks.push([breakStart, end]);
-      for (let date = localDate(new Date(start)) < contextStart ? contextStart : localDate(new Date(start)); date <= input.end && date <= localDate(new Date(end)); date = addDays(date, 1)) {
+      for (let date = localDate(new Date(start)) < contextStart ? contextStart : localDate(new Date(start)); date <= contextEnd && date <= localDate(new Date(end)); date = addDays(date, 1)) {
         if (date < contextStart) continue;
         const dayStart = Date.parse(`${date}T00:00:00`), dayEnd = Date.parse(`${addDays(date, 1)}T00:00:00`);
         const elapsed = overlap(start, end, dayStart, dayEnd);
@@ -84,23 +88,23 @@ export function buildTimeCards(input: {
       if (!card) { card = { id: `day-${employee.id}-${date}-${role}`, employeeId: employee.id, date, role, eventIds: [], issues: [], notes: [], adjustment: 0, metrics: metrics() }; cards.push(card); }
       return card;
     };
-    for (const shift of input.shifts.filter(shift => shift.employeeId === employee.id && shift.date >= contextStart && shift.date <= input.end)) {
+    for (const shift of input.shifts.filter(shift => shift.employeeId === employee.id && shift.date >= contextStart && shift.date <= contextEnd)) {
       const start = Date.parse(`${shift.date}T${shift.start}`);
       let end = Date.parse(`${shift.date}T${shift.end}`);
       if (end <= start) end = Date.parse(`${addDays(shift.date, 1)}T${shift.end}`);
-      for (let date = shift.date; date <= localDate(new Date(end)) && date <= input.end; date = addDays(date, 1)) {
+      for (let date = shift.date; date <= localDate(new Date(end)) && date <= contextEnd; date = addDays(date, 1)) {
         const hours = overlap(start, end, Date.parse(`${date}T00:00:00`), Date.parse(`${addDays(date, 1)}T00:00:00`)) / HOUR;
         if (hours) { const card = dayCard(date, shift.role || employee.role); card.metrics.scheduled = (card.metrics.scheduled ?? 0) + hours; }
       }
     }
     const adjustmentsByDate = new Map<string, number>();
-    for (const adjustment of input.adjustments.filter(a => a.employeeId === employee.id && a.date >= contextStart && a.date <= input.end)) adjustmentsByDate.set(adjustment.date, (adjustmentsByDate.get(adjustment.date) ?? 0) + adjustment.hours);
+    for (const adjustment of input.adjustments.filter(a => a.employeeId === employee.id && a.date >= contextStart && a.date <= contextEnd)) adjustmentsByDate.set(adjustment.date, (adjustmentsByDate.get(adjustment.date) ?? 0) + adjustment.hours);
     for (const [date, hours] of adjustmentsByDate) {
       const card = cards.find(card => card.date === date) ?? dayCard(date);
       card.adjustment = hours; card.notes.push(`Manual hours adjustment: ${hours >= 0 ? "+" : ""}${hours.toFixed(2)} hours`);
     }
     for (const request of input.pto.filter(request => request.employeeId === employee.id && request.status === "approved" && request.compensation === "paid")) {
-      for (let date = request.startDate < contextStart ? contextStart : request.startDate; date <= request.endDate && date <= input.end; date = addDays(date, 1)) {
+      for (let date = request.startDate < contextStart ? contextStart : request.startDate; date <= request.endDate && date <= contextEnd; date = addDays(date, 1)) {
         // Existing DomBase requests count each calendar day as eight PTO hours.
         const card = cards.find(card => card.date === date) ?? dayCard(date);
         card.metrics.pto = 8;
@@ -138,7 +142,24 @@ export function buildTimeCards(input: {
       const wage = hourlyWage(employee.wage);
       card.metrics.wages = wage === null ? null : wage * (regular + (card.metrics.ot ?? 0) * 1.5 + doubleOt * 2 + (card.metrics.pto ?? 0));
     }
-    output.push(...cards.filter(card => card.date >= input.start));
+    if (employee.wageRates !== undefined) {
+      const weeks = new Map<string, TimeCard[]>();
+      for (const card of cards) { const week = weekStartFor(card.date, input.weekStart); weeks.set(week, [...weeks.get(week) ?? [], card]); }
+      for (const group of weeks.values()) {
+        const rates = group.map(card => rateFor(employee.wageRates!, card.role, card.date));
+        const exempt = rates.length > 0 && rates.every(rate => rate?.basis === "annual_salary" && rate.overtimeExempt);
+        const hours = group.reduce((sum, card) => sum + (card.metrics.actual ?? 0), 0);
+        const hourly = rates.map(hourlyRate); const complete = hourly.every(rate => rate !== null);
+        const weighted = complete && hours > 0 ? group.reduce((sum, card, i) => sum + (card.metrics.actual ?? 0) * hourly[i]!, 0) / hours : 0;
+        for (const [i, card] of group.entries()) {
+          const rate = rates[i]; card.wageLabel = rate ? `$${(rate.amountCents / 100).toFixed(2)}/${rate.basis === "annual_salary" ? "year" : "hr"}` : "—";
+          if (exempt) { card.metrics.regular = card.metrics.paid! - (card.metrics.pto ?? 0); card.metrics.ot = 0; card.metrics.doubleOt = 0; }
+          const worked = (card.metrics.regular ?? 0) + (card.metrics.ot ?? 0) + (card.metrics.doubleOt ?? 0);
+          card.metrics.wages = complete ? Math.round((hourly[i]! * (worked + (card.metrics.pto ?? 0)) + (exempt ? 0 : weighted * ((card.metrics.ot ?? 0) * .5 + (card.metrics.doubleOt ?? 0)))) * 100) / 100 : null;
+        }
+      }
+    }
+    output.push(...cards.filter(card => card.date >= input.start && card.date <= input.end));
   }
   return output;
 }

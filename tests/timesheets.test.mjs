@@ -1,10 +1,7 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { transpileModule, ModuleKind, ScriptTarget } from "typescript";
-const source = await readFile(new URL("../app/timesheets-model.ts", import.meta.url), "utf8");
-const { outputText } = transpileModule(source, { compilerOptions: { module: ModuleKind.ESNext, target: ScriptTarget.ES2020 } });
-const { buildTimeCards, totalMetrics, timeCardReviews, timeCardEvents, validateTimeCard, timesheetCsv, hourlyWage, weekStartFor, timeCardPreview, timeCardBreakIntervals } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString("base64")}`);
+import { loadServerModule } from "../scripts/server-runtime.mjs";
+const { buildTimeCards, totalMetrics, timeCardReviews, timeCardEvents, validateTimeCard, timesheetCsv, hourlyWage, weekStartFor, timeCardPreview, timeCardBreakIntervals } = await loadServerModule("app/timesheets-model.ts");
 const employees = [{ id: 1, name: "Test Employee", role: "Sales", wage: "$20/hr", active: true }];
 const at = (date, time) => new Date(`${date}T${time}:00`).toISOString();
 const base = { employees, shifts: [], adjustments: [], pto: [], events: [], start: "2026-08-03", end: "2026-08-09", now: new Date("2026-08-10T12:00:00").getTime(), rounding: "actual", weekStart: 1, mandatoryMealBreak: true, mealBreakAfterHours: 5 };
@@ -95,54 +92,10 @@ test("CSV exports escape user fields, and unsupported wages or payroll columns r
   assert.equal(weekStartFor("2026-08-09", 0), "2026-08-09");
 });
 
-async function summaryModule() {
-  const { createRequire } = await import("node:module");
-  const { pathToFileURL } = await import("node:url");
-  const { JsxEmit } = await import("typescript");
-  const require = createRequire(import.meta.url);
-  const source = await readFile(new URL("../app/timesheets-summary.tsx", import.meta.url), "utf8");
-  const { outputText: js } = transpileModule(source, { compilerOptions: { module: ModuleKind.ESNext, target: ScriptTarget.ES2020, jsx: JsxEmit.ReactJSX } });
-  const linked = js.replaceAll('"react-dom"', JSON.stringify(pathToFileURL(require.resolve("react-dom")).href)).replaceAll('"./timesheets-model"', JSON.stringify(`data:text/javascript;base64,${Buffer.from(outputText).toString("base64")}`)).replaceAll('"react/jsx-runtime"', JSON.stringify(pathToFileURL(require.resolve("react/jsx-runtime")).href)).replaceAll('"react"', JSON.stringify(pathToFileURL(require.resolve("react")).href));
-  return `data:text/javascript;base64,${Buffer.from(linked).toString("base64")}`;
-}
-
-async function calendarModule() {
-  const { createRequire } = await import("node:module");
-  const { pathToFileURL } = await import("node:url");
-  const { JsxEmit } = await import("typescript");
-  const require = createRequire(import.meta.url);
-  const source = await readFile(new URL("../app/timesheets-calendar.tsx", import.meta.url), "utf8");
-  const { outputText: js } = transpileModule(source, { compilerOptions: { module: ModuleKind.ESNext, target: ScriptTarget.ES2020, jsx: JsxEmit.ReactJSX } });
-  const linked = js.replaceAll('"./timesheets-model"', JSON.stringify(`data:text/javascript;base64,${Buffer.from(outputText).toString("base64")}`)).replaceAll('"react/jsx-runtime"', JSON.stringify(pathToFileURL(require.resolve("react/jsx-runtime")).href)).replaceAll('"react"', JSON.stringify(pathToFileURL(require.resolve("react")).href));
-  return `data:text/javascript;base64,${Buffer.from(linked).toString("base64")}`;
-}
-
-async function dayModule() {
-  const { createRequire } = await import("node:module");
-  const { pathToFileURL } = await import("node:url");
-  const { JsxEmit } = await import("typescript");
-  const require = createRequire(import.meta.url);
-  const source = await readFile(new URL("../app/timesheets-day.tsx", import.meta.url), "utf8");
-  const { outputText: js } = transpileModule(source, { compilerOptions: { module: ModuleKind.ESNext, target: ScriptTarget.ES2020, jsx: JsxEmit.ReactJSX } });
-  const linked = js.replaceAll('"./timesheets-model"', JSON.stringify(`data:text/javascript;base64,${Buffer.from(outputText).toString("base64")}`)).replaceAll('"react/jsx-runtime"', JSON.stringify(pathToFileURL(require.resolve("react/jsx-runtime")).href)).replaceAll('"react"', JSON.stringify(pathToFileURL(require.resolve("react")).href));
-  return `data:text/javascript;base64,${Buffer.from(linked).toString("base64")}`;
-}
-
-async function panelComponent() {
-  const { createRequire } = await import("node:module");
-  const { pathToFileURL } = await import("node:url");
-  const require = createRequire(import.meta.url);
-  const { JsxEmit } = await import("typescript");
-  const panelSource = await readFile(new URL("../app/timesheets-panel.tsx", import.meta.url), "utf8");
-  const modelUrl = `data:text/javascript;base64,${Buffer.from(outputText).toString("base64")}`;
-  const { outputText: panelJs } = transpileModule(panelSource, { compilerOptions: { module: ModuleKind.ESNext, target: ScriptTarget.ES2020, jsx: JsxEmit.ReactJSX } });
-  const editorSource = await readFile(new URL("../app/time-card-editor.tsx", import.meta.url), "utf8");
-  const { outputText: editorJs } = transpileModule(editorSource, { compilerOptions: { module: ModuleKind.ESNext, target: ScriptTarget.ES2020, jsx: JsxEmit.ReactJSX } });
-  const editorLinked = editorJs.replaceAll('"./timesheets-model"', JSON.stringify(modelUrl)).replaceAll('"react/jsx-runtime"', JSON.stringify(pathToFileURL(require.resolve("react/jsx-runtime")).href)).replaceAll('"react"', JSON.stringify(pathToFileURL(require.resolve("react")).href));
-  const editorUrl = `data:text/javascript;base64,${Buffer.from(editorLinked).toString("base64")}`;
-  const linked = panelJs.replaceAll('"./timesheets-day"', JSON.stringify(await dayModule())).replaceAll('"./timesheets-calendar"', JSON.stringify(await calendarModule())).replaceAll('"./timesheets-summary"', JSON.stringify(await summaryModule())).replaceAll('"./time-card-editor"', JSON.stringify(editorUrl)).replaceAll('"./timesheets-model"', JSON.stringify(modelUrl)).replaceAll('"react/jsx-runtime"', JSON.stringify(pathToFileURL(require.resolve("react/jsx-runtime")).href)).replaceAll('"react"', JSON.stringify(pathToFileURL(require.resolve("react")).href));
-  return (await import(`data:text/javascript;base64,${Buffer.from(linked).toString("base64")}`)).TimesheetsPanel;
-}
+const summaryModule = () => loadServerModule("app/timesheets-summary.tsx");
+const calendarModule = () => loadServerModule("app/timesheets-calendar.tsx");
+const dayModule = () => loadServerModule("app/timesheets-day.tsx");
+const panelComponent = async () => (await loadServerModule("app/timesheets-panel.tsx")).TimesheetsPanel;
 
 test("employee Timesheets renders only their own records and has no editing or history controls", async () => {
   const { createElement } = await import("react");
@@ -195,7 +148,7 @@ test("overnight meal breaks work both across midnight and on the next day", () =
 
 
 test("summary aggregates employee totals, preserves payroll IDs, and distinguishes unknown wages", async () => {
-  const { summaryRows, summaryColumns, defaultSummaryColumns } = await import(await summaryModule());
+  const { summaryRows, summaryColumns, defaultSummaryColumns } = await summaryModule();
   const staff = [{ ...employees[0], name: "Alex Van Peshkov", payrollId: "007", legalFirstName: "Alexander", legalMiddleName: "V", legalLastName: "Peshkov" }, { id: 2, name: "Other Member", wage: "", role: "Sales", active: true }];
   const cards = buildTimeCards({ ...base, employees: staff, events: [...eventsFor("2026-08-03", "09:00", "17:00", 30), ...eventsFor("2026-08-04", "09:00", "17:00", 30, 10), ...eventsFor("2026-08-04", "09:00", "17:00", 30, 20).map(event => ({ ...event, employeeId: 2 }))] });
   const rows = summaryRows(staff, cards);
@@ -227,7 +180,7 @@ test("employee summary is a page with only own records and no payroll editing", 
 
 
 test("calendar month grids handle leap years, year boundaries, and the one-month selection limit", async () => {
-  const { calendarMonthDays, shiftCalendarMonth, validCalendarRange, calendarPresetRange } = await import(await calendarModule());
+  const { calendarMonthDays, shiftCalendarMonth, validCalendarRange, calendarPresetRange } = await calendarModule();
   const leap = calendarMonthDays("2028-02-01");
   assert.equal(leap.filter(Boolean).length, 29);
   assert.equal(leap[2], "2028-02-01");
@@ -246,7 +199,7 @@ test("calendar month grids handle leap years, year boundaries, and the one-month
 
 
 test("Day view combines split cards and compares elapsed clock time with scheduled time", async () => {
-  const { buildDayRows, dayClockLabel } = await import(await dayModule());
+  const { buildDayRows, dayClockLabel } = await dayModule();
   const shifts = [{ employeeId: 1, date: "2026-08-03", start: "09:00", end: "17:00", role: "Sales" }];
   const events = [...eventsFor("2026-08-03", "09:00", "12:00", 0), ...eventsFor("2026-08-03", "13:00", "18:15", 30, 10)];
   const cards = buildTimeCards({ ...base, shifts, events });
@@ -261,7 +214,7 @@ test("Day view combines split cards and compares elapsed clock time with schedul
 });
 
 test("Day no-shows require a completed scheduled shift and exclude approved leave and manual hours", async () => {
-  const { buildDayRows } = await import(await dayModule());
+  const { buildDayRows } = await dayModule();
   const shifts = [{ employeeId: 1, date: "2026-08-03", start: "09:00", end: "17:00", role: "Sales" }];
   const cards = buildTimeCards({ ...base, shifts });
   const input = { ...base, shifts, cards, date: "2026-08-03", showEmpty: false };
@@ -273,7 +226,7 @@ test("Day no-shows require a completed scheduled shift and exclude approved leav
 });
 
 test("Day view clips overnight work to the selected day and employee rows expose no editing controls", async () => {
-  const { buildDayRows, dayClockLabel, TimesheetsDay } = await import(await dayModule());
+  const { buildDayRows, dayClockLabel, TimesheetsDay } = await dayModule();
   const cards = buildTimeCards({ ...base, events: eventsFor("2026-08-03", "22:00", "06:00", 0, 1, true) });
   const rows = buildDayRows({ ...base, cards, date: "2026-08-04", showEmpty: false });
   assert.equal(rows[0].elapsedMinutes, 360);
@@ -286,7 +239,7 @@ test("Day view clips overnight work to the selected day and employee rows expose
 });
 
 test("day sorting uses names, actual starts, scheduled fallback, and midnight for overnight cards", async () => {
-  const { sortDayRows } = await import(await dayModule());
+  const { sortDayRows } = await dayModule();
   const row = (id, name, start, scheduledStart) => ({ employee: { ...employees[0], id, name }, cards: start ? [{ start }] : [], scheduled: scheduledStart ? [{ date: "2026-08-04", start: scheduledStart }] : [], elapsedMinutes: 0 });
   const rows = [row(1, "Alex Zebra", at("2026-08-04", "09:00"), "06:00"), row(2, "Carlos Adams", undefined, "08:00"), row(3, "Zoe Baker", at("2026-08-03", "22:00")), row(4, "Bea Miles"), row(5, "Aaron Young")];
   assert.deepEqual(sortDayRows(rows, "first", "2026-08-04").map(row => row.employee.id), [5, 1, 4, 2, 3]);
@@ -315,7 +268,7 @@ test("pay-period totals combine visible employee cards and respect employee acce
 });
 
 test("summary printing defaults to visible columns and prints saved values without edit controls", async () => {
-  const { TimesheetsSummary, defaultSummaryColumns } = await import(await summaryModule());
+  const { TimesheetsSummary, defaultSummaryColumns } = await summaryModule();
   const { createElement } = await import("react");
   const { renderToStaticMarkup } = await import("react-dom/server");
   const staff = [{ ...employees[0], payrollId: "EMP-100" }];
@@ -352,7 +305,7 @@ test("review counts clock sessions once across midnight while keeping separate s
 });
 
 test("summary ribbon sums displayed employees, leaves identity and rates blank, and prints the same totals", async () => {
-  const { TimesheetsSummary } = await import(await summaryModule());
+  const { TimesheetsSummary } = await summaryModule();
   const { createElement } = await import("react");
   const { renderToStaticMarkup } = await import("react-dom/server");
   const staff = [...employees, { ...employees[0], id: 2, name: "Second Worker", wage: "$30/hr" }];

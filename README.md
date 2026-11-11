@@ -1,84 +1,60 @@
 # DomBase
 
-DomBase is an employee scheduling and time-tracking app that brings shifts,
-attendance, time off, and team communication into one workspace. Managers can
-organize their team and review attendance, while employees can check their
-schedules, track their hours, and request time off.
+Shared workforce scheduling, team management and time tracking with React,
+TypeScript, vinext/Vite, Cloudflare Workers, D1, R2 and Drizzle.
 
-The app supports desktop and mobile layouts, with separate manager and employee
-views accessed through a four-digit PIN.
+## Local development
 
-## What It Does
+Requires Node >=22.13 and pnpm.
 
-### Scheduling
-
-- View shifts by day, week, or month.
-- Create and edit shifts with start and end times, roles, work stations, and notes.
-- Apply a shift to multiple days and keep changes as drafts before publishing.
-- Add events to the schedule and show approved time off alongside shifts.
-- Let employees submit preferred work hours and unavailable times for manager review.
-
-### Time Tracking
-
-- Clock in and out, take breaks, and see a live break countdown.
-- Check attendance against scheduled shifts and collect explanations for time exceptions.
-- Review clock-ins, clock-outs, breaks, and missed shifts in the Events tab.
-- View daily, weekly, and monthly timesheets with break-adjusted totals, time rounding, and overtime indicators.
-- Let managers adjust recorded hours while employees can view their own totals.
-
-### Team Management
-
-- Maintain a searchable employee roster with contact details, roles, wages, locations, and access levels.
-- Organize departments and roles, including multiple managers per department.
-- Keep employee profiles, manager notes, certificate attachments, and certificate expiration dates.
-- Record employee termination and rehire history.
-- Copy, download, or print the team roster.
-
-### Time Off and Communication
-
-- Submit paid or unpaid time-off requests with a reason and explanation.
-- Let managers approve or deny requests and review request history.
-- Set up time-off policies with starting balances and fixed or earned allowances.
-- Send individual and group messages within the app.
-- See in-app notifications for requests, schedule updates, and attendance alerts.
-
-### Settings
-
-Managers can update business information and choose rules for clock-in timing,
-required explanations, missed-shift alerts, automatic clock-outs, breaks,
-schedule visibility, department scheduling permissions, and availability approval.
-
-## Manager and Employee Views
-
-**Managers** can manage the roster, build schedules, review attendance and
-timesheets, handle time-off requests, and configure workplace rules.
-
-**Employees** can view schedules, clock in and out, track breaks, review their
-hours, submit availability and time-off requests, update personal profiles,
-and message their team.
-
-## Current Status
-
-DomBase is a working, local-first prototype. Records and uploaded certificates
-are saved in the browser on the device being used. They are not automatically
-shared between devices or users. Pulling this repository updates the app's code,
-not its saved employee records.
-
-Some settings are placeholders for future work. Payroll processing, POS
-connections, external email or text notifications, and two-step verification
-are not implemented. PIN access is intended for the prototype, not secure
-production storage of sensitive employee information.
-
-## Run Locally
-
-With Node.js 22.13 or newer installed, run:
-
-```bash
-npm install
-npm run dev
+```sh
+pnpm install
+pnpm run db:migrate:local
+pnpm run auth:configure:local
+pnpm dev
 ```
 
-Open the local address shown in the terminal. On a fresh setup, the manager PIN
-is `0000`; managers can add employees and assign their PINs in the roster.
+Owner/manager dashboards use email and password. Employee clock-in uses a
+separately registered kiosk and employee PIN. There is no shared default login.
+Initial setup links are issued privately and recipients choose their passwords.
 
-To check a production build, run `npm run build`.
+Optional fictional local demo:
+
+```sh
+pnpm run demo:seed:local -- --week YYYY-MM-DD
+```
+
+Choose a Monday; seeding refuses existing workforce data and never resets edits.
+Local and hosted databases are separate. Deploying code does not upload local data.
+
+## Checks
+
+```sh
+pnpm test
+pnpm lint
+```
+
+The test command builds the app and runs isolated native D1/R2 and HTTP checks.
+Repository-wide lint/types may require additional platform declarations; use the
+actual command results when assessing a change.
+
+## Hosted configuration
+
+Copy `wrangler.staging.example.jsonc` to the ignored `wrangler.staging.jsonc`
+and configure your own account/database bindings. Keep actual deployment IDs,
+Owner identities, secrets and operational notes private. Initial Owner tooling
+reads a private email-to-display-name JSON object from
+`.wrangler/secrets/staging-owners.json` or `DOMBASE_STAGING_OWNERS`.
+No real deployment identity is included in the public source.
+
+After configuring your account and private resources:
+
+```sh
+pnpm run build:staging
+pnpm run staging:deploy
+```
+
+Use separate development/staging secrets. Never commit environment files, setup
+links, passwords, employee PINs, database exports, recovery keys or runtime state.
+Daily hosted backup automation, real invitation delivery, hardware acceptance
+and independent release approval must be configured and verified separately.

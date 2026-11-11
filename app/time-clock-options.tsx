@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 type TimeClockOptionsProps = {
   roundingMinutes: 5 | 10 | 15;
   onLaunch: () => void;
@@ -100,7 +102,8 @@ export function TimeClockOptionsPanel({ roundingMinutes, onLaunch }: TimeClockOp
       <section className="time-clock-option-card" aria-labelledby="tablet-clock-title">
         <div className="time-clock-option-content">
           <h4 id="tablet-clock-title">Tablet Time Clock</h4>
-          <p>Works on most Android and Apple tablets. Capture employee photos on clock-ins/outs and breaks. A solution for restaurants and retail.</p>
+          <p>Register a shared tablet for employee PIN clock-in, clock-out and breaks. Manager approvals use a separate PIN.</p>
+          <Link className="time-clock-link" href="/kiosk-admin">Manage tablets and PINs</Link>
           <div className="time-clock-nested-options">
             <div>
               <PlaceholderCheckbox label="Unscheduled shift role selection" checked />

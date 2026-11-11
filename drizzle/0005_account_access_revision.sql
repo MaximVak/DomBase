@@ -1,0 +1,1 @@
+ALTER TABLE `accounts` ADD `access_revision` text DEFAULT '' NOT NULL;

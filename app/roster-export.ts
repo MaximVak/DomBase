@@ -20,7 +20,7 @@ export function rosterCopyRows(employees: RosterCopyEmployee[]): string[][] {
     employee.name,
     employee.email,
     employee.phone,
-    employee.id === 1 ? "Admin" : employee.accessLevel,
+    employee.accessLevel || "Employee",
     employee.location,
     employee.role,
     employee.wage,

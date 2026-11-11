@@ -1,68 +1,134 @@
-const permissionRows = [
-  { id: "account-plan", label: "Who can upgrade and downgrade this account?" },
-  { id: "employee-wages", label: "Who can view all employee wages?", peerWages: true },
-  { id: "labor-costs", label: "Who can see labor costs and labor cost %?" },
-  { id: "shift-notes", label: "Who can add and view notes to shifts?" },
-  { id: "departments-roles", label: "Who can create and edit Departments and Roles?" },
-  { id: "company-reports", label: "Who can view company reports and sales data on the web dashboard?" },
-  { id: "availability-requests", label: "Who can approve availability requests?" },
-  { id: "summary-emails", label: "Who can receive the daily timesheets and weekly sales summary emails?" },
-  { id: "permission-settings", label: "Who has access to and can edit this permissions page?" },
-  { id: "employee-documents", label: "Who can access completed employee documents such as W-4s, I-9s, state tax forms, and others?", manager: false },
-  { id: "hiring", label: "Who can view and manage hiring features, including paid postings, on the web dashboard?" },
-  { id: "other-settings", label: "Who has access to and can edit other settings pages?" },
-  { id: "employee-management", label: "Who can view, edit, or terminate employees?" },
-  { id: "team-schedules", label: "Who can create and edit team schedules on the web dashboard or from the mobile app?" },
-  { id: "manager-log", label: "Who can view and contribute to the manager log?" },
-  { id: "timesheets", label: "Who can view and make changes to existing timesheets on the web dashboard?" },
-  { id: "timecard-locks", label: "Who can lock and unlock time cards?", manager: false },
-];
+"use client";
+
+import { useEffect, useState } from "react";
+import { permissionCatalog } from "../access/policy";
+import type { PermissionMap } from "../access/policy";
+import { accessRequest as request, roleName } from "./account-access-client";
+import type { Account, Access, Department, EmployeeLink } from "./account-access-client";
+import { AccountLifecycleForm } from "./account-lifecycle-form";
+import { AccountSetupLink } from "./account-setup-link";
+
+type Mine = { permissions: PermissionMap; canManageAccess: boolean; allDepartments: boolean };
 
 export function TeamPermissionsPanel() {
-  return (
-    <section className="panel settings-enforcement-panel settings-team-permissions-panel">
-      <div className="settings-panel-heading">
-        <h3>Team permissions</h3>
-        <button type="button" disabled>Save</button>
-      </div>
-      <p className="team-permissions-intro">DomBase makes it simple to schedule, track, and manage employees. Review what permissions your team members have access to.</p>
-      <div className="team-permissions-feature" title="Not available yet">
-        <h4>Multiple wage rates</h4>
-        <p>Apply different wage rates to different roles for team members</p>
-      </div>
-      <div className="team-permissions-feature">
-        <h4>Departments</h4>
-        <p>Track labor costs by area and allow department-level managers to create and publish schedules for their departments.</p>
-      </div>
-      <div className="team-permissions-access-levels">
-        <h4>Access levels on DomBase:</h4>
-        <p><strong>Account Owner</strong> oversees the account and is identified in the team roster.</p>
-        <p><strong>Admins</strong> have access to team management and administrative controls.</p>
-        <p><strong>Managers</strong> can manage team schedules, employees, timesheets, and settings.</p>
-        <p><strong>Employees</strong> have access to their time clock, timesheets, and time off requests.</p>
-      </div>
-      <table className="team-permissions-table">
-        <thead>
-          <tr><th scope="col">Permissions</th><th scope="col">Admin</th><th scope="col">Manager</th></tr>
-        </thead>
-        <tbody>
-          {permissionRows.map(row => (
-            <tr key={row.id}>
-              <th scope="row">
-                <span>{row.label}</span>
-                {row.peerWages ? (
-                  <label className="team-permissions-peer-wages" title="Not available yet">
-                    <input type="checkbox" disabled />
-                    <span>Prevent managers from viewing equivalent managers&apos; wages (i.e., Admins can&apos;t see other Admins&apos; wages)</span>
-                  </label>
-                ) : null}
-              </th>
-              <td><input type="checkbox" checked disabled aria-label={`Admin: ${row.label}`} title="Not available yet" /></td>
-              <td><input type="checkbox" checked={row.manager !== false} disabled aria-label={`Manager: ${row.label}`} title="Not available yet" /></td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </section>
-  );
+  const [mine, setMine] = useState<Mine | null>(null);
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [employees, setEmployees] = useState<EmployeeLink[]>([]);
+  const [creating, setCreating] = useState(false);
+  const [selectedId, setSelectedId] = useState(0);
+  const [draft, setDraft] = useState<Access | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [reload, setReload] = useState(0);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    async function load() {
+      setLoading(true);
+      setError("");
+      const current = await request<Mine>("me", controller.signal);
+      if (controller.signal.aborted) return;
+      setMine(current);
+      if (current.canManageAccess) {
+        const result = await request<{ accounts: Account[]; departments: Department[]; employees: EmployeeLink[] }>("accounts", controller.signal);
+        if (controller.signal.aborted) return;
+        setAccounts(result.accounts);
+        setDepartments(result.departments);
+        setEmployees(result.employees);
+        setSelectedId(id => result.accounts.some(account => account.id === id) ? id : (result.accounts.find(account => account.accessLevel === "manager")?.id ?? result.accounts[0]?.id ?? 0));
+      }
+      setLoading(false);
+    }
+    void load().catch(() => {
+      if (controller.signal.aborted) return;
+      setError("Could not load access settings. Check your connection and try again.");
+      setLoading(false);
+    });
+    return () => controller.abort();
+  }, [reload]);
+
+  useEffect(() => {
+    if (!selectedId || !mine?.canManageAccess) return;
+    const controller = new AbortController();
+    async function load() {
+      setDraft(null);
+      setError("");
+      const result = await request<Access>(`accounts/${selectedId}`, controller.signal);
+      if (!controller.signal.aborted) setDraft(result);
+    }
+    void load().catch(() => {
+      if (!controller.signal.aborted) setError("Could not load this account. Reload and try again.");
+    });
+    return () => controller.abort();
+  }, [selectedId, mine?.canManageAccess, reload]);
+
+  const editable = Boolean(mine?.canManageAccess && draft && ["manager", "general_manager"].includes(draft.account.accessLevel) && draft.account.id === selectedId);
+  const shownPermissions = mine?.canManageAccess ? draft?.permissions : mine?.permissions;
+
+  function accountSaved(updated: Access) {
+    setAccounts(current => current.some(a => a.id === updated.account.id) ? current.map(a => a.id === updated.account.id ? updated.account : a) : [...current, updated.account]);
+    setDraft(updated); setSelectedId(updated.account.id); setCreating(false); setError("");
+    setMessage("Account saved. Existing sign-ins have ended. Review permissions below before handing over access.");
+  }
+
+  async function save() {
+    if (!editable || !draft || saving) return;
+    setSaving(true);
+    setError("");
+    setMessage("");
+    try {
+      const updated = await request<Access>(`accounts/${draft.account.id}`, undefined, {
+        version: draft.account.version, permissions: draft.permissions, departmentIds: draft.departmentIds,
+      });
+      accountSaved(updated);
+      setMessage(updated.account.loginEnabled ? "Access saved. This person will need to sign in again." : "Access saved. This person will need a new password setup link.");
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Could not save access. Try again.");
+    } finally { setSaving(false); }
+  }
+
+  return <section className="panel settings-enforcement-panel settings-team-permissions-panel" aria-labelledby="permissions-heading" aria-busy={loading || saving}>
+    <div className="settings-panel-heading">
+      <h3 id="permissions-heading">Team permissions</h3>
+      {mine?.canManageAccess ? <button type="button" onClick={save} disabled={!editable || saving || creating}>{saving ? "Saving…" : "Save permissions"}</button> : null}
+    </div>
+    <p className="team-permissions-intro">Owners control account access. Managers see their assigned departments; Owners and General Managers can work across departments.</p>
+    {loading ? <p role="status">Loading access settings…</p> : null}
+    {error ? <div className="permissions-feedback"><p role="alert">{error}</p><button type="button" onClick={() => setReload(value => value + 1)} disabled={saving}>Reload access settings</button></div> : null}
+    {message ? <p role="status">{message}</p> : null}
+    {!loading && mine?.canManageAccess ? <>
+      <button type="button" disabled={saving} onClick={() => { setCreating(value => !value); setMessage(""); }}>{creating ? "Close new account form" : "Add account"}</button>
+      {creating ? <AccountLifecycleForm departments={departments} employees={employees.filter(e => !accounts.some(a => a.employeeId === e.id))} busy={saving} onBusy={setSaving} onSaved={accountSaved} onCancel={() => setCreating(false)} /> : null}
+      <label className="permissions-account" htmlFor="permissions-account">Account
+        <select id="permissions-account" value={selectedId} disabled={saving || creating || !accounts.length} onChange={event => { setDraft(null); setMessage(""); setSelectedId(Number(event.target.value)); }}>
+          {accounts.map(account => <option key={account.id} value={account.id}>{account.displayName} — {roleName(account.accessLevel)} ({account.email})</option>)}
+        </select>
+      </label>
+      {!accounts.length ? <p>No accounts are available yet.</p> : null}
+      {draft && !creating ? <>
+        <p>{roleName(draft.account.accessLevel)}{draft.account.disabledAt ? " · Account disabled" : !draft.account.loginEnabled ? " · Password setup pending" : ""}</p>
+        {draft.account.accessLevel === "owner" ? <p>Owners retain full account control. Their access cannot be reduced here.</p> : null}
+        {draft.account.accessLevel === "employee" ? <p>Employee clock access is managed separately from dashboard accounts.</p> : null}
+        {draft.account.accessLevel === "general_manager" ? <button type="button" disabled={saving} onClick={() => setDraft(current => current ? { ...current, permissions: Object.fromEntries(permissionCatalog.map(permission => [permission.id, ["timesheets.read", "wages.read", "exports.timesheets"].includes(permission.id)])) as PermissionMap, departmentIds: [] } : current)}>Apply limited timesheet / wage administrator permissions</button> : null}
+        {draft.account.accessLevel !== "owner" ? <>
+          <AccountLifecycleForm key={`${draft.account.id}:${draft.account.version}`} access={draft} departments={departments} employees={employees.filter(e => e.id === draft.account.employeeId || !accounts.some(a => a.employeeId === e.id))} busy={saving} onBusy={setSaving} onSaved={accountSaved} />
+          <AccountSetupLink key={draft.account.id} account={draft.account} busy={saving} onBusy={setSaving} onSaved={accountSaved} />
+        </> : null}
+      </> : selectedId && !creating ? <p role="status">Loading this account…</p> : null}
+    </> : !loading && mine ? <p>Your permissions are shown below. Ask an Owner to change your access.</p> : null}
+    {shownPermissions && !creating ? <div className="permissions-table-scroll"><table className="team-permissions-table">
+      <thead><tr><th scope="col">Permission</th><th scope="col">Allowed</th></tr></thead>
+      <tbody>{permissionCatalog.map(permission => <tr key={permission.id}>
+        <th scope="row" id={`permission-${permission.id}`}>{permission.label}</th>
+        <td><input type="checkbox" checked={shownPermissions[permission.id]} disabled={!editable || saving} aria-labelledby={`permission-${permission.id}`} onChange={event => {
+          const checked = event.target.checked;
+          setDraft(current => current ? { ...current, permissions: { ...current.permissions, [permission.id]: checked } } : current);
+        }} /></td>
+      </tr>)}</tbody>
+    </table></div> : null}
+    <p className="permissions-footnote">Access changes end this person’s existing sign-ins. Conversation access also requires membership.</p>
+  </section>;
 }
