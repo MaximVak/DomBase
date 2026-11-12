@@ -1,5 +1,7 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { PinLockout, pinCooldown } from "./pin-lockout";
+import type { PinCooldown } from "./pin-lockout";
 import { PinForm } from "./pin-form";
 import { ClockPanel } from "./clock-panel";
 import type { ClockInput, ClockPerson } from "./clock-panel";
@@ -13,6 +15,9 @@ export function KioskScreen() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [notice, setNotice] = useState("");
+  const [cooldowns, setCooldowns] = useState<{ pin: PinCooldown | null; approve: PinCooldown | null }>({ pin: null, approve: null });
+  const clearPinCooldown = useCallback(() => setCooldowns(current => ({ ...current, pin: null })), []);
+  const clearApprovalCooldown = useCallback(() => setCooldowns(current => ({ ...current, approve: null })), []);
   const [epoch, setEpoch] = useState(0);
   const generation = useRef(0);
   const controller = useRef<AbortController | null>(null);
@@ -35,6 +40,7 @@ export function KioskScreen() {
       const result = await response.json();
       await lockRemote();
       if (signal?.aborted) return;
+      setCooldowns({ pin: result.pinRetryAfterSeconds > 0 ? pinCooldown(String(result.pinRetryAfterSeconds), "device", Date.now()) : null, approve: result.approvalRetryAfterSeconds > 0 ? pinCooldown(String(result.approvalRetryAfterSeconds), "device", Date.now()) : null });
       registered.current = true; setDeviceName(result.deviceName); setPhase("pin");
     } catch (error) { if (!signal?.aborted) { setMessage(error instanceof Error ? error.message : "Could not connect."); setPhase("error"); } }
   }, [lockRemote]);
@@ -60,6 +66,8 @@ export function KioskScreen() {
   }, [person, reset]);
   async function submit(action: string, body: unknown, receive: (result: ClockPerson & { recorded?: boolean; approvalRequired?: boolean; requestId: string; reason: string; eventType: string }) => void) {
     if (busy || document.visibilityState === "hidden") return;
+    const cooldown = action === "pin" || action === "approve" ? cooldowns[action] : null;
+    if (cooldown?.scope === "device" && cooldown.until > Date.now()) return;
     const version = generation.current; const abort = new AbortController(); controller.current = abort;
     active.current = true; setBusy(true); setMessage(""); setNotice("");
     try {
@@ -67,9 +75,14 @@ export function KioskScreen() {
       const result = await response.json();
       if (version !== generation.current) return;
       if (!response.ok) {
+        if (response.status === 429 && (action === "pin" || action === "approve")) {
+          setCooldowns(current => ({ ...current, [action]: pinCooldown(response.headers.get("retry-after"), result.limitScope, Date.now()) }));
+          return;
+        }
         if ([401, 409].includes(response.status) && action !== "pin") { reset(); setMessage(result.error); return; }
         throw new Error(result.error || "Could not record this action. Please try again.");
       }
+      if (action === "pin" || action === "approve") setCooldowns(current => ({ ...current, [action]: null }));
       receive(result);
     } catch (error) { if (version === generation.current && !abort.signal.aborted) setMessage(error instanceof Error ? error.message : "Could not connect. Please try again."); }
     finally {
@@ -92,9 +105,10 @@ export function KioskScreen() {
       {phase === "loading" ? <p role="status">Checking this tablet…</p> : null}
       {phase === "error" ? <button onClick={() => void check()}>Try again</button> : null}
       {phase === "unregistered" ? <><h2>Register this tablet</h2><p>An Owner or authorized manager needs to register this browser once. Employee PINs are available after registration.</p><a className="kiosk-primary" href="/kiosk-admin">Manager device setup</a></> : null}
-      {phase === "pin" ? <PinForm key={epoch} busy={busy} onSubmit={pin => submit("pin", { pin }, result => { setPerson(result); setPhase("person"); })} /> : null}
+      {phase === "pin" && cooldowns.pin ? <PinLockout value={cooldowns.pin} onExpired={clearPinCooldown} /> : null}
+      {phase === "pin" ? <PinForm key={epoch} busy={busy} locked={cooldowns.pin?.scope === "device"} describedBy={cooldowns.pin ? "kiosk-lockout" : undefined} onSubmit={pin => submit("pin", { pin }, result => { setPerson(result); setPhase("person"); })} /> : null}
       {phase === "person" && person ? <ClockPanel person={person} busy={busy} onClock={clock} onCancel={() => reset()} /> : null}
-      {phase === "approval" && pending ? <><h2>Manager approval</h2><p>{pending.reason}</p><PinForm key={`manager-${epoch}`} manager busy={busy} onSubmit={pin => submit("approve", { requestId: pending.requestId, pin }, success)} /><button onClick={() => reset()}>Cancel and lock</button></> : null}
+      {phase === "approval" && pending ? <><h2>Manager approval</h2><p>{pending.reason}</p>{cooldowns.approve ? <PinLockout value={cooldowns.approve} manager onExpired={clearApprovalCooldown} /> : null}<PinForm key={`manager-${epoch}`} manager busy={busy} locked={cooldowns.approve?.scope === "device"} describedBy={cooldowns.approve ? "kiosk-lockout" : undefined} onSubmit={pin => submit("approve", { requestId: pending.requestId, pin }, success)} /><button onClick={() => reset()}>Cancel and lock</button></> : null}
     </section>
   </main>;
 }

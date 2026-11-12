@@ -7,7 +7,7 @@ import { kioskCookie, readKioskCookie, registeredDevice } from "./device";
 import type { RegisteredDevice } from "./device";
 import { atomicBatch } from "./database";
 import type { KioskOperatorDatabase } from "./database";
-import { attemptBudget, exactKeys, pinIsValid, pinLookup, positiveId, releaseAttempt, verifyPin } from "./security";
+import { KioskRateLimitError, devicePinLockouts, pinAttemptLimits, attemptBudget, exactKeys, pinIsValid, pinLookup, positiveId, releaseAttempt, verifyPin } from "./security";
 
 type ClockType = "in" | "out" | "break" | "break_end";
 type Person = { interaction: typeof schema.kioskInteractions.$inferSelect; employee: typeof schema.employees.$inferSelect };
@@ -68,8 +68,8 @@ export function createKioskService(db: KioskOperatorDatabase, options: { secret:
   async function signIn(request: Request, device: RegisteredDevice, pin: unknown) {
     if (!pinIsValid(pin)) throw new AuthError(401, "Invalid employee PIN.");
     const lookup = pinLookup(options.secret, pin);
-    const deviceAttempt = await attemptBudget(db, options.secret, `employee-device:${device.device.id}`, 20, now());
-    const pinAttempt = await attemptBudget(db, options.secret, `employee-pin:${lookup}`, 5, now());
+    const deviceAttempt = await attemptBudget(db, options.secret, `employee-device:${device.device.id}`, pinAttemptLimits.employeeDevice, now());
+    const pinAttempt = await attemptBudget(db, options.secret, `employee-pin:${lookup}`, pinAttemptLimits.pin, now());
     const [employee] = await db.select().from(schema.employees).where(eq(schema.employees.pinLookup, lookup)).limit(1);
     const valid = await verifyPin(options.secret, pin, employee?.pinHash ?? dummyHash);
     if (!valid || !employee?.active || employee.terminated) throw new AuthError(401, "Invalid employee PIN.");
@@ -176,8 +176,8 @@ export function createKioskService(db: KioskOperatorDatabase, options: { secret:
     const [pending] = await db.select().from(schema.kioskClockRequests).where(and(eq(schema.kioskClockRequests.id, body.requestId), eq(schema.kioskClockRequests.interactionId, person.interaction.id), eq(schema.kioskClockRequests.requiresApproval, true), isNull(schema.kioskClockRequests.completedAt), isNull(schema.kioskClockRequests.cancelledAt), sql`${schema.kioskClockRequests.expiresAt} > ${stamp()}`)).limit(1);
     if (!pending) throw new AuthError(409, "This approval request is no longer available. Enter your employee PIN again.");
     const lookup = pinLookup(options.secret, body.pin);
-    const deviceAttempt = await attemptBudget(db, options.secret, `approval-device:${device.device.id}`, 10, now());
-    const pinAttempt = await attemptBudget(db, options.secret, `approval-pin:${lookup}`, 5, now());
+    const deviceAttempt = await attemptBudget(db, options.secret, `approval-device:${device.device.id}`, pinAttemptLimits.approvalDevice, now());
+    const pinAttempt = await attemptBudget(db, options.secret, `approval-pin:${lookup}`, pinAttemptLimits.pin, now());
     const [credential] = await db.select().from(schema.managerApprovalCredentials).where(eq(schema.managerApprovalCredentials.pinLookup, lookup));
     const valid = await verifyPin(options.secret, body.pin, credential?.pinHash ?? dummyHash);
     if (!valid || !credential || credential.revision === "legacy-unenrolled") throw new AuthError(401, "Invalid manager approval PIN.");
@@ -195,7 +195,7 @@ export function createKioskService(db: KioskOperatorDatabase, options: { secret:
       const url = new URL(request.url); const action = url.pathname.slice("/api/kiosk/".length);
       if (!["status", "pin", "lock", "clock", "approve"].includes(action)) throw new AuthError(404, "Not found.");
       const device = await deviceFor(request);
-      if (action === "status" && request.method === "GET") return json({ registered: true, deviceName: device.device.name });
+      if (action === "status" && request.method === "GET") return json({ registered: true, deviceName: device.device.name, ...await devicePinLockouts(db, options.secret, device.device.id, now()) });
       if (request.method !== "POST") return json({ error: "Method not allowed." }, 405, { Allow: action === "status" ? "GET" : "POST" });
       const body = await readAuthBody(request);
       if (action === "lock") { exactKeys(body, []); await lock(device); return json({ locked: true }, 200, { "Set-Cookie": kioskCookie(url, "person", "", 0) }); }
@@ -210,7 +210,8 @@ export function createKioskService(db: KioskOperatorDatabase, options: { secret:
       } else throw new AuthError(405, "Method not allowed.");
       return json(result, 200, { "Set-Cookie": kioskCookie(url, "person", "", 0) });
     } catch (error) {
-      if (error instanceof AuthError) return json({ error: error.message }, error.status, error.status === 429 ? { "Retry-After": "900" } : {});
+      if (error instanceof KioskRateLimitError) return json({ error: error.message, retryAfterSeconds: error.retryAfterSeconds, limitScope: error.limitScope }, error.status, { "Retry-After": String(error.retryAfterSeconds) });
+      if (error instanceof AuthError) return json({ error: error.message }, error.status);
       console.error("Kiosk request failed.");
       return json({ error: "The time clock is unavailable. Nothing is confirmed until you see a success message. Try again." }, 503);
     }

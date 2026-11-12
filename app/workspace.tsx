@@ -3,6 +3,7 @@
 import { FormEvent, MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { createPortal } from "react-dom";
+import { DepartmentManagerCell, DepartmentManagerFeedback, useDepartmentManagers } from "./department-managers";
 import { useSharedWorkspace } from "./shared-workspace";
 import { equal, newRecordId } from "../workforce/contract";
 import { PrintTable } from "./print-table";
@@ -834,7 +835,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
   const availableRoles = Array.from(new Set(
     [...state.departments.flatMap((department) => department.roles), ...rosterRoles],
   )).sort((first, second) => first.localeCompare(second));
-  const availableManagers = activeEmployees.filter((employee) => employee.accessLevel === "Manager");
+  const departmentManagers = useDepartmentManagers(activeView === "departments_roles" && account.accessLevel === "owner");
   const rosterFilterRoles = Array.from(new Set([
     ...availableRoles,
     ...state.employees.map((employee) => employee.role.trim()).filter(Boolean),
@@ -1765,30 +1766,6 @@ export default function Home({ account }: { account: DashboardAccount }) {
             )),
       };
     })) return;
-  }
-
-  async function addDepartmentManager(departmentId: number, managerId: number) {
-    if (availableManagers.some((manager) => manager.id === managerId)) {
-      if (!await setState((current) => ({
-        ...current,
-        departments: current.departments.map((department) => (
-          department.id === departmentId && !department.managerIds.includes(managerId)
-            ? { ...department, managerIds: [...department.managerIds, managerId] }
-            : department
-        )),
-      }))) return;
-    }
-  }
-
-  async function removeDepartmentManager(departmentId: number, managerId: number) {
-    if (!await setState((current) => ({
-      ...current,
-      departments: current.departments.map((department) => (
-        department.id === departmentId
-          ? { ...department, managerIds: department.managerIds.filter((id) => id !== managerId) }
-          : department
-      )),
-    }))) return;
   }
 
   async function updateEmployeeStatus(employeeId: number, active: boolean) {
@@ -4085,6 +4062,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                   <button type="button" onClick={() => setIsAddingDepartment(true)}>Add new department</button>
                 )}
               </div>
+              <DepartmentManagerFeedback control={departmentManagers} />
               <div className="panel department-roles-panel">
                 <div className="department-roles-table" role="table" aria-label="Departments and roles">
                   <div className="department-roles-header" role="row">
@@ -4094,12 +4072,6 @@ export default function Home({ account }: { account: DashboardAccount }) {
                   </div>
                   {state.departments.map((department, departmentIndex) => {
                     const displayedRoles = rolesForDepartment(department, state.departments, rosterRoles);
-                    const assignedManagers = department.managerIds
-                      .map((managerId) => employeeById(availableManagers, managerId))
-                      .filter((manager): manager is Employee => Boolean(manager));
-                    const assignableManagers = availableManagers
-                      .filter((manager) => !department.managerIds.includes(manager.id))
-                      .sort((first, second) => first.name.localeCompare(second.name, undefined, { sensitivity: "base" }));
                     return (
                       <div className="department-roles-row" role="row" key={department.id}>
                       <div className="department-name-cell" role="cell">
@@ -4141,6 +4113,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                         role="cell"
                         onClick={(event) => event.currentTarget.querySelector("input")?.focus()}
                       >
+                        <small className="department-cell-label">Job roles</small>
                         {displayedRoles.map((role) => (
                           <span key={role}>
                             {role}
@@ -4165,45 +4138,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                           aria-label={`Add role to ${department.name}`}
                         />
                       </div>
-                      <div
-                        className="department-manager-list"
-                        role="cell"
-                      >
-                        {assignedManagers.map((manager) => (
-                            <span key={manager.id}>
-                              {manager.name}
-                              <button
-                                type="button"
-                                onClick={() => removeDepartmentManager(department.id, manager.id)}
-                                aria-label={`Remove ${manager.name} from ${department.name}`}
-                              >×</button>
-                            </span>
-                        ))}
-                        {assignableManagers.length > 0 ? (
-                          <details className={assignedManagers.length > 0 ? "department-manager-picker has-selection" : "department-manager-picker"}>
-                            <summary aria-label={`Select manager for ${department.name}`}>
-                              {assignedManagers.length === 0 ? <span>Select manager</span> : null}
-                              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
-                            </summary>
-                            <div className="department-manager-menu" role="listbox" aria-label={`Available managers for ${department.name}`}>
-                              {assignableManagers.map((manager) => (
-                                <button
-                                  type="button"
-                                  role="option"
-                                  aria-selected="false"
-                                  onClick={(event) => {
-                                    addDepartmentManager(department.id, manager.id);
-                                    event.currentTarget.closest("details")?.removeAttribute("open");
-                                  }}
-                                  key={manager.id}
-                                >
-                                  {manager.name}
-                                </button>
-                              ))}
-                            </div>
-                          </details>
-                        ) : null}
-                      </div>
+                      <DepartmentManagerCell departmentId={department.id} name={department.name} control={departmentManagers} saved={shared.data.departmentManagers} />
                       {departmentIndex > 0 ? (
                         <button
                           type="button"

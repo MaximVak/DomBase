@@ -114,7 +114,7 @@ export function createAccessService(db: Database, auth: Auth) {
     const assignments = await db.select({ id: schema.departmentManagers.departmentId }).from(schema.departmentManagers)
       .innerJoin(schema.departments, eq(schema.departments.id, schema.departmentManagers.departmentId))
       .where(and(eq(schema.departmentManagers.accountId, id), eq(schema.departments.archived, false)));
-    return { account, permissions: permissionsFor(account.accessLevel, overrides), departmentIds: assignments.map(row => row.id) };
+    return { account, permissions: permissionsFor(account.accessLevel, overrides), departmentIds: account.accessLevel === "manager" ? assignments.map(row => row.id) : [] };
   }
 
   async function updateAccess(ctx: Context, id: number, body: Record<string, unknown>) {
@@ -128,6 +128,7 @@ export function createAccessService(db: Database, auth: Auth) {
     if (!Array.isArray(body.departmentIds) || body.departmentIds.length > 100 || body.departmentIds.some(id => !Number.isSafeInteger(id) || id < 1)
       || new Set(body.departmentIds).size !== body.departmentIds.length) throw new AuthError(400, "Invalid departments.");
     const departmentIds = body.departmentIds as number[];
+    if (target.account.accessLevel !== "manager" && departmentIds.length) throw new AuthError(400, "Only Managers have department assignments. General Managers have company-wide access.");
     if (departmentIds.length) {
       const found = await db.select({ id: schema.departments.id }).from(schema.departments).where(and(inArray(schema.departments.id, departmentIds), eq(schema.departments.archived, false)));
       if (found.length !== departmentIds.length) throw new AuthError(400, "Choose active departments.");
@@ -291,6 +292,10 @@ export function createAccessService(db: Database, auth: Auth) {
         requireOwner(ctx);
         if (segments.length === 1 && request.method === "GET") result = {
           accounts: await db.select(accountFields).from(schema.accounts).orderBy(schema.accounts.id).limit(500),
+          departmentAssignments: await db.select({ accountId: schema.departmentManagers.accountId, departmentId: schema.departmentManagers.departmentId }).from(schema.departmentManagers)
+            .innerJoin(schema.accounts, eq(schema.accounts.id, schema.departmentManagers.accountId))
+            .innerJoin(schema.departments, eq(schema.departments.id, schema.departmentManagers.departmentId))
+            .where(and(eq(schema.accounts.accessLevel, "manager"), eq(schema.departments.archived, false))),
           departments: await db.select({ id: schema.departments.id, name: schema.departments.name }).from(schema.departments).where(eq(schema.departments.archived, false)).orderBy(schema.departments.id).limit(500),
           employees: await db.select({ id: schema.employees.id, name: schema.employees.name }).from(schema.employees)
             .where(and(eq(schema.employees.active, true), eq(schema.employees.terminated, false))).orderBy(schema.employees.name).limit(500),

@@ -43,6 +43,7 @@ export function AccountLifecycleForm({ access, departments, employees, busy, onB
         </select></label>
       </div>
       <p>Job roles and wages are managed in Team. An employee link identifies this account’s person and cannot be reassigned once saved.</p>
+      {level === "general_manager" ? <p>General Managers have company-wide access and do not need department assignments.</p> : null}
       {level === "employee" ? <p>Link an active employee to enable password access to their own profile. Tablet PIN access is separate.</p> : null}
       {level === "manager" ? <div className="account-departments"><strong>Assigned departments</strong>
         <p>A manager with no assigned departments cannot access team records.</p>

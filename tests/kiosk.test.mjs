@@ -178,4 +178,48 @@ test("registered tablets, PIN sessions and action-scoped approvals use isolated 
     assert.equal(https.status, 200);
     assert.ok(https.headers.getSetCookie().some(cookie => cookie.startsWith("__Host-dombase-kiosk-person=") && /; Secure/.test(cookie) && /HttpOnly/.test(cookie) && /SameSite=Strict/.test(cookie)));
   });
+  await t.test("rotating guesses lock the whole device, count down accurately and survive restarting the service", async () => {
+    time += 900001;
+    for (let n = 0; n < 20; n++) assert.equal((await clock("pin", device2, { pin: String(810000 + n) })).status, 401);
+    const blocked = await clock("pin", device2, { pin: otherEmployeePin });
+    assert.equal(blocked.status, 429); assert.equal(blocked.headers.get("retry-after"), "900");
+    assert.deepEqual(await blocked.json(), { error: "Too many PIN attempts on this tablet. PIN entry is temporarily locked.", retryAfterSeconds: 900, limitScope: "device" });
+    assert.equal((await ok(await clock("status", device2))).pinRetryAfterSeconds, 900);
+    time += 45000;
+    await platform.dispose(); platform = await open(); services();
+    assert.equal((await ok(await clock("status", device2))).pinRetryAfterSeconds, 855);
+    const persisted = await clock("pin", device2, { pin: otherEmployeePin }); assert.equal(persisted.status, 429); assert.equal(persisted.headers.get("retry-after"), "855");
+    time += 855001;
+    assert.equal((await ok(await clock("status", device2))).pinRetryAfterSeconds, 0);
+    await ok(await clock("pin", device2, { pin: otherEmployeePin }));
+  });
+  await t.test("a PIN-specific lockout allows another employee and successful sign-in cannot erase failed guesses", async () => {
+    time += 900001;
+    for (let n = 0; n < 5; n++) assert.equal((await clock("pin", device2, { pin: "87654321" })).status, 401);
+    let limited = await clock("pin", device2, { pin: "87654321" }); assert.equal(limited.status, 429); assert.equal((await limited.json()).limitScope, "pin");
+    await ok(await clock("pin", device2, { pin: otherEmployeePin }));
+    limited = await clock("pin", device2, { pin: "87654321" }); assert.equal(limited.status, 429);
+    assert.equal((await ok(await clock("status", device2))).pinRetryAfterSeconds, 0);
+    time += 30000;
+    assert.equal((await clock("pin", device2, { pin: "87654321" })).headers.get("retry-after"), "870");
+  });
+  await t.test("approval guessing has a separate device lockout and never records a punch while blocked", async () => {
+    time += 900001;
+    let p = await person(otherEmployeePin, device2);
+    if (p.data.state !== "out") { await ok(await clock("clock", p.cookie, { eventType: "out", explanation: "" })); p = await person(otherEmployeePin, device2); }
+    const pendingResponse = await clock("clock", p.cookie, { eventType: "in", roleId: f.roleB.id, explanation: "" }); assert.equal(pendingResponse.status, 202); const pending = await pendingResponse.json();
+    const before = (await db.select().from(schema.clockEvents)).length;
+    for (let n = 0; n < 10; n++) assert.equal((await clock("approve", p.cookie, { requestId: pending.requestId, pin: String(910000 + n) })).status, 401);
+    const blocked = await clock("approve", p.cookie, { requestId: pending.requestId, pin: ownerPin }); assert.equal(blocked.status, 429); assert.equal((await blocked.json()).limitScope, "device");
+    assert.equal((await db.select().from(schema.clockEvents)).length, before);
+    let status = await ok(await clock("status", device2)); assert.equal(status.approvalRetryAfterSeconds, 900); assert.equal(status.pinRetryAfterSeconds, 0);
+    time += 30000; status = await ok(await clock("status", device2)); assert.equal(status.approvalRetryAfterSeconds, 870);
+    time += 870001;
+    assert.equal((await ok(await clock("status", device2))).approvalRetryAfterSeconds, 0);
+    p = await person(otherEmployeePin, device2);
+    const next = await clock("clock", p.cookie, { eventType: "in", roleId: f.roleB.id, explanation: "" }); assert.equal(next.status, 202);
+    await ok(await clock("approve", p.cookie, { requestId: (await next.json()).requestId, pin: ownerPin }));
+    assert.equal((await db.select().from(schema.clockEvents)).length, before + 1);
+  });
+
 });

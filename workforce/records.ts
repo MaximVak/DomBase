@@ -55,17 +55,7 @@ export async function departmentChange(r: RecordContext, change: Change) {
   }
   if (!equal(before?.managerIds ?? [], after.managerIds ?? [])) {
     if (r.ctx.account.accessLevel !== "owner") throw new AuthError(403, "Only an Owner can change manager assignments.");
-    const ids = v.list(after.managerIds, 100).map(id => v.integer(id));
-    const accounts = await r.db.select().from(s.accounts);
-    const assigned = ids.map(id => accounts.find(a => a.employeeId === id && ["manager", "general_manager"].includes(a.accessLevel) && !a.disabledAt));
-    if (assigned.some(a => !a)) throw new AuthError(400, "Choose existing manager dashboard accounts.");
-    const previous = await r.db.select().from(s.departmentManagers).where(eq(s.departmentManagers.departmentId, change.id));
-    r.tx.remove(s.departmentManagers, sql`department_id = ${change.id}`);
-    for (const account of assigned) r.tx.insert(s.departmentManagers, { departmentId: change.id, accountId: account!.id });
-    for (const id of new Set([...previous.map(a => a.accountId), ...assigned.map(a => a!.id)])) {
-      r.tx.write(sql`UPDATE accounts SET session_version = session_version + 1, access_revision = ${newToken()}, updated_at = ${r.tx.stamp} WHERE id = ${id} AND ${r.tx.receipt}`);
-      r.tx.write(sql`UPDATE account_sessions SET revoked_at = ${r.tx.stamp} WHERE account_id = ${id} AND ${r.tx.receipt}`);
-    }
+    throw new AuthError(403, "Use account access to change manager department assignments.");
   }
 }
 

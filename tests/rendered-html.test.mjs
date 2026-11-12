@@ -589,19 +589,12 @@ test("Departments and Roles uses shared records and supports editable roles and 
   assert.match(page, /Add Managers to Departments/);
   assert.match(page, /Department not set/);
   assert.match(page, /className="department-role-tags"/);
-  assert.match(page, /className="department-manager-list"/);
+  assert.match(page, /<DepartmentManagerCell /);
   assert.match(page, /placeholder="Add role"/);
   assert.match(page, /onBlur=\{\(\) => addDepartmentRole\(department\.id\)\}/);
-  assert.match(page, /assignedManagers\.length === 0 \? <span>Select manager<\/span> : null/);
-  assert.match(page, /className=\{assignedManagers\.length > 0 \? "department-manager-picker has-selection" : "department-manager-picker"\}/);
-  assert.match(page, /aria-label=\{`Select manager for \$\{department\.name\}`\}/);
-  assert.match(page, /addDepartmentManager\(department\.id, manager\.id\)/);
-  assert.match(page, /event\.currentTarget\.closest\("details"\)\?\.removeAttribute\("open"\)/);
+  assert.match(page, /DepartmentManagerFeedback control=\{departmentManagers\}/);
+  assert.match(page, /useDepartmentManagers\(activeView === "departments_roles" && account\.accessLevel === "owner"\)/);
   assert.match(page, /function removeDepartmentRole/);
-  assert.match(page, /function removeDepartmentManager/);
-  assert.match(page, /const assignableManagers = availableManagers\s*\.filter\(\(manager\) => !department\.managerIds\.includes\(manager\.id\)\)/);
-  assert.match(page, /assignableManagers\.length > 0 \? \(/);
-  assert.match(page, /\{assignableManagers\.map\(\(manager\) => \(/);
   assert.match(page, /departments: Department\[\]/);
   assert.match(page, /shared\.data\.state/);
   assert.match(page, /function rolesForDepartment/);
@@ -628,7 +621,7 @@ test("Departments and Roles uses shared records and supports editable roles and 
   assert.match(page, /departmentIndex > 0 \? \(/);
   assert.match(page, /className="department-row-remove"/);
   assert.match(page, /function removeDepartment\(/);
-  assert.match(page, /assignedManagers\.map\(\(manager\)/);
+  assert.match(page, /saved=\{shared\.data\.departmentManagers\}/);
 });
 
 test("starter preview code is no longer wired into DomBase", async () => {

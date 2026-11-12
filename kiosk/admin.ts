@@ -7,7 +7,7 @@ import type { createAccessService } from "../access/service";
 import { deviceSeconds, kioskCookie, registeredDevice } from "./device";
 import { atomicBatch } from "./database";
 import type { KioskOperatorDatabase } from "./database";
-import { attemptBudget, exactKeys, hashPin, pinIsValid, pinLookup, positiveId } from "./security";
+import { KioskRateLimitError, attemptBudget, exactKeys, hashPin, pinIsValid, pinLookup, positiveId } from "./security";
 
 type Access = ReturnType<typeof createAccessService>;
 type Actor = Awaited<ReturnType<Access["authorize"]>>;
@@ -116,7 +116,8 @@ export function createKioskAdmin(db: KioskOperatorDatabase, access: Access, secr
       }
       throw new AuthError(404, "Not found.");
     } catch (error) {
-      if (error instanceof AuthError) return json({ error: error.message }, error.status, error.status === 429 ? { "Retry-After": "900" } : {});
+      if (error instanceof KioskRateLimitError) return json({ error: error.message }, error.status, { "Retry-After": String(error.retryAfterSeconds) });
+      if (error instanceof AuthError) return json({ error: error.message }, error.status);
       console.error("Tablet administration request failed.");
       return json({ error: "Tablet settings are temporarily unavailable. Try again shortly." }, 503);
     }

@@ -12,6 +12,7 @@ export type WorkspaceData = {
   settings: ScheduleEnforcement;
   permissions: PermissionMap;
   primaryOwnerEmployeeId: number | null;
+  departmentManagers?: { accountId: number; departmentId: number; name: string; disabled: boolean; setupPending: boolean }[];
   opened: Record<number, string[]>;
   dismissed: Record<number, string[]>;
   employeeVersions: Record<number, number>;

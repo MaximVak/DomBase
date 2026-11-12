@@ -3382,6 +3382,24 @@ label.enforcement-rule-line {
   text-align: left;
 }
 
+
+.department-cell-label { display: none; }
+.department-manager-list > span { max-width: 100%; overflow-wrap: anywhere; }
+.department-manager-list > span button:focus-visible { outline: 2px solid #ffffff !important; outline-offset: 2px; }
+
+@media (max-width: 1279px) {
+  .department-roles-heading { flex-wrap: wrap; }
+  .department-roles-panel { min-width: 0; }
+  .department-roles-header {
+    position: absolute; width: 1px; height: 1px; padding: 0;
+    overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+  }
+  .department-roles-row { grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 16px; }
+  .department-roles-row > [role="cell"] { min-width: 0; }
+  .department-cell-label { display: block; flex-basis: 100%; color: var(--muted); font-size: 0.85rem; }
+  .department-manager-menu { width: min(260px, calc(100vw - 64px)); }
+}
+
 .department-manager-menu button:hover,
 .department-manager-menu button:focus-visible {
   background: #e7f1fb;

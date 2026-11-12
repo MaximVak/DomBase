@@ -41,7 +41,7 @@ test("built Worker serves a separate registered kiosk and completes PIN → appr
   const approved = await call("/api/kiosk/approve", person, { requestId: pending.requestId, pin: ownerPin }); await ok(approved);
   assert.ok(cookiesOf(approved).includes("dombase-kiosk-person="));
   assert.equal((await call("/api/kiosk/approve", person, { requestId: pending.requestId, pin: ownerPin })).status, 401);
-  const status = await ok(await call("/api/kiosk/status", person)); assert.deepEqual(status, { registered: true, deviceName: "Built Worker test tablet" });
+  const status = await ok(await call("/api/kiosk/status", person)); assert.deepEqual(status, { registered: true, deviceName: "Built Worker test tablet", pinRetryAfterSeconds: 0, approvalRetryAfterSeconds: 0 });
   const again = await call("/api/kiosk/pin", device, { pin: employeePin }); const current = await ok(again); assert.equal(current.state, "in");
   const nextPerson = `${device}; ${cookiesOf(again)[0]}`;
   await ok(await call("/api/kiosk/clock", nextPerson, { eventType: "out", explanation: "" }));
