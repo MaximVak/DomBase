@@ -22,4 +22,4 @@ export function stateChanges(before: StaffState, after: StaffState, employeeKey:
   if (before.hoursRoundingMinutes !== after.hoursRoundingMinutes) throw new Error("Save rounding through location settings.");
   return changes;
 }
-export function saveBody(data: WorkspaceData, changes: Change[], id: string) { return { id, revision: data.revision, employeeVersions: data.employeeVersions, changes }; }
+export function saveBody(data: WorkspaceData, changes: Change[], id: string) { return { id, period: data.period, revision: data.revision, employeeVersions: data.employeeVersions, changes }; }

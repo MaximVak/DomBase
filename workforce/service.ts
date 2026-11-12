@@ -16,6 +16,7 @@ import { canonical, equal } from "./contract";
 import type { Change, WorkspaceData, Entity } from "./contract";
 import type { Database } from "./context";
 import * as v from "./validation";
+import { requestPeriod, workspacePeriod } from "./period";
 import { runClockMaintenance } from "./maintenance";
 
 const entities: Entity[] = ["employee", "department", "schedule-event", "schedule-draft", "schedule-publish", "timecard", "hours-adjustment", "pto-request", "pto-policy", "availability", "conversation", "settings", "business", "notifications"];
@@ -38,8 +39,9 @@ export function createWorkforceService(db: Database, access: ReturnType<typeof c
   async function handle(request: Request) {
     try {
       const ctx = await access.workspaceContext(request);
-      const action = new URL(request.url).pathname.slice("/api/workspace/".length);
-      if (action === "state" && request.method === "GET") return json(await workspaceSnapshot(db, ctx, options.fieldKey));
+      const url = new URL(request.url);
+      const action = url.pathname.slice("/api/workspace/".length);
+      if (action === "state" && request.method === "GET") return json(await workspaceSnapshot(db, ctx, options.fieldKey, requestPeriod(url, now())));
       if (action === "maintenance" && request.method === "POST") {
         ctx.requirePermission("timesheets.manage");
         if (!ctx.allDepartments) throw new AuthError(403, "This action requires company-wide time management.");
@@ -48,8 +50,9 @@ export function createWorkforceService(db: Database, access: ReturnType<typeof c
       }
       if (action !== "commit") throw new AuthError(404, "Not found.");
       if (request.method !== "POST") return json({ error: "Method not allowed." }, 405, { Allow: "POST" });
-      const body = await readAuthBody(request, 256 * 1024); v.keys(body, ["id", "revision", "employeeVersions", "changes"]);
+      const body = await readAuthBody(request, 256 * 1024); v.keys(body, ["id", "revision", "employeeVersions", "changes", "period"]);
       if (!tokenIsValid(body.id)) throw new AuthError(400, "Invalid save identifier.");
+      const period = workspacePeriod(body.period, now());
       const revision = v.integer(body.revision, 0); const id = body.id;
       const changes = v.list(body.changes, 100).map(value => {
         const op = v.object(value); v.keys(op, ["entity", "id", "before", "after"]);
@@ -62,9 +65,9 @@ export function createWorkforceService(db: Database, access: ReturnType<typeof c
       const [previous] = await db.select().from(s.workforceCommits).where(eq(s.workforceCommits.id, id)).limit(1);
       if (previous) {
         if (previous.accountId !== ctx.account.id || previous.bodyHash !== hash) throw new AuthError(409, "This save identifier is already in use.");
-        return minimal ? json({ saved: true, id, revision: previous.revision }, 200, { "Preference-Applied": "return=minimal" }) : json(await workspaceSnapshot(db, ctx, options.fieldKey));
+        return minimal ? json({ saved: true, id, revision: previous.revision }, 200, { "Preference-Applied": "return=minimal" }) : json(await workspaceSnapshot(db, ctx, options.fieldKey, period));
       }
-      const view = await workspaceSnapshot(db, ctx, options.fieldKey);
+      const view = await workspaceSnapshot(db, ctx, options.fieldKey, period);
       if (revision !== view.revision) throw new AuthError(409, "Someone else saved changes. Reload the latest data and try again.");
       const employeeKey = ctx.account.employeeId ?? -ctx.account.id; const versions = v.object(body.employeeVersions);
       for (const change of changes) {
@@ -88,7 +91,7 @@ export function createWorkforceService(db: Database, access: ReturnType<typeof c
       if (!await tx.commit(revision, hash, [...new Set(changes.map(change => change.entity))])) throw new AuthError(409, "Your access or this workspace changed. Reload before saving.");
       // Reload is a separate request: compiling/projecting a second full snapshot
       // here can exceed the hosted Worker's CPU budget after an already committed save.
-      return minimal ? json({ saved: true, id, revision: revision + 1 }, 200, { "Preference-Applied": "return=minimal" }) : json(await workspaceSnapshot(db, ctx, options.fieldKey));
+      return minimal ? json({ saved: true, id, revision: revision + 1 }, 200, { "Preference-Applied": "return=minimal" }) : json(await workspaceSnapshot(db, ctx, options.fieldKey, period));
     } catch (error) {
       if (error instanceof AuthError) return json({ error: error.message }, error.status);
       // Never log a request, SQL parameter, message, private field or credential.

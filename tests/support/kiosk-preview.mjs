@@ -1,7 +1,7 @@
 // Explicit visual-QA fixture only. No normal local or remote database is used.
 import { createServer } from "node:http";
 import { startAuthApp } from "./auth-app-fixture.mjs";
-import { seedKioskFixture, employeePin, ownerPin, cookiesOf } from "./kiosk-fixture.mjs";
+import { seedKioskFixture, employeePin, cookiesOf } from "./kiosk-fixture.mjs";
 const app = await startAuthApp({ seed: seedKioskFixture });
 let bootstrap;
 const close = async (exitCode = 0) => { bootstrap?.close(); await app.close(); process.exit(exitCode); };
@@ -15,7 +15,7 @@ try {
   const owner = cookiesOf(logged)[0];
   for (const [path, body] of [
     ["employee-pin", { employeeId: app.fixtureData.a.id, pin: employeePin, password: app.password }],
-    ["approval-pin", { pin: ownerPin, password: app.password }],
+    ["approval-pin", { password: app.password }],
   ]) {
     const response = await call(`/api/kiosk-admin/${path}`, owner, body);
     if (response.status !== 200) throw new Error("Fixture PIN setup failed.");

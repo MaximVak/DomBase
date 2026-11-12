@@ -333,6 +333,7 @@ test("profile updates validate personal fields and cannot change access, PINs, o
   for (const invalid of [{ firstName: " " }, { email: "invalid" }, { socialSecurityNumber: "123" }, { dateOfBirth: "2026-02-30" }, { dateOfBirth: "2027-01-01" }, { homePostalCode: "123" }]) {
     assert.ok(accountProfile.profileUpdate({ ...values, ...invalid }, "2026-10-03").error);
   }
+  assert.ok(accountProfile.profileUpdate({ ...values, socialSecurityNumber: "•••-••-1234", homeCity: "Updated" }, "2026-10-03").update);
   assert.ok(accountProfile.profileUpdate({ ...values, dateOfBirth: "2000-02-29", homePostalCode: "90000-1234" }, "2026-10-03").update);
 });
 

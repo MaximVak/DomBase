@@ -9,6 +9,7 @@ import type { WorkspaceTransaction } from "./transaction";
 import * as v from "./validation";
 import { encryptSsn } from "./private";
 import { terminationReasons } from "../team/rules";
+import { requireOtherEmployee } from "./self-edit";
 
 type Role = { id: number; name: string; departmentId: number | null; archived: boolean };
 export type RecordContext = { db: Database; ctx: Context; tx: WorkspaceTransaction; view: WorkspaceData; roles: Role[]; fieldKey: string; today: string };
@@ -108,6 +109,7 @@ export async function employeeChange(r: RecordContext, change: Change) {
   const role = needsRole && data.role ? roleFor(r, data.role) : null;
   if (needsRole && !r.ctx.allDepartments && !role) throw new AuthError(403, "Employees need a job role in your departments.");
   if (fields.includes("wage")) {
+    requireOtherEmployee(r.ctx, change.id);
     permission(r, "wages.manage");
     if (before?.wage && !data.wage) throw new AuthError(400, "Wage history cannot be removed. Set a new effective wage instead.");
   }

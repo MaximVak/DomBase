@@ -1,4 +1,6 @@
+import { requestPeriod } from "../workforce/period";
 import { createTeamInsights } from "./insights";
+import { requireOtherEmployee } from "../workforce/self-edit";
 import { eq, sql } from "drizzle-orm";
 import * as s from "../db/schema";
 import { AuthError, json, readAuthBody } from "../auth/http";
@@ -22,7 +24,7 @@ export function createTeamService(db: Database, access: ReturnType<typeof create
       const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit" }).format(now());
       const path = new URL(request.url).pathname.slice("/api/team/".length);
       if (path === "inbox" && request.method === "GET") return json(await localInbox(db, ctx, request, options.fieldKey, now()));
-      const view = await workspaceSnapshot(db, ctx, options.fieldKey);
+      const view = await workspaceSnapshot(db, ctx, options.fieldKey, requestPeriod(new URL(request.url), now()));
       const roles = await db.select().from(s.roles);
       const [config] = await db.select().from(s.teamSettings);
       const settings = config ?? { id: 1, payPeriod: "weekly" as const, anchorDate: "2026-11-02", version: 1 };
@@ -96,6 +98,7 @@ export function createTeamService(db: Database, access: ReturnType<typeof create
           tx.write(sql`UPDATE employee_roles SET active = 0 WHERE employee_id = ${e.id} AND ${tx.receipt}`);
           for (const role of selected) tx.insert(s.employeeRoles, { employeeId: e.id, roleId: role.id, active: true, updatedAt: tx.stamp }, sql`1 = 1`, { target: ["employeeId", "roleId"], update: ["active", "updatedAt"] });
         } else if (operation === "wage") {
+          requireOtherEmployee(ctx, e.id);
           ctx.requirePermission("wages.manage"); ctx.requirePermission("team.manage"); v.keys(data, ["employeeId", "version", "roleId", "amountCents", "basis", "effectiveDate", "overtimeExempt"]);
           const role = job(data.roleId); if (!await db.get(sql`SELECT 1 FROM employee_roles WHERE employee_id = ${e.id} AND role_id = ${role.id} AND active = 1`)) throw new AuthError(400, "Assign the job before adding its wage.");
           const effectiveDate = v.date(data.effectiveDate); const basis = v.oneOf(data.basis, ["hourly", "annual_salary"]); const amountCents = v.integer(data.amountCents, 0, 1000000000); const overtimeExempt = v.boolean(data.overtimeExempt);

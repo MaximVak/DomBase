@@ -6,10 +6,14 @@ import type { Change, StaffState } from "./contract";
 import type { RecordContext } from "./records";
 import { employeeInScope, roleFor } from "./records";
 import * as v from "./validation";
+import { requireOtherEmployee } from "./self-edit";
 export async function timecardChange(r: RecordContext, change: Change) {
   r.ctx.requirePermission("timesheets.manage");
   if (!change.after) throw new AuthError(400, "Time history cannot be removed.");
   const data = v.object(change.after);
+  const selectedDate = v.date(data.date);
+  if (r.view.period && (selectedDate < r.view.period.start || selectedDate > r.view.period.end)) throw new AuthError(400, "Select the time card's date range before editing it.");
+  requireOtherEmployee(r.ctx, v.integer(data.employeeId));
   if (change.entity === "hours-adjustment") {
     if (change.before) throw new AuthError(400, "Add a compensating adjustment instead of changing history.");
     if (!r.ctx.allDepartments) throw new AuthError(403, "A General Manager or Owner must make a department-independent hours adjustment.");
@@ -59,6 +63,7 @@ export async function timecardChange(r: RecordContext, change: Change) {
     if (beforeEvents.some(event => event.id === data.cardId && !event.cardId)) existing = undefined;
     else throw new AuthError(403, "Time-card identity is outside your access.");
   }
+  if (existing && existing.workDate !== date) throw new AuthError(400, "Keep the original time-card date. Add a separate card for another date.");
   const cardId = existing?.id ?? newRecordId(); const revision = (existing?.version ?? 0) + 1;
   const lastPunch = await r.db.get<{ id: number }>(sql`SELECT COALESCE(MAX(id),0) AS id FROM clock_events WHERE employee_id = ${employeeId}`);
   const unchanged = sql`COALESCE((SELECT MAX(id) FROM clock_events WHERE employee_id = ${employeeId}),0) = ${lastPunch?.id ?? 0}`;

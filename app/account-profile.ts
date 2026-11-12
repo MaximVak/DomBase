@@ -44,7 +44,7 @@ export function profileUpdate(values: ProfileValues, today: string) {
   const trimmed = Object.fromEntries(keys.map(key => [key, typeof values[key] === "string" ? values[key].trim() : ""])) as ProfileValues;
   if (!trimmed.firstName) return { error: "Enter your preferred first name." } as const;
   if (trimmed.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed.email)) return { error: "Enter a valid email address." } as const;
-  if (trimmed.socialSecurityNumber && !/^\d{3}-\d{2}-\d{4}$/.test(trimmed.socialSecurityNumber)) return { error: "Enter a nine-digit Social Security number." } as const;
+  if (trimmed.socialSecurityNumber && !/^(?:\d{3}-\d{2}|•••-••)-\d{4}$/.test(trimmed.socialSecurityNumber)) return { error: "Enter a nine-digit Social Security number." } as const;
   if (trimmed.dateOfBirth && (!validEventDate(trimmed.dateOfBirth) || trimmed.dateOfBirth > today)) return { error: "Enter a valid date of birth that is not in the future." } as const;
   if (trimmed.homePostalCode && !/^\d{5}(-\d{4})?$/.test(trimmed.homePostalCode)) return { error: "Enter a five-digit ZIP code or ZIP+4." } as const;
   const { firstName, lastName, ...fields } = trimmed;

@@ -21,6 +21,7 @@ async function validateShift(r: RecordContext, value: unknown): Promise<Shift> {
   if (start >= end) throw new AuthError(400, "Shift end must follow its start.");
   const notes = v.text(row.notes ?? "", 500);
   const old = r.view.state.shifts.find(shift => shift.id === id);
+  if (!old && await r.db.get(sql`SELECT 1 FROM shifts WHERE id = ${id}`)) throw new AuthError(403, "Select the shift's date range before editing it.");
   if (!r.ctx.permissions["schedule.notes.manage"] && notes !== (old?.notes ?? "")) throw new AuthError(403, "You cannot change shift notes.");
   if (old) {
     const now = Date.parse(r.tx.stamp);

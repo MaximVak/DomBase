@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { startAuthApp } from "./support/auth-app-fixture.mjs";
-import { seedKioskFixture, employeePin, ownerPin, cookiesOf } from "./support/kiosk-fixture.mjs";
+import { seedKioskFixture, employeePin, cookiesOf } from "./support/kiosk-fixture.mjs";
 
 test("built Worker serves a separate registered kiosk and completes PIN → approval → clock → lock", { timeout: 120000 }, async t => {
   const app = await startAuthApp({ seed: seedKioskFixture }); t.after(app.close); const f = app.fixtureData;
   const call = (path, cookie = "", body, extra = {}) => fetch(`${app.origin}${path}`, {
-    redirect: "manual", headers: { Cookie: cookie, ...(body === undefined ? {} : { Origin: app.origin, "Content-Type": "application/json" }), ...extra },
+    signal: AbortSignal.timeout(20000), redirect: "manual", headers: { Cookie: cookie, Connection: "close", ...(body === undefined ? {} : { Origin: app.origin, "Content-Type": "application/json" }), ...extra },
     ...(body === undefined ? {} : { method: "POST", body: JSON.stringify(body) }),
   });
   const ok = async response => { assert.equal(response.status, 200); return response.json(); };
@@ -21,7 +21,7 @@ test("built Worker serves a separate registered kiosk and completes PIN → appr
   let owner = await login();
   const settings = await call("/kiosk-admin", owner); assert.equal(settings.status, 200); assert.match(await settings.text(), /Tablet.*PIN access/);
   await ok(await call("/api/kiosk-admin/employee-pin", owner, { employeeId: f.a.id, pin: employeePin, password: app.password }));
-  await ok(await call("/api/kiosk-admin/approval-pin", owner, { pin: ownerPin, password: app.password }));
+  const ownerPin = (await ok(await call("/api/kiosk-admin/approval-pin", owner, { password: app.password }))).pin;
   const registration = await call("/api/kiosk-admin/register", owner, { name: "Built Worker test tablet", password: app.password }); await ok(registration);
   const device = cookiesOf(registration).find(cookie => cookie.startsWith("dombase-kiosk-device=")); assert.ok(device);
   assert.equal((await call("/api/auth/session", owner)).status, 401);

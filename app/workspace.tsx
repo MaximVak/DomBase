@@ -318,6 +318,20 @@ export default function Home({ account }: { account: DashboardAccount }) {
   const [departmentNameDraft, setDepartmentNameDraft] = useState("");
   const [scheduleDate, setScheduleDate] = useState(today);
   const [hoursDate, setHoursDate] = useState(today);
+  const setWorkspacePeriod = shared.setPeriod;
+  useEffect(() => {
+    if (activeView === "hours") return; // Timesheets owns its day/pay-period range.
+    if (activeView === "schedule") {
+      const date = parseLocalDate(scheduleDate);
+      if (!Number.isFinite(date.getTime())) return;
+      const start = new Date(date.getFullYear(), date.getMonth(), 1); start.setDate(start.getDate() - 7);
+      const end = new Date(date.getFullYear(), date.getMonth() + 1, 0); end.setDate(end.getDate() + 7);
+      setWorkspacePeriod({ start: toDateInputValue(start), end: toDateInputValue(end) });
+    } else {
+      // Dashboard/PTO need complete current-year accrual, never all-time punches.
+      setWorkspacePeriod({ start: `${today.slice(0, 4)}-01-01`, end: `${today.slice(0, 4)}-12-31` });
+    }
+  }, [activeView, scheduleDate, today, setWorkspacePeriod]);
   const [editingHours, setEditingHours] = useState<{
     employee: Employee;
     hours: string;
@@ -4485,7 +4499,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                                 </div>
                                 <div className="contact-editor-row">
                                   <label htmlFor="payroll-social-security-number">Social Security number</label>
-                                  <input id="payroll-social-security-number" className="payroll-short-field" placeholder="xxx-xx-xxxx" inputMode="numeric" maxLength={11} pattern="[0-9]{3}-[0-9]{2}-[0-9]{4}" title="Enter a nine-digit Social Security number" value={personalPayrollDraft.socialSecurityNumber} onChange={(event) => {
+                                  <input id="payroll-social-security-number" className="payroll-short-field" placeholder="xxx-xx-xxxx" inputMode="numeric" maxLength={11} pattern="([0-9]{3}-[0-9]{2}|•••-••)-[0-9]{4}" title="Only the last four digits are displayed. Enter all nine digits to replace the stored number." value={personalPayrollDraft.socialSecurityNumber} onChange={(event) => {
                                   const digits = event.target.value.replace(/\D/g, "").slice(0, 9);
                                   setPersonalPayrollDraft((draft) => ({ ...draft, socialSecurityNumber: [digits.slice(0, 3), digits.slice(3, 5), digits.slice(5)].filter(Boolean).join("-") }));
                                 }} autoComplete="off" />
@@ -5383,6 +5397,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
 
           {activeView === "hours" && !isPublicSchedule && (
             <TimesheetsPanel
+              onPeriodChange={setWorkspacePeriod}
               payPeriod={shared.data.teamPeriod?.payPeriod}
               payPeriodAnchor={shared.data.teamPeriod?.anchorDate}
               canEdit={shared.data.permissions["timesheets.manage"]}

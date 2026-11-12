@@ -9,7 +9,8 @@ import { stateChanges, saveBody } from "../workforce/changes";
 import type { UploadDetails } from "../documents/types";
 import { maxFileBytes } from "../documents/types";
 
-type Shared = { uploadDocument: (details: Omit<UploadDetails, "id">, file: File) => Promise<boolean>; data: WorkspaceData; pending: boolean; setEditing: (editing: boolean) => void; setState: (update: SetStateAction<StaffState>) => Promise<boolean>; save: (changes: Change[]) => Promise<boolean>; setError: (message: string) => void };
+type Period = { start: string; end: string };
+type Shared = { setPeriod: (period: Period) => void; uploadDocument: (details: Omit<UploadDetails, "id">, file: File) => Promise<boolean>; data: WorkspaceData; pending: boolean; setEditing: (editing: boolean) => void; setState: (update: SetStateAction<StaffState>) => Promise<boolean>; save: (changes: Change[]) => Promise<boolean>; setError: (message: string) => void };
 const SharedContext = createContext<Shared | null>(null);
 export function useSharedWorkspace() { const value = useContext(SharedContext); if (!value) throw new Error("Shared workspace provider missing."); return value; }
 function requestId() { return btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); }
@@ -17,6 +18,10 @@ export function SharedWorkspace({ account }: { account: DashboardAccount }) {
   const [data, setData] = useState<WorkspaceData | null>(null); const current = useRef<WorkspaceData | null>(null);
   const [pending, setPending] = useState(false); const saving = useRef(false); const editing = useRef(false);
   const [error, setError] = useState(""); const [notice, setNotice] = useState("");
+  const period = useRef<Period | null>(null);
+  const requestedPeriod = useRef<Period | null>(null);
+  const stateUrl = useCallback(() => `/api/workspace/state${period.current ? `?${new URLSearchParams(period.current)}` : ""}`, []);
+  const [periodLoading, setPeriodLoading] = useState(false);
   const [epoch, setEpoch] = useState(0);
   const uploadRetries = useRef(new Map<string, string>());
   const generation = useRef(0); const mounted = useRef(false); const needsReload = useRef(false);
@@ -24,12 +29,12 @@ export function SharedWorkspace({ account }: { account: DashboardAccount }) {
   const load = useCallback(async (force = false, signal?: AbortSignal) => {
     if (!force && (saving.current || editing.current || needsReload.current || document.visibilityState === "hidden")) return;
     const version = generation.current;
-    const response = await fetch("/api/workspace/state", { cache: "no-store", signal });
+    const response = await fetch(stateUrl(), { cache: "no-store", signal });
     if (signal?.aborted || !mounted.current) return;
     if (response.status === 401) { current.current = null; setData(null); window.location.replace("/login"); return; }
     const result = await response.json(); if (!response.ok) throw new Error(result.error || "Could not load shared data.");
     if (version === generation.current && (force || !editing.current) && !saving.current) { apply(result); needsReload.current = false; }
-  }, [apply]);
+  }, [apply, stateUrl]);
   useEffect(() => {
     mounted.current = true; const controller = new AbortController();
     async function initialize() { await load(true, controller.signal); }
@@ -43,6 +48,19 @@ export function SharedWorkspace({ account }: { account: DashboardAccount }) {
     }, 60000);
     return () => { mounted.current = false; controller.abort(); window.clearInterval(interval); window.clearInterval(maintenance); window.removeEventListener("focus", refresh); };
   }, [load, account.accessLevel]);
+  const setPeriod = useCallback((next: Period) => {
+    requestedPeriod.current = next;
+    if (period.current?.start === next.start && period.current?.end === next.end) return;
+    if (saving.current || editing.current) return;
+    period.current = next;
+    if (current.current?.period?.start === next.start && current.current?.period?.end === next.end) return;
+    generation.current++; needsReload.current = true;
+    setPeriodLoading(true);
+    const selected = generation.current;
+    void load(true).then(() => { if (mounted.current && selected === generation.current) setError(""); })
+      .catch(error => { if (mounted.current && selected === generation.current) setError(error instanceof Error ? error.message : "Could not load this period."); })
+      .finally(() => { if (mounted.current && selected === generation.current) setPeriodLoading(false); });
+  }, [load]);
   async function save(changes: Change[], preview?: StaffState) {
     const base = current.current;
     if (needsReload.current) { setError("Reload the latest data before making another change."); return false; }
@@ -60,7 +78,7 @@ export function SharedWorkspace({ account }: { account: DashboardAccount }) {
       if (!mounted.current) return true;
       // The write acknowledgement and fresh projection have separate CPU budgets.
       // Freeze background polling until both finish so it cannot replace draft inputs.
-      const refreshed = await fetch("/api/workspace/state", { cache: "no-store" });
+      const refreshed = await fetch(stateUrl(), { cache: "no-store" });
       const latest = await refreshed.json();
       if (!refreshed.ok) throw new Error("Saved to the shared database, but the latest view could not load. Reload before making another change.");
       if (mounted.current) { apply(latest); needsReload.current = false; setNotice("Saved to the shared database."); } return true;
@@ -110,12 +128,12 @@ export function SharedWorkspace({ account }: { account: DashboardAccount }) {
     catch { setError("Could not reload shared data. Check your connection and try again."); }
   }
   if (!data) return <main className="login-screen"><section className="login-card auth-card"><h1>DomBase</h1>{error ? <><p role="alert">{error}</p><button onClick={() => void reload()}>Try again</button></> : <p role="status">Loading shared workspace…</p>}</section></main>;
-  return <SharedContext.Provider value={{ data, pending, uploadDocument, setState: updateState, save, setEditing: value => { editing.current = value; }, setError }}>
+  return <SharedContext.Provider value={{ data, pending: pending || periodLoading, setPeriod, uploadDocument, setState: updateState, save, setEditing: value => { editing.current = value; if (!value && requestedPeriod.current) setPeriod(requestedPeriod.current); }, setError }}>
     <div className={`workspace-sync-bar ${error ? "has-error" : ""}`}>
-      <p role={error ? "alert" : "status"}>{error || (pending ? "Saving to the shared database…" : notice || "Connected to the shared database")}</p>
+      <p role={error ? "alert" : "status"}>{error || (periodLoading ? "Loading selected period…" : pending ? "Saving to the shared database…" : notice || "Connected to the shared database")}</p>
       {error ? <button disabled={pending} onClick={() => void reload()}>Reload latest data</button> : null}
     </div>
     <Home key={epoch} account={account} />
-    {pending ? <div className="workspace-commit-cover" aria-hidden="true" /> : null}
+    {pending || periodLoading ? <div className="workspace-commit-cover" aria-hidden="true" /> : null}
   </SharedContext.Provider>;
 }

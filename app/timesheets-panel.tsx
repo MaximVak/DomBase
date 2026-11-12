@@ -16,6 +16,7 @@ import { addDays, buildTimeCards, defaultTimesheetColumns, localDate, timesheetC
 import type { ColumnId, Rounding, TimeCard, TimeCardDraft, TimeCardEdit, TimesheetAdjustment, TimesheetEmployee, TimesheetEvent, TimesheetPto, TimesheetShift } from "./timesheets-model";
 
 type Props = {
+  onPeriodChange?: (period: { start: string; end: string }) => void;
   payPeriod?: PayPeriod; payPeriodAnchor?: string;
   employees: TimesheetEmployee[]; events: TimesheetEvent[]; shifts: TimesheetShift[]; adjustments: TimesheetAdjustment[]; pto: TimesheetPto[];
   departments: { id: number; name: string; roles: string[] }[]; history: TimeCardEdit[]; today: string; now: number;
@@ -72,6 +73,8 @@ export function TimesheetsPanel(props: Props) {
   const ledgerScrollRef = useRef<HTMLDivElement>(null);
   const totalsScrollRef = useRef<HTMLDivElement>(null);
   const start = period === "day" ? day : range.start, end = period === "day" ? day : range.end;
+  const onPeriodChange = props.onPeriodChange;
+  useEffect(() => { if (start && end && end >= start) onPeriodChange?.({ start, end }); }, [start, end, onPeriodChange]);
   const cards = useMemo(() => buildTimeCards({ ...props, employees: props.employees.filter(employee => props.manager || employee.id === props.activeEmployeeId), start, end }), [props, start, end]);
   const members = props.employees.filter(employee => (props.manager || employee.id === props.activeEmployeeId) && (!employee.terminated || !employee.terminationDate || start <= retainedThrough(employee.terminationDate, props.weekStart, props.payPeriod ?? "weekly", props.payPeriodAnchor ?? "2026-11-02") || cards.some(card => card.employeeId === employee.id)));
   const memberById = new Map(members.map(member => [member.id, member]));

@@ -16,7 +16,7 @@ export function createTeamInsights(db: Database, access: ReturnType<typeof creat
       const url = new URL(request.url); const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit" }).format(now());
       const start = v.date(url.searchParams.get("start") || today.slice(0, 8) + "01"), end = v.date(url.searchParams.get("end") || today);
       if (end < start || Date.parse(end) - Date.parse(start) > 365 * 86400000) throw new AuthError(400, "Choose a report range of at most 366 days.");
-      const view = await workspaceSnapshot(db, ctx, fieldKey);
+      const view = await workspaceSnapshot(db, ctx, fieldKey, { start, end });
       const [business] = await db.select({ zone: s.business.timeZone }).from(s.business).limit(1); const zone = business?.zone ?? "America/Los_Angeles";
       const canCertificates = ctx.permissions["documents.read"], canReliability = ctx.permissions["reports.read"] && ctx.permissions["timesheets.read"] && ctx.permissions["schedule.read"];
       const certificates = canCertificates ? view.state.employees.flatMap(e => (e.certificates ?? []).map(c => ({ employeeId: e.id, name: e.name, active: e.active, certificateId: c.id, title: c.name, expirationDate: c.expirationDate ?? null, status: certificationStatusFor(c, e.certificates ?? [], today) }))) : [];
@@ -25,7 +25,7 @@ export function createTeamInsights(db: Database, access: ReturnType<typeof creat
       let shifts: ReturnType<typeof reliabilityFor> = [];
       if (canReliability) {
         // Only leave dates enter the calculation; reasons/medical details never enter the report.
-        const approved = await db.select().from(s.ptoRequests).where(sql`status = 'approved' AND archived_at IS NULL AND ${ctx.employeeFilter(s.ptoRequests.employeeId)}`).limit(10001);
+        const approved = await db.select().from(s.ptoRequests).where(sql`status = 'approved' AND start_date <= ${end} AND end_date >= ${start} AND archived_at IS NULL AND ${ctx.employeeFilter(s.ptoRequests.employeeId)}`).limit(10001);
         if (approved.length > 10000) throw new AuthError(413, "Reduce the report data before continuing.");
         const ptoRequests = approved.map(p => ({ id: p.id, employeeId: p.employeeId, compensation: p.compensation, status: p.status, startDate: p.startDate, endDate: p.endDate, startTime: p.startTime ?? undefined, endTime: p.endTime ?? undefined, reason: p.reason, requestedAt: p.requestedAt }));
         shifts = reliabilityFor({ ...view.state, ptoRequests }, start, end, now(), view.settings, zone);

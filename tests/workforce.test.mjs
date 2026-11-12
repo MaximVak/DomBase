@@ -32,7 +32,8 @@ test("shared workforce operations persist, scope, audit and serialize actual D1 
   let createdId = 70001;
   await t.test("snapshots use permissions, explicit Owner links and conversation membership", async () => {
     assert.equal((await call("state", "")).status, 401);
-    const own = await snapshot(owner); assert.equal(own.primaryOwnerEmployeeId, f.b.id); assert.equal(own.state.employees.find(e => e.id === f.a.id).socialSecurityNumber, "000-12-3456");
+    const own = await snapshot(owner); assert.equal(own.primaryOwnerEmployeeId, f.b.id); assert.equal(own.state.employees.find(e => e.id === f.a.id).socialSecurityNumber, "•••-••-3456");
+    assert.equal(JSON.stringify(own).includes("000-12-3456"), false);
     const restricted = await snapshot(manager); assert.equal(restricted.state.employees.some(e => e.id === f.b.id), false);
     assert.ok(restricted.state.employees.every(e => !e.wage && !e.socialSecurityNumber));
     assert.equal(restricted.state.conversations.some(c => c.id === f.conversationB.id), false);
@@ -115,7 +116,11 @@ test("shared workforce operations persist, scope, audit and serialize actual D1 
     await ok(await change(owner, state => { const employee = state.employees.find(e => e.id === createdId); employee.socialSecurityNumber = "000-98-7654"; employee.wage = "$25.50/hr"; }));
     const [profile] = await db.select().from(schema.employeeProfiles).where(eq(schema.employeeProfiles.employeeId, createdId));
     assert.match(profile.ssnEncrypted, /^v1\./); assert.equal(profile.ssnEncrypted.includes("000-98-7654"), false);
-    assert.equal((await snapshot(second)).state.employees.find(e => e.id === createdId).socialSecurityNumber, "000-98-7654");
+    assert.equal((await snapshot(second)).state.employees.find(e => e.id === createdId).socialSecurityNumber, "•••-••-7654");
+    await ok(await change(owner, state => { state.employees.find(e => e.id === createdId).homeAddress = "Updated fictional address"; }));
+    const [preserved] = await db.select().from(schema.employeeProfiles).where(eq(schema.employeeProfiles.employeeId, createdId));
+    assert.equal(preserved.ssnEncrypted, profile.ssnEncrypted);
+    assert.equal(decryptSsn(preserved.ssnEncrypted, createdId, fieldKey), "000-98-7654");
     assert.equal((await snapshot(manager)).state.employees.find(e => e.id === f.a.id).socialSecurityNumber, "");
     await ok(await change(owner, state => { state.employees.find(e => e.id === createdId).wage = "$26.00/hr"; }));
     const rates = await db.select().from(schema.wageRates).where(eq(schema.wageRates.employeeId, createdId)); assert.deepEqual(rates.map(rate => rate.amountCents), [2550, 2600]);

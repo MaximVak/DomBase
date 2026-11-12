@@ -1,3 +1,4 @@
+import { randomInt } from "node:crypto";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import * as schema from "../db/schema";
 import { AuthError, json, readAuthBody, sessionCookie } from "../auth/http";
@@ -76,33 +77,41 @@ export function createKioskAdmin(db: KioskOperatorDatabase, access: Access, secr
         return json({ revoked: true });
       }
       if (action === "employee-pin" || action === "approval-pin") {
-        exactKeys(body, action === "employee-pin" ? ["employeeId", "pin", "password"] : ["pin", "password"]);
-        if (!pinIsValid(body.pin)) throw new AuthError(400, "Use 4–8 digits. An all-zero PIN is not allowed.");
+        exactKeys(body, action === "employee-pin" ? ["employeeId", "pin", "password"] : ["password"]);
+        if (action === "employee-pin" && !pinIsValid(body.pin)) throw new AuthError(400, "Use 4–8 digits. An all-zero PIN is not allowed.");
         const employeeId = action === "employee-pin" ? positiveId(body.employeeId) : null;
         if (employeeId !== null) await actor.requireEmployee(employeeId);
         await reauthenticate(actor, body.password);
-        const lookup = pinLookup(secret, body.pin); const hash = await hashPin(secret, body.pin); const revision = newToken();
-        if (employeeId !== null) {
-          const guard = sql`${actor.activeActor()} AND NOT EXISTS (SELECT 1 FROM manager_approval_credentials WHERE pin_lookup = ${lookup})
-            AND NOT EXISTS (SELECT 1 FROM employees WHERE pin_lookup = ${lookup} AND id <> ${employeeId})`;
-          const results = await atomicBatch(db, [
-            db.update(schema.employees).set({ pinHash: hash, pinLookup: lookup, pinVersion: sql`${schema.employees.pinVersion} + 1`, version: sql`${schema.employees.version} + 1`, updatedAt: time })
-              .where(and(eq(schema.employees.id, employeeId), eq(schema.employees.active, true), eq(schema.employees.terminated, false), actor.employeeFilter(schema.employees.id), guard)),
-            sql`UPDATE kiosk_interactions SET ended_at = ${time} WHERE employee_id = ${employeeId} AND EXISTS (SELECT 1 FROM employees WHERE id = ${employeeId} AND pin_hash = ${hash})`,
-            audit(actor, "kiosk.employee_pin_changed", "employee", String(employeeId), sql`EXISTS (SELECT 1 FROM employees WHERE id = ${employeeId} AND pin_hash = ${hash})`, employeeId),
-          ]);
-          if (results[0].meta.changes !== 1) throw new AuthError(409, "PIN unavailable or employee access changed. Choose another PIN or reload.");
-        } else {
-          const guard = sql`${actor.activeActor()} AND NOT EXISTS (SELECT 1 FROM employees WHERE pin_lookup = ${lookup})
-            AND NOT EXISTS (SELECT 1 FROM manager_approval_credentials WHERE pin_lookup = ${lookup} AND account_id <> ${actor.account.id})`;
-          const results = await atomicBatch(db, [
-            sql`INSERT INTO manager_approval_credentials (account_id, pin_hash, pin_lookup, revision, created_at, updated_at)
-              SELECT ${actor.account.id}, ${hash}, ${lookup}, ${revision}, ${time}, ${time} WHERE ${guard}
-              ON CONFLICT(account_id) DO UPDATE SET pin_hash = excluded.pin_hash, pin_lookup = excluded.pin_lookup, revision = excluded.revision, updated_at = excluded.updated_at`,
-            audit(actor, "kiosk.approval_pin_changed", "account", String(actor.account.id), sql`EXISTS (SELECT 1 FROM manager_approval_credentials WHERE account_id = ${actor.account.id} AND revision = ${revision})`),
-          ]);
-          if (results[0].meta.changes !== 1) throw new AuthError(409, "PIN unavailable or your access changed. Choose another PIN or sign in again.");
+        if (employeeId === null) {
+          // No caller-selected candidate reaches either lookup table. Both PIN
+          // namespaces stay distinct without exposing an employee-PIN oracle.
+          for (let attempt = 0; attempt < 8; attempt++) {
+            const pin = String(randomInt(10000000, 100000000));
+            const lookup = pinLookup(secret, pin); const hash = await hashPin(secret, pin); const revision = newToken();
+            const guard = sql`${actor.activeActor()} AND NOT EXISTS (SELECT 1 FROM employees WHERE pin_lookup = ${lookup})
+              AND NOT EXISTS (SELECT 1 FROM manager_approval_credentials WHERE pin_lookup = ${lookup} AND account_id <> ${actor.account.id})`;
+            const results = await atomicBatch(db, [
+              sql`INSERT INTO manager_approval_credentials (account_id, pin_hash, pin_lookup, revision, created_at, updated_at)
+                SELECT ${actor.account.id}, ${hash}, ${lookup}, ${revision}, ${time}, ${time} WHERE ${guard}
+                ON CONFLICT(account_id) DO UPDATE SET pin_hash = excluded.pin_hash, pin_lookup = excluded.pin_lookup, revision = excluded.revision, updated_at = excluded.updated_at`,
+              audit(actor, "kiosk.approval_pin_changed", "account", String(actor.account.id), sql`EXISTS (SELECT 1 FROM manager_approval_credentials WHERE account_id = ${actor.account.id} AND revision = ${revision})`),
+            ]);
+            if (results[0].meta.changes === 1) return json({ saved: true, pin });
+            if (!await db.get(sql`SELECT 1 WHERE ${actor.activeActor()}`)) throw new AuthError(409, "Your access changed. Sign in again.");
+          }
+          throw new AuthError(503, "Could not generate an approval PIN. Try again shortly.");
         }
+        const pin = body.pin as string;
+        const lookup = pinLookup(secret, pin); const hash = await hashPin(secret, pin);
+        const guard = sql`${actor.activeActor()} AND NOT EXISTS (SELECT 1 FROM manager_approval_credentials WHERE pin_lookup = ${lookup})
+          AND NOT EXISTS (SELECT 1 FROM employees WHERE pin_lookup = ${lookup} AND id <> ${employeeId})`;
+        const results = await atomicBatch(db, [
+          db.update(schema.employees).set({ pinHash: hash, pinLookup: lookup, pinVersion: sql`${schema.employees.pinVersion} + 1`, version: sql`${schema.employees.version} + 1`, updatedAt: time })
+            .where(and(eq(schema.employees.id, employeeId), eq(schema.employees.active, true), eq(schema.employees.terminated, false), actor.employeeFilter(schema.employees.id), guard)),
+          sql`UPDATE kiosk_interactions SET ended_at = ${time} WHERE employee_id = ${employeeId} AND EXISTS (SELECT 1 FROM employees WHERE id = ${employeeId} AND pin_hash = ${hash})`,
+          audit(actor, "kiosk.employee_pin_changed", "employee", String(employeeId), sql`EXISTS (SELECT 1 FROM employees WHERE id = ${employeeId} AND pin_hash = ${hash})`, employeeId),
+        ]);
+        if (results[0].meta.changes !== 1) throw new AuthError(409, "PIN unavailable or employee access changed. Choose another PIN or reload.");
         return json({ saved: true });
       }
       throw new AuthError(404, "Not found.");

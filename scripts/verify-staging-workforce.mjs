@@ -100,7 +100,7 @@ try {
   await check("private profile encryption, wage history and restricted projection", async () => {
     ok(await employeeEdit(owner, a, { legalFirstName: "Fictional", socialSecurityNumber: "000-98-7654", wage: "$25.50/hr" }), "Save private test profile");
     const [stored] = await query("SELECT ssn_encrypted AS value FROM employee_profiles WHERE employee_id = ?", [a]); assert.ok(stored.value.startsWith("v1.") && !stored.value.includes("000-98-7654"));
-    const visible = (await snapshot(peer)).state.employees.find(row => row.id === a); assert.equal(visible.socialSecurityNumber, "000-98-7654");
+    const visible = (await snapshot(peer)).state.employees.find(row => row.id === a); assert.equal(visible.socialSecurityNumber, "•••-••-7654");
     const hidden = (await snapshot(manager)).state.employees.find(row => row.id === a); assert.equal(hidden.socialSecurityNumber, ""); assert.equal(hidden.wage, "");
     ok(await employeeEdit(owner, a, { wage: "$26.00/hr" }), "Append wage change"); assert.equal((await query("SELECT COUNT(*) AS count FROM wage_rates WHERE employee_id = ?", [a]))[0].count, 2);
   });
@@ -195,9 +195,9 @@ try {
     assert.ok((await snapshot(owner)).dismissed[a].includes(source)); assert.equal((await snapshot(peer)).dismissed[b].includes(source), false);
   });
   await check("registered-device punch through HTTPS into shared timesheets and correction history", async () => {
-    const pin = String(randomInt(100000, 1000000)); const approvalPin = String(randomInt(100000, 1000000));
+    const pin = String(randomInt(100000, 1000000));
     ok(await call("/api/kiosk-admin/employee-pin", owner.cookie, { employeeId: a, pin, password }), "Enroll fictional employee PIN");
-    ok(await call("/api/kiosk-admin/approval-pin", owner.cookie, { pin: approvalPin, password }), "Enroll fictional approval PIN");
+    const approvalPin = ok(await call("/api/kiosk-admin/approval-pin", owner.cookie, { password }), "Enroll fictional approval PIN").pin;
     const registration = await call("/api/kiosk-admin/register", owner.cookie, { name: `${label} disposable test device`, password }); const data = ok(registration, "Register test device");
     const device = registration.cookies.find(cookie => cookie.startsWith("__Host-dombase-kiosk-device=")); assert.ok(device);
     // Device ID is obtained via its Owner listing rather than assumed response fields.

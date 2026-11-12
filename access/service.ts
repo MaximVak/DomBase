@@ -86,6 +86,7 @@ export function createAccessService(db: Database, auth: Auth) {
   function activeActor(ctx: Context): SQL {
     return sql`EXISTS (SELECT 1 FROM accounts a JOIN account_sessions s ON s.account_id = a.id
       WHERE a.id = ${ctx.account.id} AND a.session_version = ${ctx.version} AND a.login_enabled = 1
+      AND a.employee_id IS ${ctx.account.employeeId}
       AND a.disabled_at IS NULL AND a.access_level = ${ctx.account.accessLevel} AND s.id = ${ctx.sessionId}
       AND s.session_version = a.session_version AND s.revoked_at IS NULL AND s.expires_at > ${new Date().toISOString()}
       AND julianday(COALESCE(s.last_seen_at, s.created_at)) > julianday(${new Date(Date.now() - 30 * 60000).toISOString()}))`;

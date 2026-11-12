@@ -6,7 +6,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { eq, sql } from "drizzle-orm";
 import { configPath, projectRoot, runLocalDb } from "../scripts/local-db.mjs";
 import { loadServerModule } from "../scripts/server-runtime.mjs";
-import { seedKioskFixture, employeePin, otherEmployeePin, managerPin, ownerPin, cookiesOf } from "./support/kiosk-fixture.mjs";
+import { seedKioskFixture, employeePin, otherEmployeePin, cookiesOf } from "./support/kiosk-fixture.mjs";
 
 test("registered tablets, PIN sessions and action-scoped approvals use isolated D1", { timeout: 120000 }, async t => {
   await mkdir(join(projectRoot, ".wrangler"), { recursive: true });
@@ -40,6 +40,7 @@ test("registered tablets, PIN sessions and action-scoped approvals use isolated 
     return { cookie: `${device}; ${cookiesOf(response)[0]}`, data: await response.json() };
   }
   let ownerCookie = await login(f.owner.email); const managerCookie = await login(f.manager.email);
+  let managerPin; let ownerPin;
   let deviceCookie; let device2; let deviceId;
 
   await t.test("enrollment requires dashboard permissions/password and unique separate PINs", async () => {
@@ -49,9 +50,14 @@ test("registered tablets, PIN sessions and action-scoped approvals use isolated 
     assert.equal((await adm("employee-pin", ownerCookie, { employeeId: f.a.id, pin: employeePin, password: "wrong" })).status, 401);
     await ok(await adm("employee-pin", ownerCookie, { employeeId: f.a.id, pin: employeePin, password }));
     await ok(await adm("employee-pin", ownerCookie, { employeeId: f.b.id, pin: otherEmployeePin, password }));
-    await ok(await adm("approval-pin", managerCookie, { pin: managerPin, password }));
-    await ok(await adm("approval-pin", ownerCookie, { pin: ownerPin, password }));
-    assert.equal((await adm("approval-pin", managerCookie, { pin: employeePin, password })).status, 409);
+    managerPin = (await ok(await adm("approval-pin", managerCookie, { password }))).pin;
+    ownerPin = (await ok(await adm("approval-pin", ownerCookie, { password }))).pin;
+    const taken = await adm("approval-pin", managerCookie, { pin: employeePin, password });
+    const unused = await adm("approval-pin", managerCookie, { pin: "12345678", password });
+    assert.equal(taken.status, 400); assert.equal(unused.status, taken.status);
+    assert.deepEqual(await taken.json(), await unused.json());
+    assert.match(managerPin, /^\d{8}$/); assert.notEqual(managerPin, employeePin);
+    assert.equal((await ok(await adm("approval-pin", managerCookie))).pin, undefined);
     assert.equal((await adm("employee-pin", ownerCookie, { employeeId: f.a.id, pin: managerPin, password })).status, 409);
     const [stored] = await db.select().from(schema.employees).where(eq(schema.employees.id, f.a.id));
     assert.equal(stored.pinLookup, pinLookup(secret, employeePin));
