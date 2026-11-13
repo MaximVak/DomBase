@@ -20,12 +20,13 @@ function DeleteBreakButton({ duration }: { duration: number }) {
   return <button className="breaks-delete" type="button" disabled title={unavailable} aria-label={`Delete ${duration}-minute meal break`}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5" /></svg></button>;
 }
 
-export function BreaksCompliancePanel({ afterHours, mandatory, dirty, message, onChange, onSave }: {
+export function BreaksCompliancePanel({ afterHours, minutes, mandatory, dirty, message, onChange, onSave }: {
   afterHours: number;
+  minutes: number;
   mandatory: boolean;
   dirty: boolean;
   message: string;
-  onChange: (changes: { mealBreakAfterHours?: number; mandatoryMealBreak?: boolean }) => void;
+  onChange: (changes: { mealBreakAfterHours?: number; mealBreakMinutes?: number; mandatoryMealBreak?: boolean }) => void;
   onSave: (event: FormEvent<HTMLFormElement>) => void;
 }) {
   return (
@@ -38,18 +39,18 @@ export function BreaksCompliancePanel({ afterHours, mandatory, dirty, message, o
         <div className="breaks-meal-grid">
           <span className="breaks-column-label">Break frequency</span><span className="breaks-column-label">Duration</span><span aria-hidden="true" /><span aria-hidden="true" />
           <label className="breaks-frequency"><input type="number" aria-label="Mandatory meal break frequency in hours" min={1} max={24} step={1} required value={afterHours} onChange={event => onChange({ mealBreakAfterHours: Number(event.target.value) })} /><span aria-hidden="true">hours</span></label>
-          <input aria-label="First meal break duration" value="30 minutes" disabled title={unavailable} />
+          <label className="breaks-frequency"><input type="number" aria-label="First meal break duration in minutes" min={30} max={120} step={1} required value={minutes} onChange={event => onChange({ mealBreakMinutes: Number(event.target.value) })} /><span>minutes</span></label>
           <label className="breaks-mandatory"><input type="checkbox" role="switch" checked={mandatory} onChange={event => onChange({ mandatoryMealBreak: event.target.checked })} /><span>Mandatory break</span></label>
-          <DeleteBreakButton duration={30} />
+          <DeleteBreakButton duration={minutes} />
           <input aria-label="Optional meal break frequency" value="4 hours" disabled title={unavailable} />
           <input aria-label="Optional meal break duration" value="45 minutes" disabled title={unavailable} />
           <label className="breaks-mandatory breaks-placeholder" title={unavailable}><input type="checkbox" role="switch" disabled /><span>Mandatory break</span></label>
           <DeleteBreakButton duration={45} />
         </div>
-        <p className="breaks-alert-help">The mandatory break frequency controls missed-break alerts and the missed-break count in employee performance.</p>
+        <p className="breaks-alert-help">The frequency controls missed-break alerts. Mandatory unpaid meals are deducted from scheduled paid hours and wage estimates. Schedule estimates do not deduct breaks from actual clocked time.</p>
         <button className="breaks-add" type="button" disabled title={unavailable}>＋ Add meal break</button>
         <div className="breaks-divider">
-          <BreakOption label="Exclude meal breaks from scheduled hours" checked description="Improve labor estimates by removing meal breaks from schedules and forecasts." />
+          <p>Scheduled paid hours exclude mandatory unpaid meals. Paid rest breaks stay paid.</p>
         </div>
       </section>
 

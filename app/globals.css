@@ -11147,3 +11147,8 @@ body:has(dialog.time-exception-modal[open]) { overflow: hidden; }
 .schedule-copy-notice button,.shift-copy-button { padding: 8px 12px; min-height: 44px; border: 1px solid var(--line); background: var(--panel); border-radius: 6px; }
 [draggable="true"] { cursor: grab; }
 .shift-week-cell:has([draggable="true"]) .shift-cell-add { min-height: 32px; }
+/* Schedule planning totals use the same flat panel treatment as the planner. */
+.schedule-estimate-summary { display: flex; flex-wrap: wrap; gap: 12px 24px; padding: 16px; border-bottom: 1px solid var(--line, #e5e7eb); }
+.schedule-estimate-summary > div { display: grid; gap: 4px; }
+.schedule-estimate-summary span, .schedule-estimate-summary p { font-size: 12px; color: var(--muted, #606870); }
+.schedule-estimate-summary p { flex-basis: 100%; margin: 0; }

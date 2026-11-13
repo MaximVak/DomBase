@@ -18,6 +18,7 @@ export type ScheduleEnforcement = {
   restrictManagerDepartments: boolean;
   enableScheduleEvents: boolean;
   mealBreakAfterHours: number;
+  mealBreakMinutes: number;
   mandatoryMealBreak: boolean;
   enableTeamMessaging: boolean;
 };
@@ -42,6 +43,7 @@ export const defaultScheduleEnforcement: ScheduleEnforcement = {
   restrictManagerDepartments: false,
   enableScheduleEvents: true,
   mealBreakAfterHours: 5,
+  mealBreakMinutes: 30,
   mandatoryMealBreak: true,
   enableTeamMessaging: true,
 };
@@ -49,7 +51,7 @@ export const defaultScheduleEnforcement: ScheduleEnforcement = {
 export const alertsPermissionsFields = ["notifyScheduleChanges", "employeesOwnScheduleOnly", "requireAvailabilityApproval", "restrictManagerDepartments", "noShowAlerts", "noShowMinutes"] as const;
 export const eventsTradesFields = ["enableScheduleEvents"] as const;
 export const overtimeFields = ["workWeekStart"] as const;
-export const breaksComplianceFields = ["mealBreakAfterHours", "mandatoryMealBreak"] as const;
+export const breaksComplianceFields = ["mealBreakAfterHours", "mealBreakMinutes", "mandatoryMealBreak"] as const;
 export const messagesSettingsFields = ["enableTeamMessaging"] as const;
 export const scheduleEnforcementFields = ["workWeekStart", "scheduleStartHour", "scheduleEndHour", "lateMinutes", "earlyClockInMinutes", "requireEarlyClockInExplanation", "requireLateClockInExplanation", "requireClockOutExplanation", "requireUnscheduledExplanation", "noShowAlerts", "noShowMinutes", "automaticClockOut", "automaticClockOutMinutes"] as const;
 
@@ -99,7 +101,7 @@ export function normalizeScheduleEnforcement(value: unknown): ScheduleEnforcemen
       : key === "scheduleStartHour" ? 23
       : key === "scheduleEndHour" ? 24
       : key === "automaticClockOutMinutes" ? 1440 : key === "mealBreakAfterHours" ? 24 : 120;
-    const minimum = key === "scheduleEndHour" || key === "automaticClockOutMinutes" || key === "lateMinutes" || key === "mealBreakAfterHours" ? 1 : 0;
+    const minimum = key === "mealBreakMinutes" ? 30 : key === "scheduleEndHour" || key === "automaticClockOutMinutes" || key === "lateMinutes" || key === "mealBreakAfterHours" ? 1 : 0;
     const candidate = input[key];
     if (typeof candidate === "number" && Number.isInteger(candidate) && candidate >= minimum && candidate <= maximum) {
       Object.assign(result, { [key]: candidate });

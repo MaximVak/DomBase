@@ -60,7 +60,7 @@ test("scheduled-only rows do not invent clock times, and issue flags follow the 
   const scheduled = buildTimeCards({ ...base, shifts: [{ employeeId: 1, date: "2026-08-03", start: "09:00", end: "17:00", role: "Sales" }] })[0];
   assert.equal(scheduled.start, undefined);
   assert.equal(scheduled.metrics.actual, 0);
-  assert.equal(scheduled.metrics.scheduled, 8);
+  assert.equal(scheduled.metrics.scheduled, 7.5);
   const events = [{ id: 1, employeeId: 1, type: "in", at: at("2026-08-03", "09:00") }];
   const now = new Date("2026-08-03T15:00:00").getTime();
   assert.deepEqual(buildTimeCards({ ...base, end: "2026-08-03", events, now })[0].issues, ["Missing clock-out", "Missing breaks"]);
@@ -198,7 +198,7 @@ test("calendar month grids handle leap years, year boundaries, and the one-month
 });
 
 
-test("Day view combines split cards and compares elapsed clock time with scheduled time", async () => {
+test("Day view combines split cards and compares actual paid time with scheduled paid time", async () => {
   const { buildDayRows, dayClockLabel } = await dayModule();
   const shifts = [{ employeeId: 1, date: "2026-08-03", start: "09:00", end: "17:00", role: "Sales" }];
   const events = [...eventsFor("2026-08-03", "09:00", "12:00", 0), ...eventsFor("2026-08-03", "13:00", "18:15", 30, 10)];

@@ -91,4 +91,34 @@ test("shift builder persists split shifts, colors, days off, moves and past edit
     await ok(await publish()); assert.ok((await snapshot()).state.shifts.some(s => s.id === 81007));
     assert.deepEqual(await db.all(sql`PRAGMA foreign_key_check`), []);
   });
+  await t.test("meal duration settings persist with revision, permission and validation guards, without changing punches", async () => {
+    const view = await snapshot(), punches = await db.select().from(s.clockEvents);
+    assert.equal(view.settings.mealBreakMinutes, 30);
+    const save = (base, minutes, cookie = owner) => call("commit", cookie, saveBody(base, [{ entity: "settings", id: 1, before: { ...base.settings, hoursRoundingMinutes: base.state.hoursRoundingMinutes }, after: { ...base.settings, hoursRoundingMinutes: base.state.hoursRoundingMinutes, mealBreakMinutes: minutes } }], newToken()));
+    assert.equal((await save(view, 0)).status, 400);
+    await ok(await save(view, 60));
+    assert.equal((await snapshot()).settings.mealBreakMinutes, 60);
+    assert.equal((await save(view, 30)).status, 409);
+    assert.equal((await save(await snapshot(manager), 45, manager)).status, 403);
+    await ok(await save(await snapshot(), 30));
+    assert.deepEqual(await db.select().from(s.clockEvents), punches);
+  });
+  await t.test("wage access retains parent-read and department scope guards; Employee and revoked wage access expose no rates", async () => {
+    await db.insert(s.accountPermissions).values([
+      { accountId: f.generalManager.id, permission: "wages.read", allowed: true },
+      { accountId: f.generalManager.id, permission: "team.read", allowed: false },
+      { accountId: f.generalManager.id, permission: "timesheets.read", allowed: false },
+      { accountId: f.manager.id, permission: "wages.read", allowed: true },
+    ]);
+    const gm = await login(f.generalManager), full = await snapshot(gm);
+    assert.equal(full.scheduleEstimateScopeComplete, true);
+    assert.ok(full.state.employees.every(e => e.wageRates.length === 0));
+    const scoped = await snapshot(manager);
+    assert.equal(scoped.scheduleEstimateScopeComplete, false);
+    assert.ok(scoped.state.employees.find(e => e.id === f.multi.id).wageRates.every(rate => rate.roleId === f.roleA.id));
+    await db.insert(s.accountPermissions).values({ accountId: f.generalManager.id, permission: "wages.read", allowed: false }).onConflictDoUpdate({ target: [s.accountPermissions.accountId, s.accountPermissions.permission], set: { allowed: false } });
+    assert.ok((await snapshot(gm)).state.employees.every(e => e.wageRates.length === 0));
+    const own = await ok(await self.handle(request("/api/self/schedule?date=2026-11-12", employee)));
+    assert.doesNotMatch(JSON.stringify(own), /wageRates|amountCents|wagesCents|salary|wages/);
+  });
 });

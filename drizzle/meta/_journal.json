@@ -92,6 +92,13 @@
       "when": 1794608208518,
       "tag": "0012_shift_builder",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1794612000000,
+      "tag": "0013_schedule_meal_duration",
+      "breakpoints": true
     }
   ]
 }

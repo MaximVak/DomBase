@@ -6,6 +6,7 @@ export type Entity = "employee" | "department" | "schedule-event" | "schedule-dr
 export type Change = { entity: Entity; id: number; before: unknown; after: unknown };
 export type WorkspaceData = {
   period?: import("./period").WorkspacePeriod;
+  scheduleEstimateScopeComplete?: boolean;
   revision: number;
   state: StaffState;
   basicInfo: BasicInfo;

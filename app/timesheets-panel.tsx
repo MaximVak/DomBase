@@ -21,7 +21,7 @@ type Props = {
   employees: TimesheetEmployee[]; events: TimesheetEvent[]; shifts: TimesheetShift[]; adjustments: TimesheetAdjustment[]; pto: TimesheetPto[];
   departments: { id: number; name: string; roles: string[] }[]; history: TimeCardEdit[]; today: string; now: number;
   manager: boolean; canEdit?: boolean; canExport?: boolean; canManagePayrollIds?: boolean; onEditingChange?: (editing: boolean) => void; activeEmployeeId: number; weekStart: number; rounding: Rounding; roundingControl: ReactNode;
-  mandatoryMealBreak: boolean; mealBreakAfterHours: number;
+  mandatoryMealBreak: boolean; mealBreakAfterHours: number; mealBreakMinutes?: number;
   onSaveCard: (draft: TimeCardDraft) => boolean | void | Promise<boolean | void>; onAdjust: (employeeId: number, date: string, hours: number) => void;
   summary?: boolean; onSummaryChange?: (summary: boolean) => void; onPayrollId?: (employeeId: number, payrollId: string) => Promise<boolean>;
   onAddTeamMember?: () => void; onSettings: () => void; onBreakSettings?: () => void; locationName?: string;

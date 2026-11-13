@@ -217,6 +217,7 @@ export const locationSettings = sqliteTable("location_settings", {
   restrictManagerDepartments: integer("restrict_manager_departments", { mode: "boolean" }).notNull().default(false),
   enableScheduleEvents: integer("enable_schedule_events", { mode: "boolean" }).notNull().default(true),
   mealBreakAfterHours: integer("meal_break_after_hours").notNull().default(5),
+  mealBreakMinutes: integer("meal_break_minutes").notNull().default(30),
   mandatoryMealBreak: integer("mandatory_meal_break", { mode: "boolean" }).notNull().default(true),
   enableTeamMessaging: integer("enable_team_messaging", { mode: "boolean" }).notNull().default(true),
   hoursRoundingMinutes: integer("hours_rounding_minutes").notNull().default(15),
@@ -225,6 +226,7 @@ export const locationSettings = sqliteTable("location_settings", {
   ...timestamps(),
 }, table => [
   check("location_settings_week_check", sql`${table.workWeekStart} BETWEEN 0 AND 6`),
+  check("location_settings_meal_duration_check", sql`${table.mealBreakMinutes} BETWEEN 30 AND 120`),
   check("location_settings_schedule_check", sql`${table.scheduleStartHour} BETWEEN 0 AND 23 AND ${table.scheduleEndHour} BETWEEN 1 AND 24 AND ${table.scheduleStartHour} < ${table.scheduleEndHour}`),
   check("location_settings_timing_check", sql`${table.lateMinutes} BETWEEN 1 AND 120 AND ${table.earlyClockInMinutes} BETWEEN 0 AND 120 AND ${table.noShowMinutes} BETWEEN 0 AND 120 AND ${table.automaticClockOutMinutes} BETWEEN 1 AND 1440 AND ${table.mealBreakAfterHours} BETWEEN 1 AND 24`),
   check("location_settings_rounding_check", sql`${table.hoursRoundingMinutes} IN (5, 10, 15) AND ${table.kioskIdleSeconds} BETWEEN 5 AND 600`),

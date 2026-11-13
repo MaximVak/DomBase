@@ -1,5 +1,6 @@
 import { hourlyRate, rateFor } from "../team/rules";
 import type { WageRate } from "../team/rules";
+import { scheduledPaidMinutes } from "./schedule-estimates";
 export type TimesheetEmployee = { id: number; name: string; role: string; wage: string; active: boolean; terminated?: boolean; terminationDate?: string; wageRates?: WageRate[]; jobs?: { id: number; name: string }[]; payrollId?: string; legalFirstName?: string; legalMiddleName?: string; legalLastName?: string };
 export type TimesheetEvent = { id: number; employeeId: number; type: "in" | "out" | "break" | "break_end"; at: string; explanation?: string; automatic?: boolean; role?: string; cardId?: number };
 export type TimesheetShift = { shiftType?: "work" | "day_off"; employeeId: number; date: string; start: string; end: string; role: string };
@@ -40,7 +41,7 @@ const overlap = (start: number, end: number, a: number, b: number) => Math.max(0
 function metrics(): Record<string, number | null> { return { scheduled: 0, actual: 0, variance: 0, paid: 0, regular: 0, breaks: 0, ot: 0, doubleOt: 0, qualifiedOt: null, spread: 0, split: 0, wages: null, pto: 0 }; }
 export function buildTimeCards(input: {
   employees: TimesheetEmployee[]; events: TimesheetEvent[]; shifts: TimesheetShift[]; adjustments: TimesheetAdjustment[]; pto: TimesheetPto[];
-  start: string; end: string; now: number; rounding: Rounding; weekStart: number; mandatoryMealBreak: boolean; mealBreakAfterHours: number;
+  start: string; end: string; now: number; rounding: Rounding; weekStart: number; mandatoryMealBreak: boolean; mealBreakAfterHours: number; mealBreakMinutes?: number;
 }): TimeCard[] {
   const output: TimeCard[] = [];
   const contextStart = weekStartFor(input.start, input.weekStart);
@@ -88,7 +89,16 @@ export function buildTimeCards(input: {
       if (!card) { card = { id: `day-${employee.id}-${date}-${role}`, employeeId: employee.id, date, role, eventIds: [], issues: [], notes: [], adjustment: 0, metrics: metrics() }; cards.push(card); }
       return card;
     };
-    for (const shift of input.shifts.filter(shift => shift.shiftType !== "day_off" && shift.employeeId === employee.id && shift.date >= contextStart && shift.date <= contextEnd)) {
+    const plannedShifts = input.shifts.filter(shift => shift.shiftType !== "day_off" && shift.employeeId === employee.id && shift.date >= contextStart && shift.date <= contextEnd).map((shift, id) => ({ ...shift, id }));
+    const plannedMinutes = scheduledPaidMinutes(plannedShifts, { mandatoryMealBreak: input.mandatoryMealBreak, mealBreakAfterHours: input.mealBreakAfterHours, mealBreakMinutes: input.mealBreakMinutes ?? 30 });
+    for (const shift of plannedShifts) {
+      if (shift.end > shift.start) {
+        const card = dayCard(shift.date, shift.role || employee.role);
+        card.metrics.scheduled = (card.metrics.scheduled ?? 0) + plannedMinutes[shift.id].paidMinutes / 60;
+        continue;
+      }
+      // Legacy overnight records retain their existing date allocation; the
+      // current shift builder accepts same-day work shifts only.
       const start = Date.parse(`${shift.date}T${shift.start}`);
       let end = Date.parse(`${shift.date}T${shift.end}`);
       if (end <= start) end = Date.parse(`${addDays(shift.date, 1)}T${shift.end}`);

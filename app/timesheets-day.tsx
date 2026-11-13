@@ -32,7 +32,7 @@ export function buildDayRows(input: {
     });
     const elapsedMinutes = Math.round((clocked ? totals.spread ?? 0 : totals.actual ?? 0) * 60);
     return [{ employee, cards, scheduled, elapsedMinutes, mealMinutes: Math.round((totals.breaks ?? 0) * 60),
-      varianceMinutes: clocked && scheduled.length && cards.filter(card => card.start).every(card => card.end) ? elapsedMinutes - Math.round((totals.scheduled ?? 0) * 60) : null,
+      varianceMinutes: clocked && scheduled.length && cards.filter(card => card.start).every(card => card.end) ? Math.round(((totals.actual ?? 0) - (totals.scheduled ?? 0)) * 60) : null,
       issues: [...new Set([...cards.flatMap(card => card.issues), ...(noShow ? ["No-Show"] : [])])],
       notes: [...new Set(cards.flatMap(card => card.notes))],
     }];

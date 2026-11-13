@@ -4,6 +4,8 @@ import { FormEvent, MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, u
 import type { DragEvent } from "react";
 import { ShiftBuilderOptions } from "./shift-builder-options";
 import { isWorkShift, shiftLayoutError } from "./shift-builder";
+import { estimateSchedule } from "./schedule-estimates";
+import { ScheduleEstimateSummary } from "./schedule-estimate-summary";
 import type { CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { DepartmentManagerCell, DepartmentManagerFeedback, useDepartmentManagers } from "./department-managers";
@@ -956,6 +958,14 @@ export default function Home({ account }: { account: DashboardAccount }) {
     [accessibleShifts, scheduleDate, shiftEmployeeIds, state.ptoRequests, scheduleEnforcement.workWeekStart],
   );
   const visibleScheduleEmployees = orderedShiftEmployees.filter((employee) => visibleEmployeeIds === null || visibleEmployeeIds.includes(employee.id));
+  const scheduleEstimates = estimateSchedule(accessibleShifts, state.employees, scheduleEnforcement, {
+    start: shared.data.period?.start ?? "", end: shared.data.period?.end ?? "", allDepartments: shared.data.scheduleEstimateScopeComplete === true,
+  });
+  const scheduleMinutes = new Map(scheduleEstimates.map(row => [row.shiftId, row]));
+  function formatScheduledHours(shift: Shift) { return ((scheduleMinutes.get(shift.id)?.paidMinutes ?? 0) / 60).toFixed(2); }
+  const summaryShiftIds = new Set((employeeScheduleTab === "day" ? scheduleDayShifts : employeeScheduleTab === "week" ? scheduleWeekDays.flatMap(day => day.shifts) : scheduleMonthDays.flatMap(day => day.shifts)).map(shift => shift.id));
+  const summaryEmployeeIds = new Set(visibleScheduleEmployees.map(employee => employee.id));
+  const summaryRows = scheduleEstimates.filter(row => summaryShiftIds.has(row.shiftId) && summaryEmployeeIds.has(row.employeeId));
   const myShift = todaysShifts.find(shift => shift.employeeId === activeEmployeeId && shiftEndDateTime(shift).getTime() > currentTime) ?? todaysShifts.filter(shift => shift.employeeId === activeEmployeeId).at(-1);
   const clockedInIds = useMemo(() => {
     return new Set(
@@ -3749,6 +3759,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
               ) : activeSettingsTab === "Breaks & compliance" ? (
                 <BreaksCompliancePanel
                   afterHours={scheduleEnforcementDraft.mealBreakAfterHours}
+                  minutes={scheduleEnforcementDraft.mealBreakMinutes}
                   mandatory={scheduleEnforcementDraft.mandatoryMealBreak}
                   dirty={isBreaksComplianceDirty}
                   message={breaksComplianceMessage}
@@ -3978,7 +3989,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                     </div>
                   </div>
                   <PanelHeading eyebrow="Own shift" title="My shift today" />
-                  {myShift ? <ShiftRow shift={myShift} employee={activeEmployee} /> : <EmptyState text="No shift assigned today." />}
+                  {myShift ? <ShiftRow shift={myShift} paidHours={formatScheduledHours(myShift)} employee={activeEmployee} /> : <EmptyState text="No shift assigned today." />}
                 </section>
               {mode === "manager" ? (
                 <section className="panel">
@@ -4023,6 +4034,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                       <ShiftRow
                         key={shift.id}
                         shift={shift}
+                        paidHours={formatScheduledHours(shift)}
                         employee={employeeById(state.employees, shift.employeeId)}
                         compact
                         showDate={activeCalendarTab !== "today"}
@@ -4977,6 +4989,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                 </div>
               </div>
               {copiedShift ? <div className="schedule-copy-notice" role="status">Copied {formatTimeRange(copiedShift)}. Select an add-shift cell to review and paste it. <button type="button" onClick={() => setCopiedShift(null)}>Finish pasting</button></div> : null}
+              <ScheduleEstimateSummary rows={summaryRows} canReadWages={mode === "manager" && shared.data.permissions["wages.read"]} />
               {(mode === "employee" || mode === "manager") && (
                 <div className="employee-schedule">
                   {schedulePermissionError ? <p className="schedule-permission-message" role="alert">{schedulePermissionError}</p> : null}
@@ -5035,7 +5048,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                           <div className="shift-day-section-label">Team members ({visibleScheduleEmployees.length})</div>
                           {visibleScheduleEmployees.map((employee) => {
                             const employeeShifts = scheduleDayShifts.filter((shift) => shift.employeeId === employee.id);
-                            const dailyHours = employeeShifts.reduce((total, shift) => total + Number(formatScheduledHours(shift)), 0);
+                            const dailyHours = employeeShifts.reduce((total, shift) => total + (scheduleMinutes.get(shift.id)?.paidMinutes ?? 0), 0) / 60;
                             const timeOff = (state.ptoRequests ?? []).find((request) => request.employeeId === employee.id && request.status === "approved" && request.startDate <= scheduleDate && request.endDate >= scheduleDate);
                             const employeeEditedTimes = employeeShifts
                               .map((shift) => editedShiftTimes[shift.id])
@@ -5146,7 +5159,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                         <div className="shift-week-section-label">Team members ({visibleScheduleEmployees.length})</div>
                         {visibleScheduleEmployees.map((employee) => {
                           const employeeWeekShifts = scheduleWeekDays.flatMap((day) => day.shifts.filter((shift) => shift.employeeId === employee.id));
-                          const weeklyHours = employeeWeekShifts.reduce((total, shift) => total + Number(formatScheduledHours(shift)), 0);
+                          const weeklyHours = employeeWeekShifts.reduce((total, shift) => total + (scheduleMinutes.get(shift.id)?.paidMinutes ?? 0), 0) / 60;
 
                           return (
                             <div className="shift-week-row" role="row" key={employee.id}>
@@ -5366,6 +5379,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
               weekStart={scheduleEnforcement.workWeekStart}
               mandatoryMealBreak={scheduleEnforcement.mandatoryMealBreak}
               mealBreakAfterHours={scheduleEnforcement.mealBreakAfterHours}
+              mealBreakMinutes={scheduleEnforcement.mealBreakMinutes}
               rounding={activeUserIsAdmin && mode === "manager" ? hoursRounding : hoursDisplay === "rounded" ? state.hoursRoundingMinutes : "actual"}
               roundingControl={activeUserIsAdmin && mode === "manager" ? (
                 <div className="hours-rounding-actions">
@@ -7874,20 +7888,6 @@ function isTimeWithinBounds(value: string, after?: string, before?: string) {
   return true;
 }
 
-function formatScheduledHours(shift: Shift) {
-  if (shift.shiftType === "day_off") return "0.0";
-  const startMinutes = timeToMinutes(shift.start);
-  const endMinutes = timeToMinutes(shift.end);
-
-  if (startMinutes === null || endMinutes === null) return "0.0";
-
-  const durationMinutes = endMinutes >= startMinutes
-    ? endMinutes - startMinutes
-    : endMinutes + 24 * 60 - startMinutes;
-
-  return (durationMinutes / 60).toFixed(1);
-}
-
 function timeToMinutes(time: string) {
   const [hourText, minuteText] = time.split(":");
   const hour = Number(hourText);
@@ -9681,11 +9681,13 @@ function PanelHeading({
 
 function ShiftRow({
   shift,
+  paidHours,
   employee,
   compact = false,
   showDate = false,
 }: {
   shift: Shift;
+  paidHours: string;
   employee?: Employee;
   compact?: boolean;
   showDate?: boolean;
@@ -9698,7 +9700,7 @@ function ShiftRow({
       </div>
       <div className="shift-meta">
         <strong>{shift.role}</strong>
-        <span>{formatScheduledHours(shift)} hours</span>
+        <span>{paidHours} paid hours</span>
       </div>
     </article>
   );
