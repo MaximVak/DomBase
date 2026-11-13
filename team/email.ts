@@ -8,7 +8,7 @@ import { invitationEmailConfig } from "./email-config.mjs";
 import type { Database } from "../workforce/context";
 
 export type InvitationEmailEnv = {
-  INVITATION_EMAIL?: { send: (message: { to: string; from: string; replyTo: string; subject: string; text: string }) => Promise<{ messageId: string }> };
+  INVITATION_EMAIL?: { send: (message: { to: string; from: { email: string; name: string }; replyTo: string; subject: string; text: string }) => Promise<{ messageId: string }> };
   INVITATION_EMAIL_FROM?: string; INVITATION_EMAIL_REPLY_TO?: string; INVITATION_EMAIL_ORIGIN?: string;
   AUTH_PRIVATE_FIELD_KEY?: string;
 };
@@ -60,9 +60,10 @@ export async function dispatchInvitationEmails(db: Database, env: InvitationEmai
       const secret = decryptSsn(invitation.localTokenEncrypted, invitation.employeeId, env.AUTH_PRIVATE_FIELD_KEY!, `invitation:${invitation.id}`);
       const [person] = await db.select({ name: s.employees.name }).from(s.employees).where(eq(s.employees.id, invitation.employeeId)).limit(1);
       const link = `${config.origin}/invite#token=${secret}`;
+      const expires = new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", month: "long", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" }).format(new Date(invitation.expiresAt));
       const response = await Promise.race([
-        env.INVITATION_EMAIL!.send({ to: invitation.recipient, from: config.sender!, replyTo: config.replyTo!, subject: "Your DomBase profile invitation",
-          text: `DomBase profile invitation for ${person?.name ?? "your employee profile"}.\n\nYou have been invited to set up your employee profile in DomBase.\n\nChoose your password using this private link:\n${link}\n\nThis link expires at ${invitation.expiresAt} and can be used once. If a newer invitation was sent, use the newest link. Never forward this email.\n\nIf you did not expect this invitation, ignore it or contact your manager. No account is created until you accept.\n` }),
+        env.INVITATION_EMAIL!.send({ to: invitation.recipient, from: { email: config.sender!, name: "Molding Mart" }, replyTo: config.replyTo!, subject: "Molding Mart: your DomBase invitation",
+          text: `Hello ${person?.name ?? "there"},\n\nMolding Mart invited you to set up your employee profile in DomBase, our team scheduling and time clock app.\n\nUse this private link to choose your password:\n${link}\n\nThe link expires ${expires} (Pacific time) and works once. If your manager resends the invitation, use the newest email. Do not forward this link.\n\nIf you were not expecting this invitation, ignore it. No account is created until you accept. Reply to this email if you need help.\n\nMolding Mart\nSacramento, California\n` }),
         new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("Email service timed out.")), 10000); }),
       ]);
       accepted = typeof response?.messageId === "string" && Boolean(response.messageId);
