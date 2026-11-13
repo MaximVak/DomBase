@@ -6,7 +6,7 @@ import type { Change } from "./contract";
 import type { RecordContext } from "./records";
 import { employeeInScope } from "./records";
 import * as v from "./validation";
-const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+import { availabilitySlots, appendAvailability } from "./availability";
 export async function timeOffChange(r: RecordContext, change: Change) {
   if (change.entity === "pto-policy") {
     r.ctx.requirePermission("settings.manage");
@@ -60,21 +60,13 @@ export async function timeOffChange(r: RecordContext, change: Change) {
   }
   if (change.entity === "availability") {
     if (!change.after) throw new AuthError(400, "Availability history cannot be deleted.");
-    const data = v.object(change.after); v.keys(data, ["id", "employeeId", "effectiveDate", "status", "slots", "submittedAt", "requestNote", "decidedAt", "decidedByEmployeeId", "rejectionNote"]);
+    const data = v.object(change.after); v.keys(data, ["id", "employeeId", "effectiveDate", "status", "slots", "submittedAt", "submittedByName", "decidedByName", "requestNote", "decidedAt", "decidedByEmployeeId", "rejectionNote"]);
     const before = change.before ? v.object(change.before) : null; const employeeId = v.integer(data.employeeId); const self = employeeId === r.ctx.account.employeeId;
-    await employeeInScope(r, employeeId, self);
+    const person = await employeeInScope(r, employeeId, self);
+    if (!person.active || person.terminated) throw new AuthError(409, "Inactive employees retain their availability history but cannot submit or receive new availability decisions.");
     if (!before) {
       if (!self) r.ctx.requirePermission("availability.approve");
-      const status = r.view.settings.requireAvailabilityApproval ? "pending" : "approved";
-      r.tx.insert(s.availabilityRequests, { id: change.id, employeeId, effectiveDate: v.date(data.effectiveDate), status, requestNote: v.text(data.requestNote ?? "", 1000), submittedAt: r.tx.stamp, decidedAt: status === "approved" ? r.tx.stamp : null });
-      const entries = v.list(data.slots, 100); const unique = new Set<string>();
-      for (const entry of entries) {
-        const slot = v.object(entry); v.keys(slot, ["day", "preference", "startHour", "endHour", "location"]);
-        const day = days.indexOf(v.text(slot.day, 10)); const startMinute = Math.round(v.number(slot.startHour, 0, 24) * 60); const endMinute = Math.round(v.number(slot.endHour, 0, 24) * 60); const preference = v.oneOf(slot.preference, ["preferred", "unavailable"]);
-        if (day < 0 || endMinute <= startMinute || startMinute > 1439) throw new AuthError(400, "Invalid availability hours.");
-        const key = `${day}:${startMinute}:${endMinute}:${preference}`; if (unique.has(key)) throw new AuthError(400, "Duplicate availability slot."); unique.add(key);
-        r.tx.insert(s.availabilitySlots, { requestId: change.id, dayOfWeek: day, startMinute, endMinute, preference });
-      }
+      appendAvailability(r.tx, { id: change.id, employeeId, accountId: r.ctx.account.id, effectiveDate: v.date(data.effectiveDate), note: v.text(data.requestNote ?? "", 1000), slots: availabilitySlots(data.slots), approvalRequired: r.view.settings.requireAvailabilityApproval });
       return;
     }
     r.ctx.requirePermission("availability.approve"); if (employeeId !== before.employeeId || !equal(data.slots, before.slots) || data.effectiveDate !== before.effectiveDate || data.requestNote !== before.requestNote) throw new AuthError(400, "Only the availability decision can change.");

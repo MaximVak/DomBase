@@ -45,7 +45,7 @@ export function EmployeeScheduleScreen() {
   }, [load]);
   const shifts = data?.shifts.filter(shift => showTeam || shift.employeeId === data.employeeId) ?? [];
   return <main className="team-screen employee-schedule-screen">
-    <header><div><a href="/me">← My profile</a><h1>My schedule</h1><p>Published shifts for your workweek.</p></div><button type="button" disabled={pending} onClick={() => void load()}>Reload schedule</button></header>
+    <header><div><a href="/me">← My profile</a> · <a href="/me/availability">My availability</a><h1>My schedule</h1><p>Published shifts for your workweek.</p></div><button type="button" disabled={pending} onClick={() => void load()}>Reload schedule</button></header>
     <div className="employee-week-toolbar">
       <button type="button" disabled={!data || pending} onClick={() => { if (data) setDate(offsetScheduleDate(data.startDate, -7)); }}>← Previous week</button>
       <label>Week containing<input type="date" min="0001-01-01" max="9998-12-31" value={date || data?.today || ""} onChange={event => { if (event.target.value) setDate(event.target.value); }} /></label>

@@ -13,6 +13,7 @@ import * as v from "../workforce/validation";
 import { profileFields, profileError } from "./profile";
 import type { PersonalProfile, MyProfile } from "./profile";
 import { readEmployeeSchedule } from "./schedule";
+import { readMyAvailability, saveMyAvailability } from "./availability";
 
 type Auth = Pick<ReturnType<typeof createAuthService>, "getSession">;
 export function createSelfService(db: KioskOperatorDatabase, auth: Auth, secret: string, now = Date.now) {
@@ -102,6 +103,12 @@ export function createSelfService(db: KioskOperatorDatabase, auth: Auth, secret:
   async function handle(request: Request) {
     try {
       const ctx = await context(request); const url = new URL(request.url);
+      if (url.pathname === "/api/self/availability") {
+        if (request.method === "GET") return json(await readMyAvailability(db, ctx, url, now()));
+        if (url.search) throw new AuthError(400, "Availability does not accept employee selectors.");
+        if (request.method === "POST") return json(await saveMyAvailability(db, ctx, await readAuthBody(request, 32768), secret, now()));
+        return json({ error: "Method not allowed." }, 405, { Allow: "GET, POST" });
+      }
       if (url.pathname === "/api/self/schedule") {
         if (request.method !== "GET") return json({ error: "Method not allowed." }, 405, { Allow: "GET" });
         return json(await readEmployeeSchedule(db, ctx, url, now()));

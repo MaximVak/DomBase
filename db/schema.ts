@@ -595,6 +595,7 @@ export const ptoDecisions = sqliteTable("pto_decisions", {
 export const availabilityRequests = sqliteTable("availability_requests", {
   id: id(),
   employeeId: integer("employee_id").notNull().references(() => employees.id),
+  submittedByAccountId: integer("submitted_by_account_id").references(() => accounts.id),
   effectiveDate: text("effective_date").notNull(),
   status: text("status", { enum: ["pending", "approved", "rejected"] }).notNull().default("pending"),
   requestNote: text("request_note").notNull().default(""),

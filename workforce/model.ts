@@ -281,6 +281,8 @@ export type AvailabilityRequest = {
   status: "pending" | "approved" | "rejected";
   slots: AvailabilityRequestSlot[];
   submittedAt: string;
+  submittedByName?: string;
+  decidedByName?: string;
   requestNote?: string;
   decidedAt?: string;
   decidedByEmployeeId?: number;

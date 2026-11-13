@@ -50,7 +50,7 @@ const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
-    if (["/", "/login", "/setup", "/access", "/kiosk-admin", "/me", "/me/schedule", "/team", "/team/reports", "/community", "/invite", "/backups"].includes(url.pathname)) {
+    if (["/", "/login", "/setup", "/access", "/kiosk-admin", "/me", "/me/schedule", "/me/availability", "/team", "/team/reports", "/community", "/invite", "/backups"].includes(url.pathname)) {
       try {
         if (await registeredDevice(drizzle(env.DB, { schema }), request.headers.get("cookie"), url)) {
           return new Response(null, { status: 303, headers: { Location: "/kiosk", "Cache-Control": "private, no-store", "Referrer-Policy": "no-referrer" } });
@@ -72,7 +72,7 @@ const worker = {
     }
 
     const response = await handler.fetch(request, env, ctx);
-    if (["/", "/login", "/setup", "/access", "/kiosk", "/kiosk-admin", "/me", "/me/schedule", "/team", "/team/reports", "/community", "/invite", "/backups"].includes(url.pathname) || /^\/api\/(auth|access|workforce|workspace|documents|kiosk|kiosk-admin|self|team|community|invitations|backups)\//.test(url.pathname)) {
+    if (["/", "/login", "/setup", "/access", "/kiosk", "/kiosk-admin", "/me", "/me/schedule", "/me/availability", "/team", "/team/reports", "/community", "/invite", "/backups"].includes(url.pathname) || /^\/api\/(auth|access|workforce|workspace|documents|kiosk|kiosk-admin|self|team|community|invitations|backups)\//.test(url.pathname)) {
       const headers = new Headers(response.headers);
       headers.set("Cache-Control", "private, no-store");
       headers.set("Referrer-Policy", "no-referrer");

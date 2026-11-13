@@ -1,0 +1,145 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { eq, sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import { configPath, projectRoot, runLocalDb } from "../scripts/local-db.mjs";
+import { loadServerModule } from "../scripts/server-runtime.mjs";
+import { seedWorkforceFixture, fieldKey } from "./support/workforce-fixture.mjs";
+
+test("availability versions persist through Employee submission and scoped review with full history", { timeout: 120000 }, async t => {
+  await mkdir(join(projectRoot, ".wrangler"), { recursive: true });
+  const statePath = await mkdtemp(join(projectRoot, ".wrangler/availability-")); let platform;
+  t.after(async () => { try { await platform?.dispose(); } finally { await rm(statePath, { recursive: true, force: true }); } });
+  await runLocalDb("migrate", [], statePath);
+  const s = await loadServerModule("db/schema.ts");
+  const { createAuthService, createAccessService, createWorkforceService, createSelfService, newToken, saveBody } = await loadServerModule("tests/support/workforce-runtime.ts");
+  const { getPlatformProxy } = await import("wrangler");
+  platform = await getPlatformProxy({ configPath, persist: { path: join(statePath, "v3") }, remoteBindings: false, envFiles: [] });
+  const db = drizzle(platform.env.DB, { schema: s }), secret = "isolated-shift-builder-test-secret-at-least-32-characters";
+  const auth = createAuthService(db, { secret }), access = createAccessService(db, auth);
+  const workspace = createWorkforceService(db, access, { secret, fieldKey });
+  const testNow = () => Date.parse("2026-11-13T20:00:00Z");
+  const self = createSelfService(db, auth, secret, testNow), password = "Fictional shift builder test passphrase!";
+  const f = await seedWorkforceFixture(db, s, loadServerModule, password), origin = "http://localhost:3000";
+  const request = (path, cookie = "", body) => new Request(origin + path, { method: body === undefined ? "GET" : "POST", headers: { Cookie: cookie, ...(body === undefined ? {} : { Origin: origin, "Content-Type": "application/json" }) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+  const ok = async response => { const body = await response.json(); assert.equal(response.status, 200, JSON.stringify(body)); return body; };
+  const login = async account => { const r = await auth.handle(request("/api/auth/login", "", { email: account.email, password })); await ok(r); return r.headers.get("set-cookie").split(";")[0]; };
+  const owner = await login(f.owner), manager = await login(f.manager); let employee = await login(f.employeeAccount);
+  const call = (action, cookie = owner, body) => workspace.handle(request("/api/workspace/" + action, cookie, body));
+  const snapshot = (cookie = owner) => call("state", cookie).then(ok);
+  const endpoint = "/api/self/availability";
+  const own = (cookie = employee, query = "") => self.handle(request(endpoint + query, cookie)).then(ok);
+  const body = view => ({ id: newToken(), contextToken: view.contextToken, revision: view.revision, effectiveDate: "2026-11-09", slots: [{ day: "Monday", preference: "preferred", startHour: 9.25, endHour: 12, location: "This location" }, { day: "Monday", preference: "unavailable", startHour: 13.5, endHour: 24, location: "This location" }], requestNote: "Fictional weekly version" });
+  const post = (value, cookie = employee) => self.handle(request(endpoint, cookie, value));
+  const decide = async (id, status, cookie = owner, rejectionNote = "") => {
+    const view = await snapshot(cookie), before = view.state.availabilityRequests.find(r => r.id === id);
+    return call("commit", cookie, saveBody(view, [{ entity: "availability", id, before, after: { ...before, status, rejectionNote, decidedByName: "Forged reviewer" } }], newToken()));
+  };
+  let firstId;
+  await t.test("Employee API rejects selectors, admin fields and unauthenticated/tablet/management access", async () => {
+    assert.equal((await self.handle(request(endpoint))).status, 401);
+    assert.equal((await self.handle(request(endpoint, owner))).status, 403);
+    assert.equal((await self.handle(request(endpoint + "?employeeId=" + f.b.id, employee))).status, 400);
+    assert.equal((await self.handle(request(endpoint + "?before=bad", employee))).status, 400);
+    assert.equal((await call("state", employee)).status, 401);
+    const view = await own();
+    assert.equal(view.employeeId, f.a.id); assert.equal(view.requests.length, 0);
+    for (const patch of [{ employeeId: f.b.id }, { status: "approved" }, { submittedByName: "Forged" }, { requestId: 1 }]) assert.equal((await post({ ...body(view), ...patch })).status, 400);
+    const csrf = request(endpoint, employee, body(view)); csrf.headers.set("Origin", "https://untrusted.example.test"); assert.equal((await self.handle(csrf)).status, 403);
+  });
+  await t.test("minute-accurate versions, authors, idempotency and retries retain all slots without altering punches", async () => {
+    const before = await own(), value = body(before), punches = await db.select().from(s.clockEvents);
+    const responses = await Promise.all([post(value), post(value)]); for (const response of responses) await ok(response);
+    const read = await own(); assert.equal(read.requests.length, 1); firstId = read.requests[0].id;
+    assert.equal(read.requests[0].status, "pending"); assert.equal(read.requests[0].submittedByName, f.employeeAccount.displayName);
+    assert.equal(read.current, null); assert.equal(read.requests[0].slots[0].startHour, 9.25);
+    assert.equal(read.requests[0].slots[1].endHour, 24);
+    assert.equal((await post({ ...value, requestNote: "Conflicting retry" })).status, 409);
+    assert.deepEqual(await db.select().from(s.clockEvents), punches);
+    assert.equal((await db.select().from(s.availabilityRequests))[0].submittedByAccountId, f.employeeAccount.id);
+  });
+  await t.test("approval, rejection and prior approved versions remain visible with actual reviewers and date-specific application", async () => {
+    await ok(await decide(firstId, "approved"));
+    let view = await own(); assert.equal(view.current.id, firstId); assert.equal(view.requests[0].decidedByName, f.owner.displayName);
+    assert.notEqual(view.requests[0].decidedByName, "Forged reviewer");
+    const value = { ...body(view), effectiveDate: "2026-11-16", slots: [], requestNote: "Future clear" }; await ok(await post(value));
+    view = await own(); const future = view.requests.find(r => r.requestNote === "Future clear");
+    assert.equal(view.current.id, firstId);
+    await ok(await decide(future.id, "approved"));
+    const { approvedAvailability, availabilityForDate } = await loadServerModule("app/availability-model.ts");
+    view = await own(); assert.equal(view.current.id, firstId);
+    assert.equal(approvedAvailability(view.requests, f.a.id, "2026-11-16").id, future.id);
+    assert.equal(availabilityForDate(view.requests, f.a.id, "2026-11-09").slots.length, 2);
+    await ok(await post({ ...body(view), requestNote: "Keep rejected history" }));
+    view = await own(); const rejected = view.requests.find(r => r.requestNote === "Keep rejected history");
+    assert.equal((await decide(rejected.id, "rejected")).status, 400);
+    await ok(await decide(rejected.id, "rejected", owner, "Fictional rejection reason"));
+    view = await own(); assert.equal(view.requests.find(r => r.id === rejected.id).rejectionNote, "Fictional rejection reason");
+    assert.equal(view.requests.length, 3); assert.equal(view.current.id, firstId);
+    const state = await snapshot(); const stored = state.state.availabilityRequests.find(r => r.id === firstId);
+    assert.equal((await call("commit", owner, saveBody(state, [{ entity: "availability", id: firstId, before: stored, after: null }], newToken()))).status, 400);
+    assert.equal((await decide(firstId, "rejected", owner, "Rewrite history")).status, 409);
+  });
+  await t.test("scoped reviews require approval permission and cannot rewrite slots, decide own requests or see another department's notes", async () => {
+    const [person] = await db.insert(s.employees).values({ name: "Other availability person", pinHash: "isolated-other-availability", roleId: f.roleB.id }).returning();
+    await db.insert(s.employeeRoles).values({ employeeId: person.id, roleId: f.roleB.id });
+    const [other] = await db.insert(s.accounts).values({ email: "other-availability@example.test", normalizedEmail: "other-availability@example.test", displayName: "Other fictional person", employeeId: person.id, accessLevel: "employee", passwordHash: f.employeeAccount.passwordHash, loginEnabled: true }).returning();
+    const otherCookie = await login(other); await ok(await post({ ...body(await own(otherCookie)), requestNote: "Private department B availability" }, otherCookie));
+    assert.ok(!(await own()).requests.some(r => r.requestNote.includes("department B")));
+    let view = await snapshot(manager); assert.doesNotMatch(JSON.stringify(view.state.availabilityRequests), /Private department B/);
+    await ok(await post({ ...body(await own()), requestNote: "Manager permission check" }));
+    const pending = (await own()).requests.find(r => r.requestNote === "Manager permission check");
+    assert.equal((await decide(pending.id, "approved", manager)).status, 403);
+    await db.insert(s.accountPermissions).values({ accountId: f.manager.id, permission: "availability.approve", allowed: true });
+    await ok(await decide(pending.id, "approved", manager));
+    view = await snapshot(manager);
+    const ownRequest = { id: 7001001, employeeId: f.managerEmployee.id, effectiveDate: "2026-11-09", status: "pending", slots: [], submittedAt: new Date().toISOString() };
+    await ok(await call("commit", manager, saveBody(view, [{ entity: "availability", id: ownRequest.id, before: null, after: ownRequest }], newToken())));
+    assert.equal((await decide(ownRequest.id, "approved", manager)).status, 403);
+    const pendingOther = (await own(otherCookie)).requests[0], scoped = await snapshot(manager);
+    assert.ok([403,404,409].includes((await call("commit", manager, saveBody(scoped, [{ entity: "availability", id: pendingOther.id, before: pendingOther, after: { ...pendingOther, status: "approved" } }], newToken()))).status));
+    const ownRow = (await own()).requests.find(r => r.id === firstId); assert.equal(ownRow.slots[0].startHour, 9.25);
+  });
+  await t.test("overlap, sub-minute values, stale forms, switched identities and audit failures cannot overwrite or append partial history", async () => {
+    const view = await own(), value = body(view);
+    assert.equal((await post({ ...value, slots: [...value.slots, value.slots[0]] })).status, 400);
+    assert.equal((await post({ ...value, slots: [{ ...value.slots[0], startHour: 9.123 }] })).status, 400);
+    await ok(await post(value)); assert.equal((await post({ ...value, id: newToken() })).status, 409);
+    const before = await own(), count = before.requests.length;
+    await db.run(sql`CREATE TRIGGER availability_audit_failure BEFORE INSERT ON audit_log WHEN NEW.action = 'workforce.changed' BEGIN SELECT RAISE(ABORT, 'isolated availability rollback'); END`);
+    try { assert.equal((await post(body(before))).status, 503); }
+    finally { await db.run(sql`DROP TRIGGER availability_audit_failure`); }
+    const after = await own(); assert.equal(after.requests.length, count); assert.equal(after.revision, before.revision);
+    const staleAuth = { getSession: async token => { const session = await auth.getSession(token); await db.update(s.accounts).set({ sessionVersion: sql`session_version + 1` }).where(eq(s.accounts.id, f.employeeAccount.id)); return session; } };
+    const guarded = createSelfService(db, staleAuth, secret, testNow);
+    assert.ok([401,409].includes((await guarded.handle(request(endpoint, employee, body(after)))).status));
+    employee = await login(f.employeeAccount); assert.equal((await post(body(after))).status, 409);
+    assert.equal((await own()).requests.length, count);
+  });
+  await t.test("automatic approval and a zero-slot version persist, while paginated history retains the older active version", async () => {
+    const view = await snapshot();
+    const settings = { ...view.settings, hoursRoundingMinutes: view.state.hoursRoundingMinutes };
+    await ok(await call("commit", owner, saveBody(view, [{ entity: "settings", id: 1, before: settings, after: { ...settings, requireAvailabilityApproval: false } }], newToken())));
+    await ok(await post({ ...body(await own()), effectiveDate: "2026-12-01", slots: [], requestNote: "Automatic future clear" }));
+    assert.equal((await own()).requests.find(r => r.requestNote === "Automatic future clear").status, "approved");
+    const activeId = (await own()).current.id;
+    for (let i = 0; i < 55; i++) await db.insert(s.availabilityRequests).values({ employeeId: f.a.id, effectiveDate: "2027-01-01", status: "pending", submittedAt: `2026-11-20T12:00:${String(i).padStart(2, "0")}Z`, requestNote: `Fictional pagination ${i}` });
+    const first = await own(); assert.equal(first.requests.length, 50); assert.ok(first.nextCursor); assert.ok(first.current); assert.equal(first.current.id, activeId);
+    const second = await own(employee, "?before=" + encodeURIComponent(first.nextCursor));
+    assert.ok(second.requests.length > 0); assert.ok(second.requests.every(r => !first.requests.some(old => old.id === r.id)));
+    assert.equal(new Set([...first.requests, ...second.requests].map(r => r.id)).size, (await db.select().from(s.availabilityRequests).where(eq(s.availabilityRequests.employeeId, f.a.id))).length);
+    assert.doesNotMatch(JSON.stringify(first), /password|pinHash|amountCents|socialSecurity|accountEmail|sessionId/);
+    assert.deepEqual(await db.all(sql`PRAGMA foreign_key_check`), []);
+  });
+  await t.test("inactive employees keep readable history but cannot submit or receive new decisions", async () => {
+    const before = await own(), pending = before.requests.find(r => r.status === "pending"), saved = await db.select().from(s.availabilityRequests).where(eq(s.availabilityRequests.employeeId, f.a.id));
+    await db.update(s.employees).set({ active: false, terminated: true, terminationDate: "2026-11-13" }).where(eq(s.employees.id, f.a.id));
+    assert.equal((await self.handle(request(endpoint, employee))).status, 401);
+    const view = await snapshot(); assert.ok(view.state.availabilityRequests.some(r => r.id === firstId));
+    assert.equal((await decide(pending.id, "approved")).status, 409);
+    assert.deepEqual(await db.select().from(s.availabilityRequests).where(eq(s.availabilityRequests.employeeId, f.a.id)), saved);
+  });
+
+});
