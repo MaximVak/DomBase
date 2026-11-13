@@ -47,7 +47,16 @@ export function BackupMonitorView({ status, unavailable, details = false, checki
       {details ? <button type="button" disabled={checking} onClick={onRefresh}>{checking ? "Checking…" : "Check again"}</button> : <a href="/backups">View backup details</a>}
     </section>
     {details ? <>
-      <p>Owners see these alerts in DomBase. Email and text alerts are not connected.</p>
+      <p>Owners see these alerts in DomBase. Text alerts are not connected.</p>
+      <p role={status?.email?.state === "retrying" || status?.email?.state === "unavailable" ? "alert" : "status"}>
+        Email alerts{status?.email?.recipient ? <> to <strong>{status.email.recipient}</strong></> : ""}: {status?.email?.configured
+          ? status.email.state === "retrying" ? "sending failed; another attempt is scheduled in 15 minutes."
+          : status.email.state === "unavailable" ? "delivery status is unavailable."
+          : status.email.state === "pending" ? "a notification is being prepared."
+          : status.email.lastAcceptedAt ? <>last accepted by the email service <time dateTime={status.email.lastAcceptedAt}>{formatBackupTime(status.email.lastAcceptedAt)} Pacific</time>. Inbox receipt is not confirmed here.</>
+          : "sending is configured; waiting for the next backup warning or recovery."
+          : "not active yet. A verified sender and email service must be connected."}
+      </p>
       <p>Daily backups start after 2:00 AM Pacific; a missing completion is overdue at 4:00 AM. A failed attempt raises a warning immediately.</p>
       {status?.checkedAt ? <p>Last checked: <time dateTime={status.checkedAt}>{formatBackupTime(status.checkedAt)} Pacific</time>.</p> : null}
       {status?.configured ? <>

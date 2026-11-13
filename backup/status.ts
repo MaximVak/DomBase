@@ -7,12 +7,21 @@ import type { BackupService } from "./schedule";
 
 export type BackupAlert = { id: string; kind: "failed" | "stale"; detectedAt: string; expectedDay: string; attemptAt?: string };
 export type BackupRecovery = { incidentId: string; kind: "failed" | "stale"; detectedAt: string; recoveredAt: string };
+export type BackupEmailStatus = { configured: boolean; recipient: string | null; state: "not_configured" | "ready" | "pending" | "accepted" | "retrying" | "unavailable"; lastAcceptedAt?: string };
 export type BackupStatus = {
   configured: boolean; schedule?: string; retention?: string; encrypted?: boolean; stale?: boolean; checkedAt?: string;
   lastSuccess?: { localDay: string; createdAt: string; tables: number; migrations: number; rows: number; objects: number; encryptedBytes: number; fingerprint: string } | null;
   lastAttempt?: { at: string; state: "running" | "succeeded" | "failed"; localDay: string; category?: string } | null;
   alerts?: { active: BackupAlert | null; lastRecovery: BackupRecovery | null };
+  email?: BackupEmailStatus;
 };
+function safeEmail(value: BackupEmailStatus | undefined): BackupEmailStatus | undefined {
+  if (value === undefined) return undefined;
+  if (!value || typeof value.configured !== "boolean" || !["not_configured", "ready", "pending", "accepted", "retrying", "unavailable"].includes(value.state)
+    || (value.recipient !== null && (typeof value.recipient !== "string" || value.recipient.length > 254 || !/^[^\s<>@,;]+@[^\s<>@,;]+\.[A-Za-z]{2,}$/.test(value.recipient)))
+    || (value.lastAcceptedAt !== undefined && (typeof value.lastAcceptedAt !== "string" || !Number.isFinite(Date.parse(value.lastAcceptedAt))))) throw new Error("Invalid backup email status.");
+  return { configured: value.configured, recipient: value.recipient, state: value.state, ...(value.lastAcceptedAt ? { lastAcceptedAt: value.lastAcceptedAt } : {}) };
+}
 function safeAlerts(value: BackupStatus["alerts"]): BackupStatus["alerts"] {
   if (value === undefined) return undefined; // Rolling deployment of the backup service.
   if (!value || typeof value !== "object") throw new Error("Invalid backup alerts.");
@@ -38,7 +47,8 @@ export async function readBackupStatus(service?: BackupService): Promise<BackupS
   // Only counts/times/status cross into the dashboard; never archive keys,
   // credential envelopes, SQL, document names or application secrets.
   const alerts = safeAlerts(body.alerts);
-  return { configured: true, schedule: "Daily after 2:00 AM Pacific time", retention: "All backups kept; no automatic deletion", encrypted: true, stale: body.stale, checkedAt: body.checkedAt, ...(alerts ? { alerts } : {}),
+  const email = safeEmail(body.email);
+  return { configured: true, schedule: "Daily after 2:00 AM Pacific time", retention: "All backups kept; no automatic deletion", encrypted: true, stale: body.stale, checkedAt: body.checkedAt, ...(alerts ? { alerts } : {}), ...(email ? { email } : {}),
     lastSuccess: success ? { localDay: success.localDay, createdAt: success.createdAt, tables: success.tables, migrations: success.migrations, rows: success.rows, objects: success.objects, encryptedBytes: success.encryptedBytes, fingerprint: success.fingerprint } : null,
     lastAttempt: attempt ? { at: attempt.at, state: attempt.state, localDay: attempt.localDay, ...(attempt.category && ["configuration", "database", "files", "archive", "completion"].includes(attempt.category) ? { category: attempt.category } : {}) } : null };
 }

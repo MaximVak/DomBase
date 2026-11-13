@@ -2,20 +2,12 @@ import { Buffer } from "node:buffer";
 import { snapshotDatabase, rowsOf, checkSecrets, checkFileInventory, hash } from "./snapshot.mjs";
 import { backupCalendar, hostedFormat, hostedLimits, encryptPart, wrapDataKey, publicFingerprint, validateCompletion } from "./hosted-format.mjs";
 import { expectedBackupDay, nextBackupAlerts } from "./alerts.mjs";
+import { readJson, putJson } from "./control.mjs";
+import { backupEmailStatus, deliverBackupEmail } from "./email.mjs";
 
-const jsonOptions = { httpMetadata: { contentType: "application/json", cacheControl: "no-store" } };
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
 const leaseKey = "control/daily-lease.json";
 const stateKey = "control/status.json";
-async function readJson(bucket, key) {
-  const object = await bucket.get(key);
-  if (!object) return null;
-  if (object.size > 32 * 1024) throw new Error("Control object is too large.");
-  return { value: await object.json(), etag: object.etag };
-}
-async function putJson(bucket, key, value, etag) {
-  return bucket.put(key, JSON.stringify(value), { ...jsonOptions, ...(etag === undefined ? {} : { onlyIf: etag === null ? { etagDoesNotMatch: "*" } : { etagMatches: etag } }) });
-}
 async function setStatus(bucket, attempt, success, now = Date.now()) {
   for (let tries = 0; tries < 5; tries++) {
     const prior = await readJson(bucket, stateKey);
@@ -48,6 +40,11 @@ export async function recordBackupAlerts(bucket, now = Date.now()) {
     if (await putJson(bucket, stateKey, { ...state, alerts }, prior?.etag ?? null)) return alerts;
   }
   throw new Error("Could not record backup alert state.");
+}
+async function monitorBackup(env, now) {
+  const alerts = await recordBackupAlerts(env.BACKUPS, now);
+  try { await deliverBackupEmail(env, alerts, (await backupStatus(env.BACKUPS, now)).lastSuccess, now); }
+  catch { console.error("Backup email delivery could not be confirmed."); }
 }
 async function writeEncrypted(bucket, key, encrypted) {
   const written = await bucket.put(key, encrypted.bytes, { httpMetadata: { contentType: "application/octet-stream", cacheControl: "no-store" }, sha256: await crypto.subtle.digest("SHA-256", encrypted.bytes), onlyIf: { etagDoesNotMatch: "*" } });
@@ -127,7 +124,7 @@ export function createBackupWorker(env, clock = Date.now) {
     const path = new URL(request.url).pathname;
     let dailyAccepted = false;
     try {
-      if (path === "/status" && request.method === "GET") return json(await backupStatus(env.BACKUPS, clock()));
+      if (path === "/status" && request.method === "GET") return json({ ...await backupStatus(env.BACKUPS, clock()), email: await backupEmailStatus(env) });
       if (path !== "/daily" || request.method !== "POST") return json({ error: "Not found." }, 404);
       if (Number(request.headers.get("content-length") ?? 0) > 2048) return json({ error: "Invalid request." }, 413);
       const text = await request.text(); if (text.length > 2048) return json({ error: "Invalid request." }, 413);
@@ -135,14 +132,14 @@ export function createBackupWorker(env, clock = Date.now) {
       if (Object.keys(body).sort().join(",") !== "AUTH_PRIVATE_FIELD_KEY,AUTH_RATE_LIMIT_SECRET") return json({ error: "Invalid request." }, 400);
       dailyAccepted = true;
       const result = await runDueBackup(env, checkSecrets(body), { now: clock() });
-      await recordBackupAlerts(env.BACKUPS, clock());
+      await monitorBackup(env, clock());
       return json(result, result.failed ? 503 : 200);
     } catch {
       if (dailyAccepted) {
         try {
           const now = clock();
           await setStatus(env.BACKUPS, { at: new Date(now).toISOString(), state: "failed", localDay: backupCalendar(now).day, category: "completion" }, null);
-          await recordBackupAlerts(env.BACKUPS, now);
+          await monitorBackup(env, now);
         } catch { /* The app shows monitoring unavailable if storage cannot be read. */ }
       }
       return json({ error: "Backup service is temporarily unavailable." }, 503);

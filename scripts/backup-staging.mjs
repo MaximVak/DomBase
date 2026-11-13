@@ -14,12 +14,17 @@ const keyFile = resolve(projectRoot, ".wrangler/backup-keys/staging-recovery.jso
 const [action, ...args] = process.argv.slice(2);
 if (!["configure", "deploy", "status", "verify"].includes(action) || action !== "verify" && args.length || action === "verify" && (args.length !== 2 || args[0] !== "--day" || !/^\d{4}-\d{2}-\d{2}$/.test(args[1]))) throw new Error("Use configure, deploy or status without overrides; verify requires --day YYYY-MM-DD. No restore target or account overrides.");
 const app = await readStagingConfig();
+const { backupEmailConfigBlock } = await import("../backup/email-config.mjs");
+let emailConfig = {};
+try { emailConfig = backupEmailConfigBlock(JSON.parse(await readFile(configFile, "utf8"))); }
+catch (error) { if (error.code !== "ENOENT") throw error; }
 const expected = {
   $schema: "./node_modules/wrangler/config-schema.json", name: stagingBackupName, account_id: stagingAccount,
   main: "./backup/worker.mjs", compatibility_date: "2026-05-15", compatibility_flags: ["nodejs_compat"], workers_dev: false, preview_urls: false,
   d1_databases: app.d1_databases,
   r2_buckets: [{ binding: "FILES", bucket_name: stagingBucket }, { binding: "BACKUPS", bucket_name: stagingBackupName }],
   limits: { cpu_ms: 30000 }, observability: { enabled: true },
+  ...emailConfig,
 };
 async function validateRecovery(recovery) {
   if (recovery?.version !== 1 || !recovery.privateKey?.d || publicFingerprint(recovery.publicKey) !== recovery.fingerprint || recovery.privateKey.n !== recovery.publicKey.n) throw new Error("Invalid recovery key file; it was not replaced.");

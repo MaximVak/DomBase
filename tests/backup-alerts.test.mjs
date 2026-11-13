@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import React from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
+import {backupEmailConfigBlock} from '../backup/email-config.mjs';
 import {nextBackupAlerts, expectedBackupDay} from '../backup/alerts.mjs';
 import {loadServerModule} from '../scripts/server-runtime.mjs';
 const {backupNotice}=await loadServerModule('backup/notice.ts');
@@ -62,4 +63,18 @@ test('a fresh validation of the completed daily archive clears a temporary confi
  const alerts=nextBackupAlerts(state,at('2026-11-12T11:00:01Z'));assert.equal(alerts.active.kind,'failed');
  const next=nextBackupAlerts({...state,alerts,lastSuccessConfirmedAt:'2026-11-12T11:01:00Z',lastAttempt:{...state.lastAttempt,state:'succeeded'}},at('2026-11-12T11:01:01Z'));
  assert.equal(next.active,null);assert.equal(next.lastRecovery.incidentId,alerts.active.id);
+});
+
+
+test('email deployment validates one fixed recipient and requires an explicit sender before enabling its binding',()=>{
+ assert.deepEqual(backupEmailConfigBlock({}),{});
+ assert.deepEqual(backupEmailConfigBlock({vars:{BACKUP_ALERT_TO:'ops@example.test'}}),{vars:{BACKUP_ALERT_TO:'ops@example.test'}});
+ const vars={BACKUP_ALERT_TO:'ops@example.test',BACKUP_ALERT_FROM:'backup@example.test'};
+ assert.deepEqual(backupEmailConfigBlock({vars,send_email:[{name:'BACKUP_EMAIL',destination_address:'ops@example.test'}]}),{vars,send_email:[{name:'BACKUP_EMAIL',destination_address:'ops@example.test'}]});
+ assert.throws(()=>backupEmailConfigBlock({vars:{BACKUP_ALERT_TO:'a@example.test\r\nBcc:other@example.test'}}));
+ assert.throws(()=>backupEmailConfigBlock({vars:{BACKUP_ALERT_TO:'ops@example.test\n'}}));
+ assert.throws(()=>backupEmailConfigBlock({vars:{...vars,ARBITRARY_SECRET:'no'}}));
+ assert.throws(()=>backupEmailConfigBlock({vars,send_email:[{name:'BACKUP_EMAIL'}]}));
+ assert.throws(()=>backupEmailConfigBlock({vars,send_email:[{name:'BACKUP_EMAIL',destination_address:'other@example.test'}]}));
+ assert.throws(()=>backupEmailConfigBlock({vars:{BACKUP_ALERT_TO:'ops@example.test'},send_email:[{name:'BACKUP_EMAIL',destination_address:'ops@example.test'}]}));
 });

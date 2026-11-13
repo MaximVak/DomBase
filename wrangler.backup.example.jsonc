@@ -32,5 +32,8 @@
   },
   "observability": {
     "enabled": true
+  },
+  "vars": {
+    "BACKUP_ALERT_TO": "ops@example.com"
   }
 }
