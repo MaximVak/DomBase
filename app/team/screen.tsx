@@ -14,7 +14,7 @@ export function TeamScreen() {
   useEffect(() => { mounted.current = true; void reload().catch(e => { if (mounted.current) setError(e.message); }); return () => { mounted.current = false; }; }, [reload]);
   async function save(operation: string, values: unknown) {
     if (!data || saving.current || blocked) return false; saving.current = true; setBusy(true); setError(""); setNotice(""); let committed = false;
-    try { await teamRequest("commit", { id: saveId(), revision: data.revision, operation, data: values }); committed = true; setNotice("Saved to the local database."); await reload(); return true; }
+    try { await teamRequest("commit", { id: saveId(), revision: data.revision, operation, data: values }); committed = true; setNotice("Changes saved."); await reload(); return true; }
     catch (e) { setBlocked(true); setError(committed ? "Saved, but the latest team could not load. Reload before making another change." : e instanceof Error ? e.message : "Could not confirm the save. Reload before continuing."); return committed; }
     finally { saving.current = false; if (mounted.current) setBusy(false); }
   }
