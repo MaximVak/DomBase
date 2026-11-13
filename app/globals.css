@@ -11090,6 +11090,24 @@ button[aria-label^="Remove"]:focus-visible,
 .retired-records-toggle input[type="checkbox"] { width: 20px; min-height: 20px; flex: 0 0 20px; margin: 0; }
 .team-screen button.team-primary { border-color: var(--blue-accent); background: var(--blue-accent); color: #fff; font-weight: 800; padding-inline: 20px; }
 .team-screen button.team-primary:disabled { opacity: .55; cursor: not-allowed; }
+
+.employee-schedule-screen { max-width: 960px; }
+.employee-week-toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; padding-block: 12px; border-block: 1px solid var(--line); }
+.employee-week-toolbar label { flex: 1 1 180px; }
+.employee-week-toolbar button { margin-block: 8px; }
+.employee-schedule-context { color: var(--muted); overflow-wrap: anywhere; }
+.employee-schedule-days { margin-top: 24px; }
+.employee-schedule-day { display: grid; grid-template-columns: minmax(160px, 1fr) 3fr; gap: 24px; padding-block: 20px; border-top: 1px solid var(--line); }
+.employee-schedule-day h3 { margin: 0; }
+.employee-schedule-day h3 span { display: block; margin-top: 8px; color: var(--blue-deep); font-size: .875rem; }
+.employee-schedule-day ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; }
+.employee-schedule-day li { display: grid; gap: 6px; border-left: 3px solid var(--blue-accent); padding: 8px 16px; background: var(--panel); overflow-wrap: anywhere; }
+.employee-schedule-day p { margin: 0; color: var(--muted); }
+@media (max-width: 600px) {
+  .employee-schedule-day { grid-template-columns: 1fr; gap: 12px; }
+  .employee-week-toolbar > button { flex: 1 1 auto; }
+  .employee-week-toolbar label { order: -1; flex-basis: 100%; }
+}
 .roster-table.without-wages { min-width: 1000px; }
 .roster-table.without-wages .roster-header,
 .roster-table.without-wages .roster-row { grid-template-columns: minmax(180px, 1.25fr) minmax(200px, 1.35fr) minmax(100px, .7fr) minmax(120px, .8fr) minmax(130px, .9fr) 90px 84px; }
