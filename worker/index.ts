@@ -9,8 +9,10 @@ import { cleanupDocumentUploads } from "../documents/maintenance";
 import { scheduleHostedBackup } from "../backup/schedule";
 import type { BackupScheduleEnv } from "../backup/schedule";
 import type { DocumentBucket } from "../documents/types";
+import { dispatchInvitationEmails } from "../team/email";
+import type { InvitationEmailEnv } from "../team/email";
 
-interface Env extends BackupScheduleEnv {
+interface Env extends BackupScheduleEnv, InvitationEmailEnv {
   ASSETS: Fetcher;
   DB: D1Database;
   FILES?: DocumentBucket;
@@ -38,6 +40,7 @@ const worker = {
   async scheduled(_event: unknown, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil(scheduleHostedBackup(env));
     const db = drizzle(env.DB, { schema });
+    ctx.waitUntil(dispatchInvitationEmails(db, env).catch(() => { console.error("Invitation email queue is temporarily unavailable."); }));
     ctx.waitUntil(runScheduledMaintenance(db).then(recorded => {
       // Scheduled-only, non-personal evidence that background work ran without a browser.
       console.info("Scheduled workforce maintenance complete", { recorded });

@@ -56,7 +56,7 @@ test("hosted daily calendar follows Pacific days and DST, including the skipped 
 test("hosted encrypted daily backup restores exact DB/files/keys and leaves live access unchanged", { timeout: 120000 }, async t => {
   const f = await fixture(t);
   assert.equal((await runDueBackup(f.env, secrets, { now: Date.parse("2026-11-10T09:00:00Z") })).reason, "before daily start");
-  const first = await runDueBackup(f.env, secrets, { now }); assert.equal(first.completed, true); assert.equal(first.objects, 3); assert.equal(first.tables, 62);
+  const first = await runDueBackup(f.env, secrets, { now }); assert.equal(first.completed, true); assert.equal(first.objects, 3); assert.equal(first.tables, 63);
   const receipt = await f.completion("2026-11-10"); assert.equal(receipt.fingerprint, publicFingerprint(publicKey));
   assert.equal(JSON.stringify(receipt).includes(secrets.AUTH_RATE_LIMIT_SECRET), false); assert.equal(JSON.stringify(receipt).includes("fictional.pdf"), false);
   assert.equal((await runDueBackup(f.env, secrets, { now: now + 60000 })).reason, "already completed");

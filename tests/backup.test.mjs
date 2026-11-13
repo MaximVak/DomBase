@@ -50,6 +50,7 @@ test("encrypted local backups restore all D1 data, protected files and private-f
   await db.update(s.teamSettings).set({ payPeriod: "biweekly" }).where(eq(s.teamSettings.id, 1));
   await db.insert(s.employeeProfiles).values({ employeeId: 900001, ssnEncrypted: encryptSsn("000-34-5678", 900001, secrets.AUTH_PRIVATE_FIELD_KEY) });
   await db.insert(s.clockEvents).values({ employeeId: 900002, eventType: "in", occurredAt: "2026-11-02T17:00:00.000Z", roleName: "Demo Sales Associate", source: "system" });
+  await db.insert(s.invitationEmails).values({ invitationId, state: "pending", nextAttemptAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
   const pendingSetup = await issueSetupToken(db, { email: "pending-backup@example.test", displayName: "Pending recovery fixture", accessLevel: "manager" });
   const deviceToken = newToken(), personToken = newToken(), approvalToken = newToken(); const expires = new Date(Date.now() + 3600000).toISOString();
   await db.insert(s.kioskDevices).values({ id: "backup-fixture-device", name: "Backup fixture tablet", registeredByAccountId: owner.id });
@@ -67,7 +68,7 @@ test("encrypted local backups restore all D1 data, protected files and private-f
     backup = await createBackup({ database: source.env.DB, bucket: source.env.FILES, secrets, directory, key });
     const bytes = await readFile(backup.file); assert.equal(bytes.includes(Buffer.from(email)), false); assert.equal(bytes.includes(Buffer.from("scrypt$16384")), false); assert.equal(bytes.includes(certificate.bytes), false); assert.equal(bytes.includes(Buffer.from(secrets.AUTH_RATE_LIMIT_SECRET)), false);
     assert.equal((await stat(backup.file)).mode & 0o777, 0o600); assert.equal((await stat(keyPath)).mode & 0o777, 0o600); assert.equal((await stat(directory)).mode & 0o777, 0o700);
-    payload = await readBackup(backup.file, key); assert.equal(payload.snapshot.tables.length, 63); assert.equal(payload.objects.length, 4); assert.equal(payload.secrets.AUTH_PRIVATE_FIELD_KEY, secrets.AUTH_PRIVATE_FIELD_KEY);
+    payload = await readBackup(backup.file, key); assert.equal(payload.snapshot.tables.length, 64); assert.equal(payload.objects.length, 4); assert.equal(payload.secrets.AUTH_PRIVATE_FIELD_KEY, secrets.AUTH_PRIVATE_FIELD_KEY);
     assert.equal(await containedBackup(backup.file, directory), backup.file);
   });
   await t.test("wrong key, damaged ciphertext, loose permissions and external paths are rejected", async () => {
@@ -90,7 +91,7 @@ test("encrypted local backups restore all D1 data, protected files and private-f
   await t.test("fresh isolated D1/R2 restores all table contents, migrations, sequences, indexes and triggers", async () => {
     destination = await open(destinationPath);
     const result = await restoreIntoEmpty({ database: destination.env.DB, bucket: destination.env.FILES, payload });
-    assert.deepEqual(result, { tables: 62, migrations: 11, objects: 4, exactDatabase: true, exactFiles: true });
+    assert.deepEqual(result, { tables: 63, migrations: 12, objects: 4, exactDatabase: true, exactFiles: true });
     await assert.rejects(destination.env.DB.prepare("UPDATE clock_events SET event_type=event_type").run());
     await assert.rejects(destination.env.DB.prepare("UPDATE audit_log SET action=action").run());
     await assert.rejects(destination.env.DB.prepare("UPDATE wage_rates SET amount_cents=amount_cents").run());
@@ -100,6 +101,11 @@ test("encrypted local backups restore all D1 data, protected files and private-f
   await t.test("recovery revokes all old contexts while preserving passwords, files and immutable history", async () => {
     await invalidateRecoveredAccess(destination.env.DB); const recovered = drizzle(destination.env.DB, { schema: s });
     assert.ok((await recovered.select().from(s.teamInvitations))[0].revokedAt);
+    const { dispatchInvitationEmails } = await loadServerModule("team/email.ts");
+    let sends = 0;
+    await dispatchInvitationEmails(recovered, { AUTH_PRIVATE_FIELD_KEY: payload.secrets.AUTH_PRIVATE_FIELD_KEY, INVITATION_EMAIL_FROM: "invites@example.test", INVITATION_EMAIL_REPLY_TO: "ops@example.test", INVITATION_EMAIL_ORIGIN: "https://app.example.test", INVITATION_EMAIL: { send: async () => { sends++; return { messageId: "must-not-send" }; } } });
+    assert.equal(sends, 0);
+    assert.equal((await recovered.select().from(s.invitationEmails))[0].state, "cancelled");
     assert.equal((await recovered.select().from(s.recognitionPreferences))[0].shareBirthday, true);
     assert.equal((await recovered.select().from(s.teamShoutouts))[0].body, "Fictional preserved recognition");
     assert.equal((await recovered.select().from(s.shoutoutModeration))[0].shoutoutId, recognitionId);

@@ -46,6 +46,8 @@ export async function readStagingConfig() {
     || JSON.stringify(config.d1_databases) !== JSON.stringify(expected.d1_databases)
     || JSON.stringify(config.assets) !== JSON.stringify(expected.assets)
     || !config.compatibility_flags?.includes("nodejs_compat")) throw new Error("Staging bindings differ from the approved target.");
+  const { invitationEmailConfigBlock } = await import("../team/email-config.mjs");
+  invitationEmailConfigBlock(config);
   return config;
 }
 
@@ -119,7 +121,9 @@ async function main() {
       || config.d1_databases?.[0]?.database_id !== intended.d1_databases[0].database_id
       || JSON.stringify(config.triggers?.crons ?? []) !== JSON.stringify(intended.triggers?.crons ?? [])
       || JSON.stringify(config.r2_buckets ?? []) !== JSON.stringify(intended.r2_buckets ?? [])
-      || JSON.stringify(config.services ?? []) !== JSON.stringify(intended.services ?? [])) throw new Error("Build the staging target before deploying; the current build targets a different environment.");
+      || JSON.stringify(config.services ?? []) !== JSON.stringify(intended.services ?? [])
+      || JSON.stringify(config.vars ?? {}) !== JSON.stringify(intended.vars ?? {})
+      || JSON.stringify(config.send_email ?? []) !== JSON.stringify(intended.send_email ?? [])) throw new Error("Build the staging target before deploying; the current build targets a different environment.");
     if ((await environmentCopies(resolve(projectRoot, "dist"))).length) throw new Error("Run build:staging to remove local environment copies before deployment.");
     await wrangler(["deploy", "--config", built]);
   } else if (action === "secret") {

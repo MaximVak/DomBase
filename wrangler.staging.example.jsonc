@@ -27,6 +27,14 @@
       "bucket_name": "dombase-staging-files"
     }
   ],
+  // Optional invitation email delivery: use an onboarded sender domain.
+  // Keep actual deployment addresses in the ignored private configuration.
+  "vars": {
+    "INVITATION_EMAIL_FROM": "invites@example.com",
+    "INVITATION_EMAIL_REPLY_TO": "ops@example.com",
+    "INVITATION_EMAIL_ORIGIN": "https://your-staging.example.com"
+  },
+  "send_email": [{ "name": "INVITATION_EMAIL", "allowed_sender_addresses": ["invites@example.com"] }],
   "triggers": {
     "crons": [
       "* * * * *"

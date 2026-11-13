@@ -787,6 +787,19 @@ export const teamInvitations = sqliteTable("team_invitations", {
   ...timestamps(),
 }, t => [uniqueIndex("team_invitations_token_idx").on(t.tokenHash), index("team_invitations_employee_idx").on(t.employeeId), check("team_invitations_channel_check", sql`${t.channel} IN ('email', 'sms')`)]);
 
+// Durable transactional outbox. Only invitations created after activation enter it.
+export const invitationEmails = sqliteTable("invitation_emails", {
+  invitationId: text("invitation_id").primaryKey().references(() => teamInvitations.id),
+  state: text("state", { enum: ["pending", "sending", "accepted", "failed", "cancelled"] }).notNull().default("pending"),
+  attempts: integer("attempts").notNull().default(0),
+  leaseToken: text("lease_token"), leaseUntil: text("lease_until"),
+  nextAttemptAt: text("next_attempt_at").notNull(),
+  acceptedAt: text("accepted_at"),
+  updatedAt: text("updated_at").notNull(),
+}, t => [index("invitation_emails_due_idx").on(t.state, t.nextAttemptAt),
+  check("invitation_emails_state_check", sql`${t.state} IN ('pending','sending','accepted','failed','cancelled')`),
+  check("invitation_emails_attempts_check", sql`${t.attempts} >= 0 AND ${t.attempts} <= 4`)]);
+
 // Optional Stage 1 P2: consent and immutable employee recognition.
 export const recognitionPreferences = sqliteTable("recognition_preferences", {
   employeeId: integer("employee_id").primaryKey().references(() => employees.id),

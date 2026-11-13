@@ -78,6 +78,13 @@
       "when": 1793860924061,
       "tag": "0010_silky_baron_strucker",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1794549870163,
+      "tag": "0011_invitation_email",
+      "breakpoints": true
     }
   ]
 }

@@ -3,7 +3,7 @@ import { createTeamInsights } from "./insights";
 import { requireOtherEmployee } from "../workforce/self-edit";
 import { eq, sql } from "drizzle-orm";
 import * as s from "../db/schema";
-import { AuthError, json, readAuthBody } from "../auth/http";
+import { AuthError, isLoopback, json, readAuthBody } from "../auth/http";
 import { newToken, rateKey } from "../auth/crypto";
 import type { createAccessService } from "../access/service";
 import type { Database } from "../workforce/context";
@@ -15,7 +15,9 @@ import { canonical, newRecordId } from "../workforce/contract";
 import * as v from "../workforce/validation";
 import { invitation, localInbox } from "./invitations";
 import { periodFor, tenure, terminationReasons, normalizePhone } from "./rules";
-export function createTeamService(db: Database, access: ReturnType<typeof createAccessService>, options: { secret: string; fieldKey: string; now?: () => number }) {
+import { attemptBudget } from "../kiosk/security";
+import { validEmail } from "../backup/email-config.mjs";
+export function createTeamService(db: Database, access: ReturnType<typeof createAccessService>, options: { secret: string; fieldKey: string; now?: () => number; emailEnabled?: boolean }) {
   const now = options.now ?? Date.now;
   async function handle(request: Request) {
     try {
@@ -23,15 +25,18 @@ export function createTeamService(db: Database, access: ReturnType<typeof create
       const ctx = await access.workspaceContext(request); ctx.requirePermission("team.read");
       const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit" }).format(now());
       const path = new URL(request.url).pathname.slice("/api/team/".length);
+      const local = isLoopback(new URL(request.url).hostname);
       if (path === "inbox" && request.method === "GET") return json(await localInbox(db, ctx, request, options.fieldKey, now()));
       const view = await workspaceSnapshot(db, ctx, options.fieldKey, requestPeriod(new URL(request.url), now()));
       const roles = await db.select().from(s.roles);
       const [config] = await db.select().from(s.teamSettings);
       const settings = config ?? { id: 1, payPeriod: "weekly" as const, anchorDate: "2026-11-02", version: 1 };
       if (path === "state" && request.method === "GET") {
-        const invites = ctx.permissions["team.invite"] ? await db.select({ id: s.teamInvitations.id, employeeId: s.teamInvitations.employeeId, channel: s.teamInvitations.channel,
-          expiresAt: s.teamInvitations.expiresAt, usedAt: s.teamInvitations.usedAt, revokedAt: s.teamInvitations.revokedAt }).from(s.teamInvitations).where(ctx.employeeFilter(s.teamInvitations.employeeId)).limit(500) : [];
-        return json({ revision: view.revision, permissions: ctx.permissions, allDepartments: ctx.allDepartments, settings, currentPeriod: periodFor(today, settings.payPeriod, settings.anchorDate), today,
+        const invites = ctx.permissions["team.invite"] && ctx.permissions["team.contact.read"] ? await db.select({ id: s.teamInvitations.id, employeeId: s.teamInvitations.employeeId, channel: s.teamInvitations.channel,
+          expiresAt: s.teamInvitations.expiresAt, usedAt: s.teamInvitations.usedAt, revokedAt: s.teamInvitations.revokedAt,
+          deliveryState: s.invitationEmails.state, attempts: s.invitationEmails.attempts, acceptedAt: s.invitationEmails.acceptedAt, nextAttemptAt: s.invitationEmails.nextAttemptAt })
+          .from(s.teamInvitations).leftJoin(s.invitationEmails, eq(s.invitationEmails.invitationId, s.teamInvitations.id)).where(ctx.employeeFilter(s.teamInvitations.employeeId)).orderBy(sql`${s.teamInvitations.createdAt} DESC`, sql`${s.teamInvitations.id} DESC`).limit(500) : [];
+        return json({ revision: view.revision, permissions: ctx.permissions, allDepartments: ctx.allDepartments, delivery: { emailEnabled: Boolean(options.emailEnabled), localCapture: local, smsEnabled: false }, settings, currentPeriod: periodFor(today, settings.payPeriod, settings.anchorDate), today,
           departments: view.state.departments, roles: roles.filter(role => !role.archived && (ctx.allDepartments || ctx.departmentIds.includes(role.departmentId ?? -1))).map(role => ({ id: role.id, name: role.name, departmentId: role.departmentId })),
           shifts: view.state.shifts, employees: view.state.employees.map(e => ({ id: e.id, version: view.employeeVersions[e.id], name: e.name, email: e.email, phone: e.phone,
             startDate: e.startDate, tenure: tenure(e.startDate, today), payrollId: e.payrollId, active: e.active, terminated: e.terminated, terminationDate: e.terminationDate,
@@ -60,6 +65,17 @@ export function createTeamService(db: Database, access: ReturnType<typeof create
         ctx.requirePermission("team.invite"); ctx.requirePermission("team.contact.read");
         if (await db.get(sql`SELECT 1 FROM accounts WHERE employee_id = ${id}`)) throw new AuthError(409, "An account already exists. Use Account access for initial setup or sign in.");
       }
+      async function queueInvitation(id: number, channel: "email" | "sms", recipient: string) {
+        ctx.requirePermission("team.invite"); ctx.requirePermission("team.contact.read");
+        if (channel === "email" && !validEmail(recipient)) throw new AuthError(400, "Use a valid email address.");
+        if (!local && (channel === "sms" || !options.emailEnabled)) throw new AuthError(400, channel === "sms" ? "SMS invitations are not connected. Use email." : "Email invitations are not connected. Add without an invitation for now.");
+        if (channel === "email" && await db.get(sql`SELECT 1 FROM accounts WHERE normalized_email = ${recipient.toLowerCase()}`)) throw new AuthError(409, "This sign-in email already has an account. Use Account access or another email.");
+        try {
+          await attemptBudget(db, options.secret, `team-invite-account:${ctx.account.id}`, 100, now());
+          await attemptBudget(db, options.secret, `team-invite-person:${id}`, 5, now());
+        } catch (error) { if (error instanceof AuthError && error.status === 429) throw new AuthError(429, "Too many invitations. Wait 15 minutes before trying again."); throw error; }
+        invitation(tx, id, channel, recipient, options.fieldKey, now(), ctx.version, Boolean(options.emailEnabled));
+      }
       if (operation === "bulk") {
         ctx.requirePermission("team.manage"); v.keys(data, ["rows"]); const rows = v.list(data.rows, 50);
         if (!rows.length) throw new AuthError(400, "Add at least one employee.");
@@ -73,7 +89,7 @@ export function createTeamService(db: Database, access: ReturnType<typeof create
           const role = job(row.roleId); const id = newRecordId();
           tx.insert(s.employees, { id, name, email, phone, pinHash: `unenrolled:${newToken()}`, roleId: role.id, active: true, startDate: row.startDate ? v.date(row.startDate) : today });
           tx.insert(s.employeeRoles, { employeeId: id, roleId: role.id, active: true });
-          if (row.channel) { ctx.requirePermission("team.invite"); const channel = v.oneOf(row.channel, ["email", "sms"]); const recipient = channel === "email" ? email : phone; if (!recipient) throw new AuthError(400, "Choose a channel with a contact value."); invitation(tx, id, channel, recipient, options.fieldKey, now(), ctx.version); }
+          if (row.channel) { const channel = v.oneOf(row.channel, ["email", "sms"]); const recipient = channel === "email" ? email : phone; if (!recipient) throw new AuthError(400, "Choose a channel with a contact value."); await queueInvitation(id, channel, recipient); }
         }
       } else if (operation === "settings") {
         ctx.requirePermission("settings.manage"); if (!ctx.allDepartments) throw new AuthError(403, "Company-wide settings require company-wide access.");
@@ -89,7 +105,7 @@ export function createTeamService(db: Database, access: ReturnType<typeof create
           if (!e.active || e.terminated) throw new AuthError(400, "Invite an active employee.");
           const channel = v.oneOf(data.channel, ["email", "sms"]); const recipient = channel === "email" ? e.email : normalizePhone(e.phone);
           if (!recipient) throw new AuthError(400, "Add the contact value before inviting.");
-          invitation(tx, e.id, channel, recipient, options.fieldKey, now(), ctx.version);
+          await queueInvitation(e.id, channel, recipient);
         } else if (operation === "jobs") {
           ctx.requirePermission("team.manage"); v.keys(data, ["employeeId", "version", "roleIds"]);
           const selected = v.list(data.roleIds, 30).map(job); if (!selected.length || new Set(selected.map(r => r.id)).size !== selected.length) throw new AuthError(400, "Choose unique jobs and a primary job.");
