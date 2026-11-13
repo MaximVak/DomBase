@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { permissionCatalog } from "../access/policy";
 import type { PermissionMap } from "../access/policy";
 import { accessRequest as request, roleName } from "./account-access-client";
@@ -11,6 +11,7 @@ import { AccountSetupLink } from "./account-setup-link";
 type Mine = { permissions: PermissionMap; canManageAccess: boolean; allDepartments: boolean };
 
 export function TeamPermissionsPanel() {
+  const permissionIdPrefix = useId();
   const [mine, setMine] = useState<Mine | null>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -127,8 +128,8 @@ export function TeamPermissionsPanel() {
     {shownPermissions && !creating ? <div className="permissions-table-scroll"><table className="team-permissions-table">
       <thead><tr><th scope="col">Permission</th><th scope="col">Allowed</th></tr></thead>
       <tbody>{permissionCatalog.map(permission => <tr key={permission.id}>
-        <th scope="row" id={`permission-${permission.id}`}>{permission.label}</th>
-        <td><input type="checkbox" checked={shownPermissions[permission.id]} disabled={!editable || saving} aria-labelledby={`permission-${permission.id}`} onChange={event => {
+        <th scope="row"><label htmlFor={`${permissionIdPrefix}-${permission.id}`}>{permission.label}</label></th>
+        <td><input id={`${permissionIdPrefix}-${permission.id}`} type="checkbox" checked={shownPermissions[permission.id]} disabled={!editable || saving} onChange={event => {
           const checked = event.target.checked;
           setDraft(current => current ? { ...current, permissions: { ...current.permissions, [permission.id]: checked } } : current);
         }} /></td>
