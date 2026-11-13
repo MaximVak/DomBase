@@ -16,6 +16,7 @@ export function TeamPermissionsPanel() {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [employees, setEmployees] = useState<EmployeeLink[]>([]);
   const [creating, setCreating] = useState(false);
+  const [showDisabled, setShowDisabled] = useState(false);
   const [selectedId, setSelectedId] = useState(0);
   const [draft, setDraft] = useState<Access | null>(null);
   const [saving, setSaving] = useState(false);
@@ -38,7 +39,8 @@ export function TeamPermissionsPanel() {
         setAccounts(result.accounts);
         setDepartments(result.departments);
         setEmployees(result.employees);
-        setSelectedId(id => result.accounts.some(account => account.id === id) ? id : (result.accounts.find(account => account.accessLevel === "manager")?.id ?? result.accounts[0]?.id ?? 0));
+        const visible = result.accounts.filter(account => showDisabled || !account.disabledAt);
+        setSelectedId(id => visible.some(account => account.id === id) ? id : (visible.find(account => account.accessLevel === "manager")?.id ?? visible[0]?.id ?? 0));
       }
       setLoading(false);
     }
@@ -48,7 +50,7 @@ export function TeamPermissionsPanel() {
       setLoading(false);
     });
     return () => controller.abort();
-  }, [reload]);
+  }, [reload, showDisabled]);
 
   useEffect(() => {
     if (!selectedId || !mine?.canManageAccess) return;
@@ -65,11 +67,13 @@ export function TeamPermissionsPanel() {
     return () => controller.abort();
   }, [selectedId, mine?.canManageAccess, reload]);
 
-  const editable = Boolean(mine?.canManageAccess && draft && ["manager", "general_manager"].includes(draft.account.accessLevel) && draft.account.id === selectedId);
+  const visibleAccounts = accounts.filter(account => showDisabled || !account.disabledAt);
+  const editable = Boolean(!loading && mine?.canManageAccess && draft && ["manager", "general_manager"].includes(draft.account.accessLevel) && draft.account.id === selectedId);
   const shownPermissions = mine?.canManageAccess ? draft?.permissions : mine?.permissions;
 
   function accountSaved(updated: Access) {
     setAccounts(current => current.some(a => a.id === updated.account.id) ? current.map(a => a.id === updated.account.id ? updated.account : a) : [...current, updated.account]);
+    if (updated.account.disabledAt) setShowDisabled(true);
     setDraft(updated); setSelectedId(updated.account.id); setCreating(false); setError("");
     setMessage("Account saved. Existing sign-ins have ended. Review permissions below before handing over access.");
   }
@@ -102,12 +106,13 @@ export function TeamPermissionsPanel() {
     {!loading && mine?.canManageAccess ? <>
       <button type="button" disabled={saving} onClick={() => { setCreating(value => !value); setMessage(""); }}>{creating ? "Close new account form" : "Add account"}</button>
       {creating ? <AccountLifecycleForm departments={departments} employees={employees.filter(e => !accounts.some(a => a.employeeId === e.id))} busy={saving} onBusy={setSaving} onSaved={accountSaved} onCancel={() => setCreating(false)} /> : null}
+      <label className="retired-records-toggle"><input type="checkbox" checked={showDisabled} disabled={saving || creating} onChange={event => setShowDisabled(event.target.checked)} />Show disabled accounts</label>
       <label className="permissions-account" htmlFor="permissions-account">Account
-        <select id="permissions-account" value={selectedId} disabled={saving || creating || !accounts.length} onChange={event => { setDraft(null); setMessage(""); setSelectedId(Number(event.target.value)); }}>
-          {accounts.map(account => <option key={account.id} value={account.id}>{account.displayName} — {roleName(account.accessLevel)} ({account.email})</option>)}
+        <select id="permissions-account" value={selectedId} disabled={saving || creating || !visibleAccounts.length} onChange={event => { setDraft(null); setMessage(""); setSelectedId(Number(event.target.value)); }}>
+          {visibleAccounts.map(account => <option key={account.id} value={account.id}>{account.displayName} — {roleName(account.accessLevel)} ({account.email})</option>)}
         </select>
       </label>
-      {!accounts.length ? <p>No accounts are available yet.</p> : null}
+      {!visibleAccounts.length ? <p>No active accounts are available. Show disabled accounts to review past access.</p> : null}
       {draft && !creating ? <>
         <p>{roleName(draft.account.accessLevel)}{draft.account.disabledAt ? " · Account disabled" : !draft.account.loginEnabled ? " · Password setup pending" : ""}</p>
         {draft.account.accessLevel === "owner" ? <p>Owners retain full account control. Their access cannot be reduced here.</p> : null}

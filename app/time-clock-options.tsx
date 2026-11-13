@@ -1,4 +1,4 @@
-import Link from "next/link";
+// Use native navigation to avoid the vinext RSC prefetch error.
 
 type TimeClockOptionsProps = {
   roundingMinutes: 5 | 10 | 15;
@@ -103,7 +103,7 @@ export function TimeClockOptionsPanel({ roundingMinutes, onLaunch }: TimeClockOp
         <div className="time-clock-option-content">
           <h4 id="tablet-clock-title">Tablet Time Clock</h4>
           <p>Register a shared tablet for employee PIN clock-in, clock-out and breaks. Manager approvals use a separate PIN.</p>
-          <Link className="time-clock-link" href="/kiosk-admin">Manage tablets and PINs</Link>
+          <a className="time-clock-link" href="/kiosk-admin">Manage tablets and PINs</a>
           <div className="time-clock-nested-options">
             <div>
               <PlaceholderCheckbox label="Unscheduled shift role selection" checked />

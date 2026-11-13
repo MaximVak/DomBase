@@ -28,7 +28,7 @@ visit(ast);
 function runtime(extra = {}) {
   const names = ["nextId", "lastWorkClockEvent", "shiftForClockEvent", "shiftStartDateTime", "shiftEndDateTime",
     "applyAutomaticClockOuts", "isAutomaticClockOut", "hasClockInForShift", "noShowAlertsFor", "needsTimeException",
-    "isWithinScheduledMinute", "workWeekCalendarDays", "hoursDateRange", "hoursDateLabel", "dateRangeForCalendarTab",
+    "isWithinScheduledMinute", "workWeekCalendarDays", "hoursDateRange", "hoursDateLabel", "dateRangeForCalendarTab", "shiftsForCalendarRange",
     "parseLocalDate", "startOfDay", "toDateInputValue", "shiftDateForWeekday", "shiftDatesForWeekdays",
     "formatShortDate", "formatLongDate", "formatMonthYear", "formatClockTime", "saveScheduleEnforcement",
     "saveAlertsPermissions", "publishSchedule", "applyScheduleDraft", "submitAvailabilityRequest", "saveEventsTrades", "saveScheduleEvent", "deleteScheduleEvent", "saveOvertime",
@@ -397,4 +397,23 @@ test("employee profiles can display missing or invalid optional start dates", ()
   assert.equal(context.formatShortDate(""), "—");
   assert.equal(context.formatShortDate("invalid"), "—");
   assert.match(context.formatShortDate("2026-11-02"), /Nov/);
+});
+
+
+test("Home upcoming shifts include today and each range's last day, respecting employee scope", () => {
+  const app = runtime();
+  const shifts = [
+    { id: 1, employeeId: 3, date: "2026-11-12" },
+    { id: 2, employeeId: 3, date: "2026-11-15" },
+    { id: 3, employeeId: 3, date: "2026-11-30" },
+    { id: 4, employeeId: 3, date: "2026-12-01" },
+    { id: 5, employeeId: 99, date: "2026-11-12" },
+    { id: 6, employeeId: 3, date: "2026-11-09" },
+    { id: 7, employeeId: 3, date: "2026-11-08" },
+  ];
+  const ids = tab => Array.from(app.shiftsForCalendarRange(shifts, new Set([3]), "2026-11-12", tab, 1), s => s.id);
+  assert.deepEqual(ids("today"), [1], "the manager's own shift must match today's summary");
+  assert.deepEqual(ids("week"), [1, 2, 6], "both Monday and Sunday belong to the visible week");
+  assert.deepEqual(ids("month"), [1, 2, 3, 6, 7], "last-day shifts belong to the visible month");
+  assert.equal(app.shiftsForCalendarRange(shifts, new Set(), "2026-11-12", "today").length, 0);
 });

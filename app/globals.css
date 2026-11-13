@@ -11084,3 +11084,22 @@ button[aria-label^="Remove"]:focus-visible,
   .p2-event-list li { break-inside: avoid; page-break-inside: avoid; }
   .team-p2 :is(h2,h3) { break-after: avoid; page-break-after: avoid; }
 }
+
+/* Keep retired records accessible without crowding the working lists. */
+.retired-records-toggle { display: flex; align-items: center; gap: 8px; margin-block: 12px; }
+.retired-records-toggle input[type="checkbox"] { width: 20px; min-height: 20px; flex: 0 0 20px; margin: 0; }
+.team-screen button.team-primary { border-color: var(--blue-accent); background: var(--blue-accent); color: #fff; font-weight: 800; padding-inline: 20px; }
+.team-screen button.team-primary:disabled { opacity: .55; cursor: not-allowed; }
+.roster-table.without-wages { min-width: 1000px; }
+.roster-table.without-wages .roster-header,
+.roster-table.without-wages .roster-row { grid-template-columns: minmax(180px, 1.25fr) minmax(200px, 1.35fr) minmax(100px, .7fr) minmax(120px, .8fr) minmax(130px, .9fr) 90px 84px; }
+/* Native modal supplies focus containment, Escape and focus restoration. */
+dialog.time-exception-modal { width: min(520px, calc(100% - 32px)); max-height: calc(100dvh - 32px); margin: auto; overflow-y: auto; }
+dialog.time-exception-modal::backdrop { background: rgba(7, 29, 58, .48); }
+body:has(dialog.time-exception-modal[open]) { overflow: hidden; }
+.time-exception-modal form { display: grid; gap: 10px; min-width: 0; }
+.time-exception-modal h2 { overflow-wrap: anywhere; }
+.time-exception-modal .time-exception-close { flex: 0 0 44px; width: 44px; height: 44px; min-width: 44px; min-height: 44px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink); font-size: 24px; }
+.time-exception-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
+.time-exception-actions button { min-height: 44px; border: 1px solid var(--line); border-radius: 6px; padding: 8px 16px; }
+.time-exception-actions button:disabled { opacity: .55; cursor: not-allowed; }

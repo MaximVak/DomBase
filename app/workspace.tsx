@@ -36,6 +36,8 @@ import type { DashboardAccount } from "../auth/types";
 import type { Mode, ViewId, CalendarTab, SettingsTab, BasicInfo, BasicInfoField, CompanyLocation, NewLocationDraft, EmployeeScheduleTab, HoursRoundingMinutes, HoursRounding, HoursDisplay, TeamMemberProfileTab, PayrollClassification, AccessLevel, EmployeeLocationSettings, EmploymentHistoryEvent, EmployeeCertificate, ManagerNote, PtoHistoryStatusFilter, TimeExceptionAction, Employee, Department, Shift, ClockEvent, OperationalAlert, HeaderNotification, ScheduleUpdateNotification, HoursAdjustment, PtoRequest, PtoPolicyMethod, PtoPolicy, PtoPolicyForm, TeamMessage, TeamConversation, ScheduleDraft, AvailabilityRequestSlot, AvailabilityRequest, StaffState } from "../workforce/model";
 export type { BasicInfo, Employee, StaffState } from "../workforce/model";
 
+import { TimeExceptionDialog } from "./time-exception-dialog";
+
 const timeExceptionExplanationLimit = 250;
 const automaticClockOutExplanation = "Automatically clocked out two hours after the scheduled shift ended.";
 const operationalAlertLookbackMs = 7 * 24 * 60 * 60 * 1000;
@@ -601,6 +603,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
   }, [isPtoHistoryEmployeeFilterOpen]);
 
   const activeEmployee = state.employees.find((employee) => employee.id === activeEmployeeId);
+  const canLaunchTimeClock = Boolean(activeEmployee?.active && !activeEmployee.terminated);
   const activeUserIsAdmin = account.accessLevel === "owner" || account.accessLevel === "general_manager";
   const activeAvailabilityRequest = [...(state.availabilityRequests ?? [])]
     .filter((request) => request.employeeId === activeEmployeeId)
@@ -2886,6 +2889,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
   }
 
   function requestTimeException(action: TimeExceptionAction) {
+    if (!canLaunchTimeClock) return;
     if (!needsTimeException(action, myShift, activeBreakEndTime, currentTime, scheduleEnforcement)) {
       if (action === "break_end") finishBreak();
       else clock(action);
@@ -3929,9 +3933,11 @@ export default function Home({ account }: { account: DashboardAccount }) {
                   <div className="clock-card">
                     <div>
                       <p className="eyebrow">{activeEmployee?.role ?? "Employee"}</p>
-                      <h3>{activeEmployee?.name ?? "Select employee"}</h3>
+                      <h3>{activeEmployee?.name ?? "No employee linked"}</h3>
                       <p>
-                        {activeIsClockedIn
+                        {!canLaunchTimeClock
+                          ? "A linked, active employee is required. Use the registered tablet to record time."
+                          : activeIsClockedIn
                           ? `Clocked in since ${formatDateTime(activeClockEvent?.at)}`
                           : "Currently clocked out"}
                       </p>
@@ -3971,6 +3977,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                         <button
                           type="button"
                           className={activeIsClockedIn ? "danger-action" : "primary-action"}
+                          disabled={!canLaunchTimeClock}
                           onClick={() => requestTimeException(activeIsClockedIn ? "out" : "in")}
                         >
                           {activeIsClockedIn ? "Clock out" : "Clock in"}
@@ -4821,7 +4828,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                     <span>Missing information</span>
                     <select value={rosterMissingFilter} onChange={(event) => { setRosterMissingFilter(event.target.value); setRosterActionEmployeeId(null); }}>
                       <option value="">--</option>
-                      <option value="wage">Wage rates</option>
+                      {shared.data.permissions["wages.read"] ? <option value="wage">Wage rates</option> : null}
                       <option value="contact">Contact information</option>
                       <option value="role">Role</option>
                       <option value="birth">Date of birth</option>
@@ -4829,14 +4836,14 @@ export default function Home({ account }: { account: DashboardAccount }) {
                   </label>
                 </div>
               <div className="roster-table-wrap">
-                <div className="roster-table" role="table" aria-label="Team roster">
+                <div className={`roster-table${shared.data.permissions["wages.read"] ? "" : " without-wages"}`} role="table" aria-label="Team roster">
                   <div className="roster-header" role="row">
                     <span role="columnheader">Team member</span>
                     <span role="columnheader">Contact information</span>
                     <span role="columnheader">Access level</span>
                     <span role="columnheader">Location</span>
                     <span role="columnheader">Role</span>
-                    <span role="columnheader">Wage</span>
+                    {shared.data.permissions["wages.read"] ? <span role="columnheader">Wage</span> : null}
                     <span role="columnheader">Status</span>
                     <span role="columnheader" aria-label="Actions" />
                   </div>
@@ -4864,7 +4871,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                         </div>
                         <div role="cell">{employee.location}</div>
                         <div role="cell">{employee.role}</div>
-                        <div role="cell">{employee.wage}</div>
+                        {shared.data.permissions["wages.read"] ? <div role="cell">{employee.wage}</div> : null}
                         <div
                           role="cell"
                           className={employee.active ? "roster-status active" : "roster-status"}
@@ -6849,32 +6856,10 @@ export default function Home({ account }: { account: DashboardAccount }) {
       ) : null}
 
       {pendingTimeException ? (
-        <div className="modal-backdrop" role="presentation">
-          <form className="time-exception-modal" onSubmit={submitTimeException} role="dialog" aria-modal="true" aria-labelledby="time-exception-title">
-            <div className="modal-heading">
-              <div>
-                <p className="eyebrow">Warning</p>
-                <h2 id="time-exception-title">Supervisor Approval Required</h2>
-              </div>
-            </div>
-            <p className="time-exception-warning">
-              {timeExceptionMessage} This is a warning and is subject for approval with the supervisor.
-            </p>
-            <textarea
-              value={timeExceptionExplanation}
-              onChange={(event) => setTimeExceptionExplanation(event.target.value)}
-              placeholder="Enter explanation"
-              aria-label="Time exception explanation"
-              maxLength={timeExceptionExplanationLimit}
-              required
-              autoFocus
-            />
-            <p className="character-count" aria-live="polite">
-              {timeExceptionExplanationLimit - timeExceptionExplanation.length} characters remaining
-            </p>
-            <button type="submit" disabled={!timeExceptionExplanation.trim()}>Submit explanation</button>
-          </form>
-        </div>
+        <TimeExceptionDialog message={timeExceptionMessage} explanation={timeExceptionExplanation}
+          limit={timeExceptionExplanationLimit} onExplanation={setTimeExceptionExplanation}
+          onCancel={() => { setPendingTimeException(null); setTimeExceptionExplanation(""); }}
+          onSubmit={submitTimeException} />
       ) : null}
     </main>
   );
@@ -7542,7 +7527,7 @@ function shiftsForCalendarRange(
   return shifts.filter((shift) => {
     if (!employeeIds.has(shift.employeeId)) return false;
 
-    const shiftDate = parseLocalDate(shift.date);
+    const shiftDate = startOfDay(parseLocalDate(shift.date));
     return shiftDate >= start && shiftDate <= end;
   });
 }

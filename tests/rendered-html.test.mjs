@@ -351,7 +351,7 @@ test("Roster includes complete team fields without placeholders for contact, loc
   assert.doesNotMatch(page, /phone: "To be added"/);
   assert.doesNotMatch(page, /location: "To be added"/);
   assert.doesNotMatch(page, /wage: "To be added"/);
-  assert.match(page, /className="roster-table"/);
+  assert.match(page, /roster-table\$\{shared\.data\.permissions\["wages\.read"\]/);
   assert.doesNotMatch(page, /localStorage/);
   assert.doesNotMatch(page, /<small>Email<\/small>/);
   assert.doesNotMatch(page, /<small>Phone number<\/small>/);
@@ -1084,7 +1084,7 @@ test("dismissible popups close from the backdrop while required forms stay prote
   assert.match(page, /dismissModalFromBackdrop\(event, \(\) => setReviewingPtoRequestId\(null\)\)/);
   assert.match(page, /\{ptoRequestForm \? \(\s*<div className="modal-backdrop" role="presentation">/);
   assert.match(page, /mode === "manager" && isAddingShift \? \(\s*<div className="modal-backdrop" role="presentation">/);
-  assert.match(page, /pendingTimeException \? \(\s*<div className="modal-backdrop" role="presentation">/);
+  assert.match(page, /pendingTimeException \? \(\s*<TimeExceptionDialog/);
 });
 
 test("manager settings includes a gear icon, copied tabs, and the basic info template", async () => {

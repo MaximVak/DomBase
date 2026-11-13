@@ -19,7 +19,11 @@ test("shared workforce operations persist, scope, audit and serialize actual D1 
   const { createAuthService, createAccessService, createWorkforceService, newToken, stateChanges, saveBody, encryptSsn, decryptSsn, runClockMaintenance, runScheduledMaintenance } = runtime;
   const secret = "isolated-workforce-test-secret-with-32-characters"; const password = "Shared workforce test password only!";
   let db; let auth; let access; let workspace;
-  function services() { db = drizzle(platform.env.DB, { schema }); auth = createAuthService(db, { secret }); access = createAccessService(db, auth); workspace = createWorkforceService(db, access, { secret, fieldKey }); }
+  function services() {
+    db = drizzle(platform.env.DB, { schema }); auth = createAuthService(db, { secret }); access = createAccessService(db, auth);
+    // Keep future/past shift assertions independent of the wall clock.
+    workspace = createWorkforceService(db, access, { secret, fieldKey, now: () => Date.parse("2026-11-10T20:00:00Z") });
+  }
   platform = await open(); services(); const f = await seedWorkforceFixture(db, schema, loadServerModule, password);
   const origin = "http://localhost:3000";
   const request = (service, path, cookie = "", body, headers = {}) => service.handle(new Request(origin + path, { method: body === undefined ? "GET" : "POST", headers: { Cookie: cookie, ...(body === undefined ? {} : { Origin: origin, "Content-Type": "application/json" }), ...headers }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) }));

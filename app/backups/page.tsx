@@ -1,4 +1,4 @@
-import Link from "next/link";
+/* eslint-disable @next/next/no-html-link-for-pages -- Native navigation avoids the vinext RSC prefetch error. */
 import { redirect } from "next/navigation";
 import { dashboardAccount } from "../../auth/server";
 import { ownerBackupStatus } from "../../backup/server";
@@ -13,7 +13,7 @@ export default async function Backups() {
   try { status = await ownerBackupStatus(); } catch { /* Visible unavailable state below. */ }
   const success = status?.lastSuccess; const failed = status?.lastAttempt?.state === "failed";
   return <main className="access-screen backup-screen">
-    <Link href="/">← Back to DomBase</Link>
+    <a href="/">← Back to DomBase</a>
     <header><h1>Backups</h1><p>Daily recovery protection · Owner access</p></header>
     {!status ? <p role="alert">Backup status is unavailable. Reload this page shortly. A missing daily backup needs attention.</p>
       : !status.configured ? <p role="status">Automatic hosted backups are not configured in this environment.</p>
@@ -32,7 +32,7 @@ export default async function Backups() {
           </dl> : <p>No completed backup has been recorded yet.</p>}
         </section>
         <section aria-labelledby="backup-recovery"><h2 id="backup-recovery">Recovery key</h2><p>Keep the separate recovery file in your password manager and share a private copy with the company Owner. The key is required to recover these backups and is never displayed here.</p><p>Recovery is tested in a separate environment. This page cannot overwrite company data or download private files.</p></section>
-        <Link href="/backups">Refresh backup status</Link>
+        <a href="/backups">Refresh backup status</a>
       </>}
   </main>;
 }

@@ -60,7 +60,7 @@ export function DepartmentManagerCell({ departmentId, name, control, saved = [] 
   const assigned = control.enabled
     ? control.accounts.filter(a => control.assignments.some(link => link.departmentId === departmentId && link.accountId === a.id)).map(a => ({ accountId: a.id, name: a.displayName, disabled: Boolean(a.disabledAt), setupPending: !a.loginEnabled }))
     : saved.filter(a => a.departmentId === departmentId);
-  const available = control.accounts.filter(a => !assigned.some(link => link.accountId === a.id));
+  const available = control.accounts.filter(a => !a.disabledAt && !assigned.some(link => link.accountId === a.id));
   const disabled = control.busy || control.loading || Boolean(control.error);
   const label = (a: { name: string; disabled: boolean; setupPending: boolean }) => `${a.name}${a.disabled ? " · Disabled" : a.setupPending ? " · Password setup pending" : ""}`;
   return <div className="department-manager-list" role="cell" aria-busy={control.enabled && (control.busy || control.loading)}>

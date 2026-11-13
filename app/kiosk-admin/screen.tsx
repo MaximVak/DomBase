@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
+/* eslint-disable @next/next/no-html-link-for-pages -- Native navigation avoids the vinext RSC prefetch error. */
 import { DeviceSettings } from "./device-settings";
 import type { ClockDevice } from "./device-settings";
 import { PinSettings } from "./pin-settings";
@@ -29,7 +29,7 @@ export function KioskAdminScreen() {
   }, [load]);
   function saved(message: string) { setNotice(message); void load(); }
   return <main className="kiosk-admin-screen">
-    <header><Link href="/">← Dashboard</Link><h1>Tablet &amp; PIN access</h1><p>Manage the shared clock separately from personal dashboard sign-in.</p></header>
+    <header><a href="/">← Dashboard</a><h1>Tablet &amp; PIN access</h1><p>Manage the shared clock separately from personal dashboard sign-in.</p></header>
     {loading ? <p role="status">Loading tablet settings…</p> : null}
     {notice ? <p className="kiosk-notice" role="status">{notice}</p> : null}
     {error ? <div><p className="kiosk-error" role="alert">{error}</p><button onClick={() => void load()}>Try again</button></div> : null}

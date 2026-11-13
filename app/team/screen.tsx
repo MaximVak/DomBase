@@ -18,11 +18,13 @@ export function TeamScreen() {
     catch (e) { setBlocked(true); setError(committed ? "Saved, but the latest team could not load. Reload before making another change." : e instanceof Error ? e.message : "Could not confirm the save. Reload before continuing."); return committed; }
     finally { saving.current = false; if (mounted.current) setBusy(false); }
   }
-  const person = data?.employees.find(e => e.id === selected);
+  const [showInactive, setShowInactive] = useState(false);
+  const visiblePeople = data?.employees.filter(e => showInactive || (e.active && !e.terminated)) ?? [];
+  const person = visiblePeople.find(e => e.id === selected);
   return <main className="team-screen"><header><div><a href="/">← Back to DomBase</a><h1>Team details</h1><p>People, jobs, wage history and invitations</p></div><nav className="team-actions" aria-label="Team tools"><a href="/access">Account access &amp; permissions</a><a href="/community">Achievements &amp; shout-outs</a></nav></header>
     {notice ? <p role="status">{notice}</p> : null}{error ? <p role="alert">{error}</p> : null}
     <button type="button" disabled={busy} onClick={() => { setError(""); void reload().catch(e => setError(e.message)); }}>Reload team</button>
-    {data ? <><TeamP2Summary key={data.revision} /><div className="team-toolbar"><label>Team member<select value={selected} onChange={e => setSelected(Number(e.target.value))}><option value={0}>Choose a person</option>{data.employees.map(e => <option key={e.id} value={e.id}>{e.name}{e.terminated ? " — terminated" : ""}</option>)}</select></label><p>Current pay period: {data.currentPeriod.start} – {data.currentPeriod.end}</p></div>
+    {data ? <><TeamP2Summary key={data.revision} /><div className="team-toolbar"><label>Team member<select value={person?.id ?? 0} onChange={e => setSelected(Number(e.target.value))}><option value={0}>Choose a person</option>{visiblePeople.map(e => <option key={e.id} value={e.id}>{e.name}{e.terminated ? " — terminated" : ""}</option>)}</select></label><label className="retired-records-toggle"><input type="checkbox" checked={showInactive} disabled={busy} onChange={event => { setShowInactive(event.target.checked); setSelected(0); }} />Show inactive and terminated team members</label><p>Current pay period: {data.currentPeriod.start} – {data.currentPeriod.end}</p></div>
       <fieldset className="team-main-fieldset" disabled={busy || blocked}>{person ? <TeamPersonEditor key={`${person.id}:${data.revision}`} person={person} data={data} busy={busy} save={save} reload={reload} /> : null}
         {data.permissions["team.manage"] ? <BulkTeamForm data={data} busy={busy} save={save} /> : null}
         <TeamPeriodSettings key={data.settings.version} data={data} save={save} />
