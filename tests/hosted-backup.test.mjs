@@ -6,7 +6,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { sql } from "drizzle-orm";
 import { projectRoot, configPath, runLocalDb } from "../scripts/local-db.mjs";
 import { loadServerModule } from "../scripts/server-runtime.mjs";
-import { runDueBackup, backupStatus, createBackupWorker } from "../backup/hosted.mjs";
+import { runDueBackup, backupStatus, createBackupWorker, recordBackupAlerts } from "../backup/hosted.mjs";
 import { backupCalendar, publicFingerprint } from "../backup/hosted-format.mjs";
 import { recoverHostedBundle } from "../backup/recovery.mjs";
 import { hash } from "../backup/snapshot.mjs";
@@ -105,4 +105,39 @@ test("backup status requires current Owner auth and exposes only safe counters",
   assert.equal((await service.handle(f.req("/api/backups/status", f.cookie))).status, 401);
   const r = await f.auth.handle(f.req("/api/auth/login", "", { email: f.email, password: f.password })); const cookie = r.headers.get("set-cookie").split(";")[0];
   assert.equal((await service.handle(f.req("/api/backups/status", cookie))).status, 403);
+});
+
+
+test("backup alerts persist in R2 across retries/restarts, deduplicate concurrent checks and recover only after success", { timeout: 120000 }, async t => {
+  const f = await fixture(t); await runDueBackup(f.env, secrets, { now });
+  const file = (await f.env.DB.prepare("SELECT object_key FROM files WHERE status='ready' LIMIT 1").all()).results[0];
+  const saved = new Uint8Array(await (await f.env.FILES.get(file.object_key)).arrayBuffer()); await f.env.FILES.delete(file.object_key);
+  const next = now + 86400000;
+  const daily = () => new Request("https://backup.internal/daily", { method: "POST", body: JSON.stringify(secrets) });
+  const worker = createBackupWorker(f.env, () => next);
+  assert.equal((await worker.fetch(daily())).status, 503);
+  const first = await (await f.env.BACKUPS.get("control/status.json")).json(); assert.equal(first.alerts.active.kind, "failed");
+  await Promise.all([recordBackupAlerts(f.env.BACKUPS, next + 1000), recordBackupAlerts(f.env.BACKUPS, next + 1000)]);
+  const etag = (await f.env.BACKUPS.head("control/status.json")).etag;
+  assert.equal((await worker.fetch(daily())).status, 200, "cooldown is not another failed backup");
+  assert.equal((await f.env.BACKUPS.head("control/status.json")).etag, etag, "unchanged checks must not rewrite alerts");
+  const restart = createBackupWorker(f.env, () => next + 5000);
+  const status = await (await restart.fetch(new Request("https://backup.internal/status"))).json(); assert.deepEqual(status.alerts, first.alerts);
+  await f.env.FILES.put(file.object_key, saved);
+  const recovered = createBackupWorker(f.env, () => next + 16 * 60000); assert.equal((await recovered.fetch(daily())).status, 200);
+  const result = await (await f.env.BACKUPS.get("control/status.json")).json(); assert.equal(result.alerts.active, null); assert.equal(result.alerts.lastRecovery.incidentId, first.alerts.active.id);
+  assert.ok(await f.completion("2026-11-10")); assert.ok(await f.completion("2026-11-11"));
+  await recordBackupAlerts(f.env.BACKUPS, next + 17 * 60000); assert.deepEqual((await (await f.env.BACKUPS.get("control/status.json")).json()).alerts, result.alerts);
+  const bad = createBackupWorker(f.env, () => next + 18 * 60000);
+  assert.equal((await bad.fetch(new Request("https://backup.internal/daily", { method:"POST",body:JSON.stringify({...secrets,AUTH_RATE_LIMIT_SECRET:""}) }))).status,503);
+  assert.equal((await (await f.env.BACKUPS.get("control/status.json")).json()).alerts.active.kind,"failed");
+  const confirmed = createBackupWorker(f.env, () => next + 19 * 60000);
+  assert.equal((await confirmed.fetch(daily())).status,200);
+  const healed = await (await f.env.BACKUPS.get("control/status.json")).json();assert.equal(healed.alerts.active,null);assert.equal(healed.lastAttempt.state,"succeeded");
+  assert.equal(healed.lastSuccess.createdAt,result.lastSuccess.createdAt,"revalidation repairs health without replacing the completed archive");
+  const safe = {...result, alerts:{active:null,lastRecovery:{...result.alerts.lastRecovery,privateKey:"must-never-project"}}, privateKey:"must-never-project"};
+  const service = f.createBackupStatusService(f.db,f.access,{fetch:async()=>Response.json({...safe,configured:true,stale:false,checkedAt:new Date(next+17*60000).toISOString()})});
+  const projection = await service.handle(f.req("/api/backups/status",f.cookie)); assert.equal(projection.status,200);assert.doesNotMatch(await projection.text(),/must-never-project|privateKey|wrappedKey/);
+  const broken = f.createBackupStatusService(f.db,f.access,{fetch:async()=>{throw new Error("sensitive database credential details");}});
+  const unavailable = await broken.handle(f.req("/api/backups/status",f.cookie));assert.equal(unavailable.status,503);assert.doesNotMatch(await unavailable.text(),/sensitive|credential details/);
 });

@@ -11103,3 +11103,12 @@ body:has(dialog.time-exception-modal[open]) { overflow: hidden; }
 .time-exception-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
 .time-exception-actions button { min-height: 44px; border: 1px solid var(--line); border-radius: 6px; padding: 8px 16px; }
 .time-exception-actions button:disabled { opacity: .55; cursor: not-allowed; }
+
+.backup-alert { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; margin-block: 16px; padding: 16px; border: 1px solid var(--line); border-left: 4px solid var(--blue-accent); border-radius: 8px; background: #fff; color: var(--ink); }
+.backup-alert > div { flex: 1 1 240px; min-width: 0; overflow-wrap: anywhere; }
+.backup-alert h2 { margin: 0 0 8px; font-size: 1rem; }
+.backup-alert p { margin: 4px 0; font-size: .9rem; line-height: 1.5; }
+.backup-alert-warning { border-color: #d49a37; background: #fff7e8; }
+.backup-alert-success { border-color: #4a8264; background: #f1f8f3; }
+.backup-alert > a, .backup-alert > button { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 8px 16px; border: 1px solid currentColor; border-radius: 6px; color: inherit; font-weight: 700; background: #fff; }
+.backup-alert > button:disabled { opacity: .55; cursor: wait; }

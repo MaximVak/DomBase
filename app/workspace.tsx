@@ -37,6 +37,7 @@ import type { Mode, ViewId, CalendarTab, SettingsTab, BasicInfo, BasicInfoField,
 export type { BasicInfo, Employee, StaffState } from "../workforce/model";
 
 import { TimeExceptionDialog } from "./time-exception-dialog";
+import { BackupMonitor } from "./backup-monitor";
 
 const timeExceptionExplanationLimit = 250;
 const automaticClockOutExplanation = "Automatically clocked out two hours after the scheduled shift ended.";
@@ -3603,6 +3604,8 @@ export default function Home({ account }: { account: DashboardAccount }) {
               <button type="button" className="public-back-button" onClick={signOut}>Back</button>
             )}
           </header>
+
+          {account.accessLevel === "owner" ? <BackupMonitor /> : null}
 
           {activeView === "profile" && !isPublicSchedule ? (
             accountProfilePanel()

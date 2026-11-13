@@ -5,24 +5,40 @@ import type { drizzle } from "drizzle-orm/d1";
 import type * as schema from "../db/schema";
 import type { BackupService } from "./schedule";
 
+export type BackupAlert = { id: string; kind: "failed" | "stale"; detectedAt: string; expectedDay: string; attemptAt?: string };
+export type BackupRecovery = { incidentId: string; kind: "failed" | "stale"; detectedAt: string; recoveredAt: string };
 export type BackupStatus = {
   configured: boolean; schedule?: string; retention?: string; encrypted?: boolean; stale?: boolean; checkedAt?: string;
   lastSuccess?: { localDay: string; createdAt: string; tables: number; migrations: number; rows: number; objects: number; encryptedBytes: number; fingerprint: string } | null;
   lastAttempt?: { at: string; state: "running" | "succeeded" | "failed"; localDay: string; category?: string } | null;
+  alerts?: { active: BackupAlert | null; lastRecovery: BackupRecovery | null };
 };
+function safeAlerts(value: BackupStatus["alerts"]): BackupStatus["alerts"] {
+  if (value === undefined) return undefined; // Rolling deployment of the backup service.
+  if (!value || typeof value !== "object") throw new Error("Invalid backup alerts.");
+  const { active, lastRecovery } = value;
+  const time = (v: unknown): v is string => typeof v === "string" && Number.isFinite(Date.parse(v));
+  const id = (v: unknown): v is string => typeof v === "string" && /^backup-(failed|stale)-[0-9TZ:.+-]{10,80}$/.test(v);
+  const kind = (v: unknown) => v === "failed" || v === "stale";
+  if (active && (!id(active.id) || !kind(active.kind) || !time(active.detectedAt) || !/^\d{4}-\d{2}-\d{2}$/.test(active.expectedDay) || (active.kind === "failed" && !time(active.attemptAt)))) throw new Error("Invalid backup alert.");
+  if (lastRecovery && (!id(lastRecovery.incidentId) || !kind(lastRecovery.kind) || !time(lastRecovery.detectedAt) || !time(lastRecovery.recoveredAt))) throw new Error("Invalid backup recovery.");
+  return { active: active ? { id: active.id, kind: active.kind, detectedAt: active.detectedAt, expectedDay: active.expectedDay, ...(active.kind === "failed" ? { attemptAt: active.attemptAt } : {}) } : null,
+    lastRecovery: lastRecovery ? { incidentId: lastRecovery.incidentId, kind: lastRecovery.kind, detectedAt: lastRecovery.detectedAt, recoveredAt: lastRecovery.recoveredAt } : null };
+}
 export async function readBackupStatus(service?: BackupService): Promise<BackupStatus> {
   if (!service) return { configured: false };
   const response = await service.fetch(new Request("https://backup.internal/status"));
   if (!response.ok) throw new Error("Backup status unavailable.");
   const body = await response.json() as BackupStatus;
-  if (body.configured !== true || typeof body.stale !== "boolean") throw new Error("Invalid backup status.");
+  if (body.configured !== true || typeof body.stale !== "boolean" || typeof body.checkedAt !== "string" || !Number.isFinite(Date.parse(body.checkedAt))) throw new Error("Invalid backup status.");
   const success = body.lastSuccess;
   const attempt = body.lastAttempt;
   if (success && (!/^\d{4}-\d{2}-\d{2}$/.test(success.localDay) || !Number.isFinite(Date.parse(success.createdAt)) || ![success.tables, success.migrations, success.rows, success.objects, success.encryptedBytes].every(value => Number.isSafeInteger(value) && value >= 0) || !/^[0-9a-f]{64}$/.test(success.fingerprint))) throw new Error("Invalid completed backup status.");
   if (attempt && (!["running", "succeeded", "failed"].includes(attempt.state) || !Number.isFinite(Date.parse(attempt.at)) || !/^\d{4}-\d{2}-\d{2}$/.test(attempt.localDay))) throw new Error("Invalid backup attempt status.");
   // Only counts/times/status cross into the dashboard; never archive keys,
   // credential envelopes, SQL, document names or application secrets.
-  return { configured: true, schedule: "Daily after 2:00 AM Pacific time", retention: "All backups kept; no automatic deletion", encrypted: true, stale: body.stale, checkedAt: body.checkedAt,
+  const alerts = safeAlerts(body.alerts);
+  return { configured: true, schedule: "Daily after 2:00 AM Pacific time", retention: "All backups kept; no automatic deletion", encrypted: true, stale: body.stale, checkedAt: body.checkedAt, ...(alerts ? { alerts } : {}),
     lastSuccess: success ? { localDay: success.localDay, createdAt: success.createdAt, tables: success.tables, migrations: success.migrations, rows: success.rows, objects: success.objects, encryptedBytes: success.encryptedBytes, fingerprint: success.fingerprint } : null,
     lastAttempt: attempt ? { at: attempt.at, state: attempt.state, localDay: attempt.localDay, ...(attempt.category && ["configuration", "database", "files", "archive", "completion"].includes(attempt.category) ? { category: attempt.category } : {}) } : null };
 }
