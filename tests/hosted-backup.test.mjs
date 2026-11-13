@@ -12,6 +12,8 @@ import { backupCalendar, publicFingerprint } from "../backup/hosted-format.mjs";
 import { recoverHostedBundle } from "../backup/recovery.mjs";
 import { hash } from "../backup/snapshot.mjs";
 import { restoreIntoEmpty, invalidateRecoveredAccess } from "../scripts/backup-core.mjs";
+import { runOffsiteCopy } from "../backup/offsite.mjs";
+import { offsitePrefix } from "../backup/b2.mjs";
 
 const secrets = { AUTH_RATE_LIMIT_SECRET: "isolated-hosted-backup-authentication-secret-32-characters", AUTH_PRIVATE_FIELD_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" };
 const now = Date.parse("2026-11-10T11:00:00Z"); // 03:00 Pacific.
@@ -66,7 +68,13 @@ test("hosted encrypted daily backup restores exact DB/files/keys and leaves live
   assert.equal((await runDueBackup(f.env, secrets, { now: now + 120000 })).reason, "already completed");
   assert.equal((await backupStatus(f.env.BACKUPS, now + 120000)).lastAttempt.state, "succeeded", "A completed archive repairs a stale failure without another backup");
   const manifestBytes = await f.readPart(receipt.manifest.key); assert.equal(Buffer.from(manifestBytes).includes(Buffer.from(secrets.AUTH_PRIVATE_FIELD_KEY)), false);
-  const payload = await recoverHostedBundle(receipt, f.readPart, privateKey); const target = await f.destination();
+  const independent = new Map();
+  const copyEnv = { ...f.env, BACKUP_B2: JSON.stringify({ bucket: "isolated-native-backups", region: "us-west-004", keyId: "fictionalkey123", applicationKey: "fictionalapplicationkey123456" }) };
+  await runOffsiteCopy(copyEnv, { now, clientFactory: () => ({ copy: async (key, bytes) => { independent.set(key, bytes.slice()); } }) });
+  assert.ok(independent.has(offsitePrefix + `daily/${receipt.localDay}.json`));
+  // Recovery reads only the independent copy; it cannot fall back to R2.
+  const copiedReceipt = JSON.parse(new TextDecoder().decode(independent.get(offsitePrefix + `daily/${receipt.localDay}.json`)));
+  const payload = await recoverHostedBundle(copiedReceipt, async key => independent.get(offsitePrefix + key), privateKey); const target = await f.destination();
   const result = await restoreIntoEmpty({ database: target.env.DB, bucket: target.env.FILES, payload }); assert.equal(result.exactDatabase, true); assert.equal(result.exactFiles, true);
   const { decryptSsn } = await loadServerModule("workforce/private.ts"); const profile = (await target.env.DB.prepare("SELECT ssn_encrypted FROM employee_profiles WHERE employee_id=900001").all()).results[0]; assert.equal(decryptSsn(profile.ssn_encrypted, 900001, payload.secrets.AUTH_PRIVATE_FIELD_KEY), "000-45-6789");
   await invalidateRecoveredAccess(target.env.DB); const { createAuthService } = await loadServerModule("auth/service.ts"); const { createAccessService } = await loadServerModule("access/service.ts"); const { createDocumentService } = await loadServerModule("documents/service.ts");

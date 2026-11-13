@@ -8,11 +8,13 @@ import { recoverHostedBundle } from "../backup/recovery.mjs";
 import { rowsOf, hash } from "../backup/snapshot.mjs";
 import { configPath } from "./local-db.mjs";
 import { loadServerModule } from "./server-runtime.mjs";
+import { createB2Client, offsitePrefix } from "../backup/b2.mjs";
 
 const configFile = resolve(projectRoot, "wrangler.backup.jsonc");
 const keyFile = resolve(projectRoot, ".wrangler/backup-keys/staging-recovery.json");
 const [action, ...args] = process.argv.slice(2);
-if (!["configure", "deploy", "status", "verify"].includes(action) || action !== "verify" && args.length || action === "verify" && (args.length !== 2 || args[0] !== "--day" || !/^\d{4}-\d{2}-\d{2}$/.test(args[1]))) throw new Error("Use configure, deploy or status without overrides; verify requires --day YYYY-MM-DD. No restore target or account overrides.");
+const verifying = action === "verify" || action === "verify-offsite";
+if (!["configure", "deploy", "status", "verify", "verify-offsite"].includes(action) || !verifying && args.length || verifying && (args.length !== 2 || args[0] !== "--day" || !/^\d{4}-\d{2}-\d{2}$/.test(args[1]))) throw new Error("Use configure, deploy or status without overrides; verify/verify-offsite require --day YYYY-MM-DD. No restore target or account overrides.");
 const app = await readStagingConfig();
 const { backupEmailConfigBlock } = await import("../backup/email-config.mjs");
 let emailConfig = {};
@@ -47,7 +49,14 @@ async function privateBucket() {
 async function download(key, file) {
   if (!/^(?:daily\/\d{4}-\d{2}-\d{2}\.json|control\/status\.json|runs\/\d{4}-\d{2}-\d{2}\/[0-9a-f-]{36}\/(?:manifest|object-\d{4})\.bin)$/.test(key)) throw new Error("Unexpected backup object key.");
   await writeFile(file, "", { mode: 0o600, flag: "wx" });
-  try { await wrangler(["r2", "object", "get", `${stagingBackupName}/${key}`, "--remote", "--config", configFile, "--file", file], { capture: true }); }
+  try {
+    if (action === "verify-offsite") {
+      const { readOffsiteConfig } = await import("./offsite-staging.mjs");
+      const bytes = await createB2Client(await readOffsiteConfig()).get(offsitePrefix + key);
+      if (!bytes) throw new Error("Missing independent backup part.");
+      await writeFile(file, bytes, { mode: 0o600 });
+    } else await wrangler(["r2", "object", "get", `${stagingBackupName}/${key}`, "--remote", "--config", configFile, "--file", file], { capture: true });
+  }
   catch { await rm(file, { force: true }); throw new Error("Could not download the private backup object; check scheduled completion and access."); }
   await chmod(file, 0o600); return new Uint8Array(await readFile(file));
 }
@@ -67,12 +76,12 @@ try {
     await validateRecovery(recovery);
     if (!storage.exists) { await wrangler(["r2", "bucket", "create", stagingBackupName, "--config", stagingPath], { capture: true }); storage = await privateBucket(); }
     await writeFile(configFile, JSON.stringify(expected, null, 2) + "\n");
-    await writeFile(stagingPath, JSON.stringify(stagingConfig(app.d1_databases[0].database_id, { files: true, maintenance: true, backups: true }), null, 2) + "\n");
+    await writeFile(stagingPath, JSON.stringify({ ...app, ...stagingConfig(app.d1_databases[0].database_id, { files: true, maintenance: true, backups: true }) }, null, 2) + "\n");
     console.log(JSON.stringify({ storage, configurationPrepared: true, deployed: false, recoveryFile: keyFile, publicFingerprint: recovery.fingerprint }));
   } else {
     const configured = JSON.parse(await readFile(configFile, "utf8"));
     if (JSON.stringify(configured) !== JSON.stringify(expected)) throw new Error("Backup Worker configuration differs from the pinned staging target.");
-    phase = "storage-and-key-check"; await privateBucket(); await privateFile(keyFile); const recovery = JSON.parse(await readFile(keyFile, "utf8"));
+    phase = "storage-and-key-check"; if (action !== "verify-offsite") await privateBucket(); await privateFile(keyFile); const recovery = JSON.parse(await readFile(keyFile, "utf8"));
     await validateRecovery(recovery);
     if (action === "deploy") {
       phase = "worker-deploy"; await wrangler(["deploy", "--config", configFile], { capture: true });
@@ -118,7 +127,7 @@ try {
           if (response.status !== 200 || hash(new Uint8Array(await response.arrayBuffer())) !== ready.sha256) throw new Error("Recovered authorized document download failed.");
           freshLoginAndDownload = true;
         }
-        const report = { verifiedAt: new Date().toISOString(), localDay: receipt.localDay, backupId: receipt.id, fingerprint: recovery.fingerprint, ...result, decryptedProfiles: profiles.length, oldAccessRevoked: true, auditProtected, freshLoginAndDownload, isolatedRestore: true, sourceModified: false, encryptedArchiveDirectory: archive };
+        const report = { verifiedAt: new Date().toISOString(), archiveSource: action === "verify-offsite" ? "Backblaze B2 only" : "Cloudflare R2", localDay: receipt.localDay, backupId: receipt.id, fingerprint: recovery.fingerprint, ...result, decryptedProfiles: profiles.length, oldAccessRevoked: true, auditProtected, freshLoginAndDownload, isolatedRestore: true, sourceModified: false, encryptedArchiveDirectory: archive };
         await writePrivateJson(join(archive, "verified.json"), report); console.log(JSON.stringify(report));
       } finally { await platform?.dispose(); await rm(temp, { recursive: true, force: true }); }
     }

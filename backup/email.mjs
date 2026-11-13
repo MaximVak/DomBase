@@ -1,7 +1,7 @@
 import { readJson, putJson } from "./control.mjs";
 import { backupEmailConfig } from "./email-config.mjs";
 
-const key = "control/email-delivery.json";
+const deliveryKey = scope => scope === "offsite" ? "control/offsite-email-delivery.json" : "control/email-delivery.json";
 const retryMs = 15 * 60000, leaseMs = 5 * 60000;
 function eventFor(alerts, now) {
   if (alerts.active) return { id: `${alerts.active.id}:warning`, kind: alerts.active.kind, at: alerts.active.detectedAt };
@@ -9,12 +9,15 @@ function eventFor(alerts, now) {
   if (recovered && now - Date.parse(recovered.recoveredAt) < 86400000) return { id: `${recovered.incidentId}:recovery`, kind: "recovered", at: recovered.recoveredAt };
   return null;
 }
-function message(config, event, success) {
-  const title = event.kind === "failed" ? "Daily backup failed" : event.kind === "stale" ? "Daily backup is overdue" : "Backup protection restored";
+function message(config, event, success, scope) {
+  const title = scope === "offsite"
+    ? event.kind === "failed" ? "Backblaze backup copy failed" : event.kind === "stale" ? "Backblaze backup copy is overdue" : "Backblaze backup copying restored"
+    : event.kind === "failed" ? "Daily backup failed" : event.kind === "stale" ? "Daily backup is overdue" : "Backup protection restored";
   return { to: config.recipient, from: config.sender, subject: `DomBase backup: ${title}`,
-    text: `${title}.\n\n${event.kind === "recovered" ? "A successful backup has cleared the previous warning." : "Automatic backup retries continue. Check the Backups page in DomBase."}\n\nDetected: ${event.at}\nLast successful backup: ${success?.createdAt ?? "No completed backup confirmed"}\n\nOpen DomBase and choose Backups from your account menu. This email contains operational status only; no employee data or recovery keys.\n` };
+    text: `${title}.\n\n${scope === "offsite" ? "This alert concerns the independent encrypted Backblaze copy. Cloudflare backup health is shown separately.\n\n" : ""}${event.kind === "recovered" ? "A successful backup has cleared the previous warning." : "Automatic backup retries continue. Check the Backups page in DomBase."}\n\nDetected: ${event.at}\nLast successful backup: ${success?.createdAt ?? "No completed backup confirmed"}\n\nOpen DomBase and choose Backups from your account menu. This email contains operational status only; no employee data or recovery keys.\n` };
 }
 export async function backupEmailStatus(env) {
+  const key = deliveryKey();
   const config = backupEmailConfig(env);
   if (!config.configured) return { configured: false, recipient: config.recipient, state: "not_configured" };
   try {
@@ -23,7 +26,7 @@ export async function backupEmailStatus(env) {
     return { configured: true, recipient: config.recipient, state: state.retry ? "retrying" : state.lease ? "pending" : state.lastAcceptedAt ? "accepted" : "ready", ...(state.lastAcceptedAt ? { lastAcceptedAt: state.lastAcceptedAt } : {}) };
   } catch { return { configured: true, recipient: config.recipient, state: "unavailable" }; }
 }
-async function finish(bucket, token, event, now, accepted) {
+async function finish(bucket, key, token, event, now, accepted) {
   for (let i = 0; i < 5; i++) {
     const prior = await readJson(bucket, key), state = prior?.value;
     if (!state || state.lease?.token !== token) return;
@@ -33,7 +36,8 @@ async function finish(bucket, token, event, now, accepted) {
   }
   throw new Error("Could not record email acknowledgement.");
 }
-export async function deliverBackupEmail(env, alerts, success, now = Date.now()) {
+export async function deliverBackupEmail(env, alerts, success, now = Date.now(), { scope } = {}) {
+  const key = deliveryKey(scope);
   const config = backupEmailConfig(env), event = eventFor(alerts, now);
   if (!config.configured) return;
   if (!event) {
@@ -58,7 +62,7 @@ export async function deliverBackupEmail(env, alerts, success, now = Date.now())
     let timer;
     try {
       const result = await Promise.race([
-        env.BACKUP_EMAIL.send(message(config, event, success)),
+        env.BACKUP_EMAIL.send(message(config, event, success, scope)),
         new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("Email acknowledgement timed out.")), 15000); }),
       ]);
       if (typeof result?.messageId !== "string" || !result.messageId) throw new Error("No provider acknowledgement.");
@@ -67,7 +71,7 @@ export async function deliverBackupEmail(env, alerts, success, now = Date.now())
     finally { clearTimeout(timer); }
     // A send acknowledgement is not proof of inbox receipt. A provider timeout
     // after acceptance can cause a duplicate on retry; no exactly-once claim.
-    await finish(env.BACKUPS, token, event, now, accepted);
+    await finish(env.BACKUPS, key, token, event, now, accepted);
     return;
   }
   throw new Error("Could not acquire email delivery lease.");

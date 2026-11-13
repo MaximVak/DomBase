@@ -8,13 +8,24 @@ import type { BackupService } from "./schedule";
 export type BackupAlert = { id: string; kind: "failed" | "stale"; detectedAt: string; expectedDay: string; attemptAt?: string };
 export type BackupRecovery = { incidentId: string; kind: "failed" | "stale"; detectedAt: string; recoveredAt: string };
 export type BackupEmailStatus = { configured: boolean; recipient: string | null; state: "not_configured" | "ready" | "pending" | "accepted" | "retrying" | "unavailable"; lastAcceptedAt?: string };
+export type OffsiteStatus = { configured: boolean; state: "not_configured" | "pending" | "copying" | "ready" | "failed"; stale?: boolean; lastSuccess?: { localDay: string; createdAt: string } | null; alerts?: BackupStatus["alerts"] };
 export type BackupStatus = {
   configured: boolean; schedule?: string; retention?: string; encrypted?: boolean; stale?: boolean; checkedAt?: string;
   lastSuccess?: { localDay: string; createdAt: string; tables: number; migrations: number; rows: number; objects: number; encryptedBytes: number; fingerprint: string } | null;
   lastAttempt?: { at: string; state: "running" | "succeeded" | "failed"; localDay: string; category?: string } | null;
   alerts?: { active: BackupAlert | null; lastRecovery: BackupRecovery | null };
   email?: BackupEmailStatus;
+  offsite?: OffsiteStatus;
 };
+function safeOffsite(value: OffsiteStatus | undefined): OffsiteStatus | undefined {
+  if (value === undefined) return undefined;
+  if (!value || typeof value.configured !== "boolean" || !["not_configured", "pending", "copying", "ready", "failed"].includes(value.state)
+    || value.stale !== undefined && typeof value.stale !== "boolean") throw new Error("Invalid off-site status.");
+  const success = value.lastSuccess;
+  if (success && (!/^\d{4}-\d{2}-\d{2}$/.test(success.localDay) || !Number.isFinite(Date.parse(success.createdAt)))) throw new Error("Invalid off-site completion.");
+  const alerts = safeAlerts(value.alerts);
+  return { configured: value.configured, state: value.state, ...(value.stale !== undefined ? { stale: value.stale } : {}), ...(alerts ? { alerts } : {}), lastSuccess: success ? { localDay: success.localDay, createdAt: success.createdAt } : null };
+}
 function safeEmail(value: BackupEmailStatus | undefined): BackupEmailStatus | undefined {
   if (value === undefined) return undefined;
   if (!value || typeof value.configured !== "boolean" || !["not_configured", "ready", "pending", "accepted", "retrying", "unavailable"].includes(value.state)
@@ -48,7 +59,8 @@ export async function readBackupStatus(service?: BackupService): Promise<BackupS
   // credential envelopes, SQL, document names or application secrets.
   const alerts = safeAlerts(body.alerts);
   const email = safeEmail(body.email);
-  return { configured: true, schedule: "Daily after 2:00 AM Pacific time", retention: "All backups kept; no automatic deletion", encrypted: true, stale: body.stale, checkedAt: body.checkedAt, ...(alerts ? { alerts } : {}), ...(email ? { email } : {}),
+  const offsite = safeOffsite(body.offsite);
+  return { configured: true, schedule: "Daily after 2:00 AM Pacific time", retention: "All backups kept; no automatic deletion", encrypted: true, stale: body.stale, checkedAt: body.checkedAt, ...(alerts ? { alerts } : {}), ...(email ? { email } : {}), ...(offsite ? { offsite } : {}),
     lastSuccess: success ? { localDay: success.localDay, createdAt: success.createdAt, tables: success.tables, migrations: success.migrations, rows: success.rows, objects: success.objects, encryptedBytes: success.encryptedBytes, fingerprint: success.fingerprint } : null,
     lastAttempt: attempt ? { at: attempt.at, state: attempt.state, localDay: attempt.localDay, ...(attempt.category && ["configuration", "database", "files", "archive", "completion"].includes(attempt.category) ? { category: attempt.category } : {}) } : null };
 }

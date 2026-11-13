@@ -7,6 +7,7 @@ export function backupNotice(status: BackupStatus | null, unavailable: boolean, 
   const active = status.alerts?.active;
   if (active?.kind === "failed" || (!status.alerts && status.lastAttempt?.state === "failed")) return { tone: "warning", title: "Daily backup failed", detail: "A backup attempt failed. Automatic retries continue every 15 minutes. This warning stays until a completed backup confirms recovery." };
   if (active?.kind === "stale" || (!status.alerts && status.stale)) return { tone: "warning", title: "Daily backup is overdue", detail: "The expected daily backup has not completed. Check backup details. Automatic retries continue; previous completed backups remain available." };
+  if (status.offsite?.state === "failed") return { tone: "warning", title: "Backblaze backup copy needs attention", detail: "The independent encrypted backup copy failed or is overdue. Cloudflare backup health is shown separately in Backups. Automatic retries continue." };
   const recovery = status.alerts?.lastRecovery;
   if (recovery && (details || Date.parse(status.checkedAt ?? "") - Date.parse(recovery.recoveredAt) < 86400000)) return { tone: "success", title: "Backup protection restored", detail: "A successful backup has cleared the previous warning." };
   if (!details) return null;

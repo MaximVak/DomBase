@@ -4,6 +4,7 @@ import { backupCalendar, hostedFormat, hostedLimits, encryptPart, wrapDataKey, p
 import { expectedBackupDay, nextBackupAlerts } from "./alerts.mjs";
 import { readJson, putJson } from "./control.mjs";
 import { backupEmailStatus, deliverBackupEmail } from "./email.mjs";
+import { runOffsiteCopy, offsiteStatus, monitorOffsite } from "./offsite.mjs";
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
 const leaseKey = "control/daily-lease.json";
@@ -124,7 +125,7 @@ export function createBackupWorker(env, clock = Date.now) {
     const path = new URL(request.url).pathname;
     let dailyAccepted = false;
     try {
-      if (path === "/status" && request.method === "GET") return json({ ...await backupStatus(env.BACKUPS, clock()), email: await backupEmailStatus(env) });
+      if (path === "/status" && request.method === "GET") return json({ ...await backupStatus(env.BACKUPS, clock()), email: await backupEmailStatus(env), offsite: await offsiteStatus(env, clock()) });
       if (path !== "/daily" || request.method !== "POST") return json({ error: "Not found." }, 404);
       if (Number(request.headers.get("content-length") ?? 0) > 2048) return json({ error: "Invalid request." }, 413);
       const text = await request.text(); if (text.length > 2048) return json({ error: "Invalid request." }, 413);
@@ -133,6 +134,10 @@ export function createBackupWorker(env, clock = Date.now) {
       dailyAccepted = true;
       const result = await runDueBackup(env, checkSecrets(body), { now: clock() });
       await monitorBackup(env, clock());
+      // Replication failures must never reclassify a good local archive as bad.
+      // Both channels have separate persistent incidents/email acknowledgements.
+      try { await runOffsiteCopy(env, { now: clock() }); await monitorOffsite(env, clock()); }
+      catch { console.error("Off-site backup monitoring is unavailable."); }
       return json(result, result.failed ? 503 : 200);
     } catch {
       if (dailyAccepted) {

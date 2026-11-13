@@ -58,6 +58,16 @@ export function BackupMonitorView({ status, unavailable, details = false, checki
           : "not active yet. A verified sender and email service must be connected."}
       </p>
       <p>Daily backups start after 2:00 AM Pacific; a missing completion is overdue at 4:00 AM. A failed attempt raises a warning immediately.</p>
+      <section aria-labelledby="backup-offsite"><h2 id="backup-offsite">Independent Backblaze copy</h2>
+        <p role={status?.offsite?.state === "failed" ? "alert" : "status"}>{!status?.offsite ? "Copy status is unavailable."
+          : !status.offsite.configured ? "Not connected yet. The Backblaze account and storage access are needed."
+          : status.offsite.state === "failed" ? "The copy failed or is overdue. Automatic retries continue every 15 minutes; previous completed copies remain available."
+          : status.offsite.state === "copying" ? "Copying and checking encrypted archive bytes."
+          : status.offsite.stale || !status.offsite.lastSuccess ? "Waiting for the next completed daily copy."
+          : "The latest daily archive was copied and its bytes verified."}</p>
+        {status?.offsite?.lastSuccess ? <p>Last verified copy: <time dateTime={status.offsite.lastSuccess.createdAt}>{formatBackupTime(status.offsite.lastSuccess.createdAt)} Pacific</time> · backup day {status.offsite.lastSuccess.localDay}.</p> : null}
+        <p>Backblaze keeps encrypted copies independently of Cloudflare. When connected, bucket lifecycle rules keep copies for 30 days. The separate recovery key is required to restore them.</p>
+      </section>
       {status?.checkedAt ? <p>Last checked: <time dateTime={status.checkedAt}>{formatBackupTime(status.checkedAt)} Pacific</time>.</p> : null}
       {status?.configured ? <>
         {status.lastAttempt ? <p>Latest attempt: {status.lastAttempt.state} · <time dateTime={status.lastAttempt.at}>{formatBackupTime(status.lastAttempt.at)} Pacific</time></p> : null}
