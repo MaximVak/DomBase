@@ -110,7 +110,7 @@ export function createKioskService(db: KioskOperatorDatabase, options: { secret:
         JOIN departments d ON d.id = r.department_id WHERE er.employee_id = ${person.employee.id} AND er.role_id = ${pending.roleId}
         AND er.active = 1 AND r.archived = 0 AND d.archived = 0))
       AND (${pending.eventType !== "in" || pending.requiresApproval ? 1 : 0} = 1 OR EXISTS (SELECT 1 FROM shifts s
-        WHERE s.id = ${pending.shiftId} AND s.employee_id = ${person.employee.id} AND s.role_id = ${pending.roleId}
+        WHERE s.shift_type = 'work' AND s.id = ${pending.shiftId} AND s.employee_id = ${person.employee.id} AND s.role_id = ${pending.roleId}
         AND s.publication_id IS NOT NULL AND s.archived_at IS NULL))
       AND ${pending.requiresApproval ? (approval ? approvalActor(approval, pending.roleId) : sql`0 = 1`) : sql`1 = 1`}`;
     const result = await atomicBatch(db, [
@@ -146,7 +146,7 @@ export function createKioskService(db: KioskOperatorDatabase, options: { secret:
       const part = (name: string) => parts.find(part => part.type === name)!.value;
       const localTime = `${part("year")}-${part("month")}-${part("day")}T${part("hour")}:${part("minute")}`;
       const [settings] = await db.select({ early: schema.locationSettings.earlyClockInMinutes }).from(schema.locationSettings).limit(1);
-      const shifts = await db.select().from(schema.shifts).where(and(eq(schema.shifts.employeeId, person.employee.id), eq(schema.shifts.roleId, roleId), isNull(schema.shifts.archivedAt), sql`${schema.shifts.publicationId} IS NOT NULL`, sql`${schema.shifts.date} BETWEEN date(${localTime.slice(0, 10)}, '-1 day') AND ${localTime.slice(0, 10)}`));
+      const shifts = await db.select().from(schema.shifts).where(and(eq(schema.shifts.shiftType, "work"), eq(schema.shifts.employeeId, person.employee.id), eq(schema.shifts.roleId, roleId), isNull(schema.shifts.archivedAt), sql`${schema.shifts.publicationId} IS NOT NULL`, sql`${schema.shifts.date} BETWEEN date(${localTime.slice(0, 10)}, '-1 day') AND ${localTime.slice(0, 10)}`));
       const shift = shifts.find(shift => {
         const start = new Date(`${shift.date}T${shift.startTime}:00Z`);
         const end = new Date(`${shift.date}T${shift.endTime}:00Z`);

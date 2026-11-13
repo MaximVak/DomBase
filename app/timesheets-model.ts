@@ -2,7 +2,7 @@ import { hourlyRate, rateFor } from "../team/rules";
 import type { WageRate } from "../team/rules";
 export type TimesheetEmployee = { id: number; name: string; role: string; wage: string; active: boolean; terminated?: boolean; terminationDate?: string; wageRates?: WageRate[]; jobs?: { id: number; name: string }[]; payrollId?: string; legalFirstName?: string; legalMiddleName?: string; legalLastName?: string };
 export type TimesheetEvent = { id: number; employeeId: number; type: "in" | "out" | "break" | "break_end"; at: string; explanation?: string; automatic?: boolean; role?: string; cardId?: number };
-export type TimesheetShift = { employeeId: number; date: string; start: string; end: string; role: string };
+export type TimesheetShift = { shiftType?: "work" | "day_off"; employeeId: number; date: string; start: string; end: string; role: string };
 export type TimesheetAdjustment = { id: number; employeeId: number; date: string; hours: number };
 export type TimesheetPto = { employeeId: number; startDate: string; endDate: string; compensation: string; status: string };
 export type TimeCardBreak = { id: number; start: string; end: string; nextDay: boolean };
@@ -66,7 +66,7 @@ export function buildTimeCards(input: {
         const elapsed = overlap(start, end, dayStart, dayEnd);
         if (!elapsed) continue;
         const breakMs = breaks.reduce((total, [a, b]) => total + overlap(Math.max(a, start), Math.min(b, end), dayStart, dayEnd), 0);
-        const shift = input.shifts.find(shift => shift.employeeId === employee.id && shift.date === date);
+        const shift = input.shifts.find(shift => shift.shiftType !== "day_off" && shift.employeeId === employee.id && shift.date === date);
         const card: TimeCard = { id: `clock-${session[0].id}-${date}`, employeeId: employee.id, date, role: session[0].role || shift?.role || employee.role || "Unassigned", start: session[0].at, end: closed ? session[session.length - 1].at : undefined, eventIds: session.map(event => event.id), issues: [], notes: session.flatMap(event => event.explanation ? [event.explanation] : []), adjustment: 0, metrics: metrics() };
         card.metrics.actual = Math.max(0, elapsed - breakMs) / HOUR;
         card.metrics.breaks = breakMs / HOUR;
@@ -88,7 +88,7 @@ export function buildTimeCards(input: {
       if (!card) { card = { id: `day-${employee.id}-${date}-${role}`, employeeId: employee.id, date, role, eventIds: [], issues: [], notes: [], adjustment: 0, metrics: metrics() }; cards.push(card); }
       return card;
     };
-    for (const shift of input.shifts.filter(shift => shift.employeeId === employee.id && shift.date >= contextStart && shift.date <= contextEnd)) {
+    for (const shift of input.shifts.filter(shift => shift.shiftType !== "day_off" && shift.employeeId === employee.id && shift.date >= contextStart && shift.date <= contextEnd)) {
       const start = Date.parse(`${shift.date}T${shift.start}`);
       let end = Date.parse(`${shift.date}T${shift.end}`);
       if (end <= start) end = Date.parse(`${addDays(shift.date, 1)}T${shift.end}`);

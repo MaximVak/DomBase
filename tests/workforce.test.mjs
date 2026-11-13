@@ -145,10 +145,15 @@ test("shared workforce operations persist, scope, audit and serialize actual D1 
     const view = await snapshot(second); assert.equal(view.state.clockEvents.some(event => ids.includes(event.id)), false); assert.equal(view.state.clockEvents.find(event => event.id === 77001).at, events[0].at);
     const [edit] = await db.select().from(schema.timeCardEdits).where(eq(schema.timeCardEdits.id, 77003)); assert.equal(edit.actorAccountId, f.owner.id); assert.equal(edit.revision, 1); assert.deepEqual(edit.before.eventIds, ids);
   });
-  await t.test("past-shift changes and unsupported attachment storage fail without committing", async () => {
+  await t.test("past schedule edits preserve raw punches; unsupported attachments still fail", async () => {
     const before = await snapshot(owner); const old = before.state.shifts.find(shift => shift.id === f.shifts[0].id);
     const draft = { upsertedShifts: [{ ...old, end: "18:00" }], deletedShiftIds: [], affectedEmployeeIds: [old.employeeId] };
-    assert.equal((await call("commit", owner, saveBody(before, [{ entity: "schedule-draft", id: 1, before: null, after: draft }], newToken()))).status, 409);
+    const rawPunches = await db.select().from(schema.clockEvents);
+    await ok(await call("commit", owner, saveBody(before, [{ entity: "schedule-draft", id: 1, before: null, after: draft }], newToken())));
+    const saved = await snapshot(owner);
+    await ok(await call("commit", owner, saveBody(saved, [{ entity: "schedule-publish", id: 1, before: saved.state.scheduleDraftsByManager[f.b.id], after: { publish: true } }], newToken())));
+    assert.equal((await snapshot(owner)).state.shifts.find(s => s.id === old.id).end, "18:00");
+    assert.deepEqual(await db.select().from(schema.clockEvents), rawPunches);
     const revision = (await snapshot(owner)).revision;
     assert.equal((await change(owner, state => { state.employees.find(e => e.id === createdId).certificates.push({ id: 78001, name: "QA certificate", fileName: "unsafe-placeholder.pdf", fileId: "fake" }); })).status, 409);
     assert.equal((await snapshot(owner)).revision, revision);

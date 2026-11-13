@@ -122,11 +122,11 @@ export async function workspaceSnapshot(db: Database, ctx: Context, fieldKey: st
     };
   });
   state.departments = departments.map(dept => ({ id: dept.id, name: dept.name, roles: roles.filter(role => role.departmentId === dept.id).map(role => role.name), managerIds: managers.filter(row => row.departmentId === dept.id).flatMap(row => { const account = accounts.find(a => a.id === row.accountId); return account?.level === "manager" && account.employeeId ? [account.employeeId] : []; }) }));
-  state.shifts = shifts.map(row => ({ id: row.id, employeeId: row.employeeId, date: row.date, start: row.startTime, end: row.endTime, role: row.roleName || roles.find(role => role.id === row.roleId)?.name || "", station: row.station, ...(p["schedule.notes.read"] ? { notes: row.notes } : {}) }));
+  state.shifts = shifts.map(row => ({ id: row.id, employeeId: row.employeeId, date: row.date, start: row.startTime, end: row.endTime, shiftType: row.shiftType, color: row.color, role: row.roleName || roles.find(role => role.id === row.roleId)?.name || "", station: row.station, ...(p["schedule.notes.read"] ? { notes: row.notes } : {}) }));
   state.scheduleHasBeenPublished = publications.length > 0;
   const draftKey = ctx.account.employeeId ?? -ctx.account.id;
   if (drafts[0]) state.scheduleDraftsByManager[draftKey] = {
-    upsertedShifts: draftChanges.filter(row => row.operation === "upsert").map(row => ({ id: row.shiftId ?? Number(row.clientKey), employeeId: row.employeeId!, date: row.date!, start: row.startTime!, end: row.endTime!, role: row.roleName!, station: row.station ?? "Floor", ...(p["schedule.notes.read"] ? { notes: row.notes ?? "" } : {}) })),
+    upsertedShifts: draftChanges.filter(row => row.operation === "upsert").map(row => ({ id: row.shiftId ?? Number(row.clientKey), employeeId: row.employeeId!, date: row.date!, start: row.startTime!, end: row.endTime!, shiftType: row.shiftType, color: row.color, role: row.roleName!, station: row.station ?? "Floor", ...(p["schedule.notes.read"] ? { notes: row.notes ?? "" } : {}) })),
     deletedShiftIds: draftChanges.filter(row => row.operation === "delete").map(row => row.shiftId!), affectedEmployeeIds: draftEmployees.map(row => row.employeeId),
   };
   state.scheduleEvents = events.map(row => ({ id: row.id, date: row.date, title: row.title, notes: p["schedule.notes.read"] ? row.notes : "" }));

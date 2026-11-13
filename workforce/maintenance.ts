@@ -8,7 +8,7 @@ export async function runClockMaintenance(db: Database, now = Date.now()) {
   const candidates = await db.all<{ eventId: number; employeeId: number; shiftId: number; cardId: number | null; roleName: string; lastEventId: number; lastAt: string; date: string; start: string; end: string }>(sql`SELECT ce.id AS eventId, ce.employee_id AS employeeId, sh.id AS shiftId, ce.card_id AS cardId, ce.role_name AS roleName, (SELECT MAX(id) FROM clock_events WHERE employee_id = ce.employee_id) AS lastEventId, (SELECT occurred_at FROM clock_events WHERE employee_id = ce.employee_id ORDER BY id DESC LIMIT 1) AS lastAt, sh.date AS date, sh.start_time AS start, sh.end_time AS end
     FROM clock_events ce JOIN shifts sh ON sh.id = ce.shift_id
     WHERE ce.event_type = 'in' AND ce.id = (SELECT MAX(last.id) FROM clock_events last WHERE last.employee_id = ce.employee_id AND last.event_type IN ('in','out'))
-    AND sh.publication_id IS NOT NULL ORDER BY ce.id LIMIT 500`);
+    AND sh.shift_type = 'work' AND sh.publication_id IS NOT NULL ORDER BY ce.id LIMIT 500`);
   let count = 0;
   for (const row of candidates) {
     let threshold: number;
@@ -23,7 +23,7 @@ export async function runClockMaintenance(db: Database, now = Date.now()) {
         WHERE NOT EXISTS (SELECT 1 FROM clock_events WHERE idempotency_key = ${`automatic-out:${row.eventId}:${row.shiftId}`})
         AND (SELECT MAX(id) FROM clock_events WHERE employee_id = ${row.employeeId} AND event_type IN ('in','out')) = ${row.eventId}
         AND (SELECT MAX(id) FROM clock_events WHERE employee_id = ${row.employeeId}) = ${row.lastEventId}
-        AND EXISTS (SELECT 1 FROM shifts WHERE id = ${row.shiftId} AND date = ${row.date} AND start_time = ${row.start} AND end_time = ${row.end} AND archived_at IS NULL)
+        AND EXISTS (SELECT 1 FROM shifts WHERE shift_type = 'work' AND id = ${row.shiftId} AND date = ${row.date} AND start_time = ${row.start} AND end_time = ${row.end} AND archived_at IS NULL)
         AND EXISTS (SELECT 1 FROM location_settings ls JOIN business b ON b.id = ls.business_id WHERE ls.automatic_clock_out = 1 AND ls.automatic_clock_out_minutes = ${settings.delay})`,
       sql`INSERT INTO audit_log (employee_id, action, entity_type, entity_id, created_at) SELECT ${row.employeeId}, 'clock.automatic_out', 'clock_event', ${String(row.eventId)}, ${receivedAt} WHERE changes() = 1`,
     ]);

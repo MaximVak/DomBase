@@ -147,7 +147,7 @@ test("shift editor uses clear time labels and available role options", async () 
   assert.match(page, /placeholder="End time"/);
   assert.match(page, /aria-label="Shift role"[^]*availableRoles\.filter\(role => canEditScheduleRole\(role\)\)\.map\(\(role\)/);
   assert.doesNotMatch(page, /placeholder="Start shift"|placeholder="End shift"/);
-  assert.doesNotMatch(page, /aria-label="Edit shift employee"/);
+  assert.match(page, /aria-label="Edit shift employee"/);
   assert.match(page, /<span>Date<\/span>/);
   assert.match(page, /<span>Clock-in time<\/span>/);
   assert.match(page, /<span>Clock-out time<\/span>/);
@@ -155,11 +155,6 @@ test("shift editor uses clear time labels and available role options", async () 
   assert.match(page, /className="shift-edit-field"/);
   assert.match(page, /editingShiftHasStarted/);
   assert.match(page, /editingShiftHasEnded/);
-  assert.match(page, /disabled=\{editingShiftHasStarted\}/);
-  assert.match(page, /disabled=\{editingShiftHasEnded\}/);
-  assert.match(page, /Once a shift starts, only its clock-out time can be changed\./);
-  assert.match(page, /Clock-out time must remain in the future while the shift is active\./);
-  assert.match(page, /This shift has ended and can no longer be changed\./);
   assert.match(page, /shiftForClockEvent\(event, workingScheduleShifts\)\?\.id === savedEditingShift\.id/);
   assert.match(page, /editingShiftIsNoShow \? "No-show" : `Clocked in: \$\{editingShiftClockIn \? formatClockTime\(editingShiftClockIn\.at\) : "Not recorded"\}`/);
   assert.match(page, /<span>Clock-in time<\/span>\s*\{editingShiftClockIn \|\| editingShiftHasStarted \? \(/);
@@ -227,7 +222,7 @@ test("shift editor uses clear time labels and available role options", async () 
   assert.doesNotMatch(page, /className="delete-action" onClick=\{deleteEditingShift\} disabled=\{editingShiftHasStarted\}/);
   assert.doesNotMatch(page, /A shift cannot be deleted after it starts\./);
   assert.match(page, /className=\{`secondary-action\$\{editingShiftHasEnded \? " align-right" : ""\}`\}/);
-  assert.match(page, /\{!editingShiftHasEnded \? \(\s*<button type="submit" className="primary-action">Save changes<\/button>/);
+  assert.match(page, /<button type="submit" className="primary-action">Save changes<\/button>/);
   assert.match(styles, /\.modal-actions \.secondary-action \{[^}]*grid-column: 3;/s);
   assert.match(styles, /\.modal-actions \.secondary-action\.align-right \{[^}]*grid-column: 4;[^}]*justify-self: end;[^}]*inline-size: 94px;/s);
   assert.match(styles, /\.modal-actions \.delete-action \{[^}]*inline-size: 94px;/s);
@@ -247,12 +242,12 @@ test("shift editor uses clear time labels and available role options", async () 
   assert.match(page, /function employeeHasApprovedTimeOffOnDate\(requests: PtoRequest\[\], employeeId: number, date: string\)/);
   assert.match(page, /request\.employeeId === employeeId\s*&& request\.status === "approved"\s*&& request\.startDate <= date\s*&& request\.endDate >= date/);
   assert.equal((page.match(/!employeeHasApprovedTimeOffOnDate\(state\.ptoRequests \?\? \[\], shift\.employeeId, shift\.date\)/g) ?? []).length, 3);
-  assert.match(page, /mode === "manager" && dayShifts\.length === 0 && !timeOff/);
+  assert.match(page, /mode === "manager" && !timeOff/);
   assert.match(page, /\{timeOff \? \(\s*<button type="button" className="shift-time-off schedule-time-off-button"/);
   assert.doesNotMatch(page, /\{dayShifts\.length === 0 && timeOff \? \(/);
   assert.match(page, /onClick=\{\(\) => openShiftCreator\(employee, day\.date\)\}/);
   assert.match(page, /className="shift-cell-add schedule-track-add"/);
-  assert.match(page, /mode === "manager" && employeeShifts\.length === 0 && !timeOff/);
+  assert.match(page, /mode === "manager" && !timeOff/);
   assert.match(page, /onClick=\{\(\) => openShiftCreator\(employee, scheduleDate\)\}/);
   assert.match(page, /className="shift-cell-add shift-month-add"/);
   assert.match(page, /onClick=\{\(\) => openMonthShiftCreator\(day\.date\)\}/);
@@ -903,7 +898,7 @@ test("signed-in users have a header account menu instead of a sidebar logout pan
   assert.match(page, /title: "Missed break"/);
   assert.match(page, /function noShowAlertsFor/);
   assert.match(page, /title: "No-show"/);
-  assert.match(page, /const alertEligibleShifts = state\.shifts;/);
+  assert.match(page, /const alertEligibleShifts = state\.shifts\.filter\(isWorkShift\);/);
   assert.match(page, /noShowAlertsFor\(state\.employees, alertEligibleShifts/);
   assert.match(page, /activeUserCanManage\s*\? noShowAlertsFor/);
   assert.match(page, /kind: "no-show" as const/);

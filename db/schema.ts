@@ -70,6 +70,8 @@ export const shifts = sqliteTable(
     date: text("date").notNull(),
     startTime: text("start_time").notNull(),
     endTime: text("end_time").notNull(),
+    shiftType: text("shift_type", { enum: ["work", "day_off"] }).notNull().default("work"),
+    color: text("color", { enum: ["blue", "green", "amber", "red", "violet", "gray"] }).notNull().default("blue"),
     station: text("station").notNull().default("Floor"),
     notes: text("notes").notNull().default(""),
     roleName: text("role_name").notNull().default(""),
@@ -467,6 +469,8 @@ export const scheduleDraftChanges = sqliteTable("schedule_draft_changes", {
   date: text("date"),
   startTime: text("start_time"),
   endTime: text("end_time"),
+  shiftType: text("shift_type", { enum: ["work", "day_off"] }).notNull().default("work"),
+  color: text("color", { enum: ["blue", "green", "amber", "red", "violet", "gray"] }).notNull().default("blue"),
   station: text("station"),
   notes: text("notes"),
 }, table => [

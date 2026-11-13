@@ -234,7 +234,7 @@ export function createAccessService(db: Database, auth: Auth) {
       requirePermission(ctx, "schedule.read");
       const s = schema.shifts;
       return { shifts: await db.select({ id: s.id, employeeId: s.employeeId, roleId: s.roleId, roleName: s.roleName, date: s.date,
-        startTime: s.startTime, endTime: s.endTime, station: s.station, version: s.version,
+        startTime: s.startTime, endTime: s.endTime, shiftType: s.shiftType, color: s.color, station: s.station, version: s.version,
         ...(ctx.permissions["schedule.notes.read"] ? { notes: s.notes } : {}) }).from(s)
         .where(and(isNull(s.archivedAt), roleScope(ctx, s.roleId), employeeScope(ctx, s.employeeId))).orderBy(s.id).limit(500) };
     }

@@ -141,6 +141,8 @@ export type Department = {
 };
 
 export type Shift = {
+  shiftType?: import("../app/shift-builder").ShiftType;
+  color?: import("../app/shift-builder").ShiftColor;
   id: number;
   employeeId: number;
   date: string;

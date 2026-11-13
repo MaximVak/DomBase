@@ -129,6 +129,13 @@ test("registered tablets, PIN sessions and action-scoped approvals use isolated 
     time += 900001;
     const date = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(time));
     const [pub] = await db.insert(schema.schedulePublications).values({ version: 1, publishedByAccountId: f.owner.id }).returning();
+    const [off] = await db.insert(schema.shifts).values({ employeeId: f.a.id, roleId: f.roleA.id, date, startTime: "00:00", endTime: "00:00", shiftType: "day_off", publicationId: pub.id }).returning();
+    const offPerson = await person();
+    const offResponse = await clock("clock", offPerson.cookie, { eventType: "in", roleId: f.roleA.id, explanation: "Day-off test" });
+    assert.equal(offResponse.status, 202);
+    assert.equal((await offResponse.json()).approvalRequired, true, "A day off must never authorize a scheduled clock-in");
+    await clock("lock", deviceCookie, {});
+    await db.update(schema.shifts).set({ archivedAt: new Date(time).toISOString() }).where(eq(schema.shifts.id, off.id));
     await db.insert(schema.shifts).values({ employeeId: f.a.id, roleId: f.roleA.id, date, startTime: "00:00", endTime: "23:59", publicationId: pub.id });
     const p = await person();
     assert.equal((await clock("clock", p.cookie, { eventType: "in", roleId: f.roleB.id, explanation: "" })).status, 403);

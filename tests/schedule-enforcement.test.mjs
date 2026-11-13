@@ -26,7 +26,7 @@ visit(ast);
 
 // Run the actual page helpers against in-memory records, without clocking anyone in or out.
 function runtime(extra = {}) {
-  const names = ["nextId", "lastWorkClockEvent", "shiftForClockEvent", "shiftStartDateTime", "shiftEndDateTime",
+  const names = ["formatTimeDraftInput", "timeDraftHourLength", "nextId", "lastWorkClockEvent", "shiftForClockEvent", "shiftStartDateTime", "shiftEndDateTime",
     "applyAutomaticClockOuts", "isAutomaticClockOut", "hasClockInForShift", "noShowAlertsFor", "needsTimeException",
     "isWithinScheduledMinute", "workWeekCalendarDays", "hoursDateRange", "hoursDateLabel", "dateRangeForCalendarTab", "shiftsForCalendarRange",
     "parseLocalDate", "startOfDay", "toDateInputValue", "shiftDateForWeekday", "shiftDatesForWeekdays",
@@ -416,4 +416,10 @@ test("Home upcoming shifts include today and each range's last day, respecting e
   assert.deepEqual(ids("week"), [1, 2, 6], "both Monday and Sunday belong to the visible week");
   assert.deepEqual(ids("month"), [1, 2, 3, 6, 7], "last-day shifts belong to the visible month");
   assert.equal(app.shiftsForCalendarRange(shifts, new Set(), "2026-11-12", "today").length, 0);
+});
+
+
+test("complete typed and pasted clock times retain their hours and minutes", () => {
+  const app = runtime();
+  for (const time of ["1:00pm", "5:00pm", "12:00pm", "13:00", "09:30"]) assert.equal(app.formatTimeDraftInput(time), time);
 });

@@ -11130,3 +11130,20 @@ body:has(dialog.time-exception-modal[open]) { overflow: hidden; }
 .backup-alert-success { border-color: #4a8264; background: #f1f8f3; }
 .backup-alert > a, .backup-alert > button { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 8px 16px; border: 1px solid currentColor; border-radius: 6px; color: inherit; font-weight: 700; background: #fff; }
 .backup-alert > button:disabled { opacity: .55; cursor: wait; }
+
+/* Shared schedule colors retain readable labels and distinct draft borders. */
+[data-shift-color="blue"] { --shift-color: #155fa8; --shift-tint: #e5f1ff; }
+[data-shift-color="green"] { --shift-color: #176548; --shift-tint: #e5f5ed; }
+[data-shift-color="amber"] { --shift-color: #88540b; --shift-tint: #fff3d6; }
+[data-shift-color="red"] { --shift-color: #a32d35; --shift-tint: #ffecef; }
+[data-shift-color="violet"] { --shift-color: #694399; --shift-tint: #f1eafa; }
+[data-shift-color="gray"] { --shift-color: #4f5a67; --shift-tint: #eef1f4; }
+:is(.shift-week-card,.shift-month-card,.schedule-bar,.employee-schedule-day li)[data-shift-color] { border-left: 4px solid var(--shift-color); background: var(--shift-tint); color: var(--ink); }
+.shift-frequent { margin-block: 12px; }
+.shift-frequent h3 { font-size: 1rem; margin-bottom: 8px; }
+.shift-frequent button { display: block; padding: 8px 12px; margin-block: 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); text-align: left; width: 100%; }
+.shift-frequent small { display: block; color: var(--muted); }
+.schedule-copy-notice { padding: 12px; margin-block: 12px; border: 1px solid var(--line); background: var(--panel); }
+.schedule-copy-notice button,.shift-copy-button { padding: 8px 12px; min-height: 44px; border: 1px solid var(--line); background: var(--panel); border-radius: 6px; }
+[draggable="true"] { cursor: grab; }
+.shift-week-cell:has([draggable="true"]) .shift-cell-add { min-height: 32px; }

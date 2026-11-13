@@ -64,8 +64,8 @@ export function EmployeeScheduleScreen() {
         const day = offsetScheduleDate(data.startDate, index), dayShifts = shifts.filter(shift => shift.date === day);
         return <section className="employee-schedule-day" key={day} aria-labelledby={`day-${day}`}>
           <h3 id={`day-${day}`}><time dateTime={day}>{dayLabel(day)}</time>{day === data.today ? <span>Today</span> : null}</h3>
-          {dayShifts.length ? <ul>{dayShifts.map(shift => <li key={shift.id}>
-            <strong><time dateTime={`${shift.date}T${shift.start}`}>{timeLabel(shift.start)}</time> – <time dateTime={`${shift.date}T${shift.end}`}>{timeLabel(shift.end)}</time>{shift.end <= shift.start ? " (ends next day)" : ""}</strong>
+          {dayShifts.length ? <ul>{dayShifts.map(shift => <li key={shift.id} data-shift-color={shift.color}>
+            <strong>{shift.shiftType === "day_off" ? "Day off" : <><time dateTime={`${shift.date}T${shift.start}`}>{timeLabel(shift.start)}</time> – <time dateTime={`${shift.date}T${shift.end}`}>{timeLabel(shift.end)}</time>{shift.end <= shift.start ? " (ends next day)" : ""}</>}</strong>
             {showTeam ? <span>{shift.employeeId === data.employeeId ? `${shift.employeeName} (you)` : shift.employeeName}</span> : null}
             <span>{shift.role || "Shift"}{shift.station ? ` · ${shift.station}` : ""}</span>
           </li>)}</ul> : <p>No shifts</p>}

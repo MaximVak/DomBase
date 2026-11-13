@@ -35,7 +35,7 @@ test("employee schedule reads enforce live identity, publication and privacy bou
     assert.deepEqual(a.shifts.map(shift => shift.id), [f.scheduledShifts[0].id]);
     assert.deepEqual(b.shifts.map(shift => shift.id), [f.scheduledShifts[1].id]);
     assert.doesNotMatch(JSON.stringify(a), /Second schedule employee|UNPUBLISHED|Private|wage|payroll|email|phone|ssn|pin|password|notes|token/i);
-    assert.deepEqual(Object.keys(a.shifts[0]).sort(), ["date", "employeeId", "employeeName", "end", "id", "role", "start", "station"]);
+    assert.deepEqual(Object.keys(a.shifts[0]).sort(), ["color", "date", "employeeId", "employeeName", "end", "id", "role", "shiftType", "start", "station"]);
   });
   await t.test("team visibility follows the live setting on each request, without exposing private fields", async () => {
     await db.update(s.locationSettings).set({ employeesOwnScheduleOnly: false }).where(eq(s.locationSettings.businessId, 1));

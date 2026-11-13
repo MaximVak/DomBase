@@ -1,6 +1,9 @@
 "use client";
 
 import { FormEvent, MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, useState } from "react";
+import type { DragEvent } from "react";
+import { ShiftBuilderOptions } from "./shift-builder-options";
+import { isWorkShift, shiftLayoutError } from "./shift-builder";
 import type { CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { DepartmentManagerCell, DepartmentManagerFeedback, useDepartmentManagers } from "./department-managers";
@@ -386,7 +389,9 @@ export default function Home({ account }: { account: DashboardAccount }) {
   const [pendingTimeException, setPendingTimeException] = useState<TimeExceptionAction | null>(null);
   const [timeExceptionExplanation, setTimeExceptionExplanation] = useState("");
   const [currentTime, setCurrentTime] = useState(() => Date.now());
-  const [shiftForm, setShiftForm] = useState({
+  const [copiedShift, setCopiedShift] = useState<Shift | null>(null);
+  const draggedShift = useRef<Shift | null>(null);
+  const [shiftForm, setShiftForm] = useState<Shift & { notes: string }>({
     id: 0,
     employeeId: 0,
     date: today,
@@ -692,7 +697,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
     .filter((request) => request.employeeId !== activeEmployeeId)
     .sort((first, second) => (second.requestedAt ?? "").localeCompare(first.requestedAt ?? ""))
     : [];
-  const alertEligibleShifts = state.shifts;
+  const alertEligibleShifts = state.shifts.filter(isWorkShift);
   const operationalAlerts = activeUserCanManage
     ? operationalAlertsFor(
         state.employees,
@@ -902,12 +907,12 @@ export default function Home({ account }: { account: DashboardAccount }) {
   const visibleNavItems = isPublicSchedule
     ? navItems.filter((item) => item.id === "schedule")
     : navItems.filter((item) => (mode === "manager" || !item.managerOnly) && viewIsAllowed(item.id));
-  const todaysShifts = accessibleShifts
+  const todaysShifts = accessibleShifts.filter(isWorkShift)
     .filter((shift) => shift.date === today && shiftEmployeeIds.has(shift.employeeId))
     .sort((a, b) => a.start.localeCompare(b.start));
   const calendarShifts = useMemo(
     () =>
-      shiftsForCalendarRange(accessibleShifts, shiftEmployeeIds, today, activeCalendarTab, scheduleEnforcement.workWeekStart).sort(
+      shiftsForCalendarRange(accessibleShifts.filter(isWorkShift), shiftEmployeeIds, today, activeCalendarTab, scheduleEnforcement.workWeekStart).sort(
         (a, b) => `${a.date}${a.start}`.localeCompare(`${b.date}${b.start}`),
       ),
     [accessibleShifts, activeCalendarTab, shiftEmployeeIds, today, scheduleEnforcement.workWeekStart],
@@ -951,7 +956,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
     [accessibleShifts, scheduleDate, shiftEmployeeIds, state.ptoRequests, scheduleEnforcement.workWeekStart],
   );
   const visibleScheduleEmployees = orderedShiftEmployees.filter((employee) => visibleEmployeeIds === null || visibleEmployeeIds.includes(employee.id));
-  const myShift = todaysShifts.find((shift) => shift.employeeId === activeEmployeeId);
+  const myShift = todaysShifts.find(shift => shift.employeeId === activeEmployeeId && shiftEndDateTime(shift).getTime() > currentTime) ?? todaysShifts.filter(shift => shift.employeeId === activeEmployeeId).at(-1);
   const clockedInIds = useMemo(() => {
     return new Set(
       state.employees
@@ -2137,28 +2142,24 @@ export default function Home({ account }: { account: DashboardAccount }) {
       return;
     }
 
-    const start = parseTypedTime(shiftForm.start);
-    const end = parseTypedTime(shiftForm.end);
+    const start = shiftForm.shiftType === "day_off" ? "00:00" : parseTypedTime(shiftForm.start);
+    const end = shiftForm.shiftType === "day_off" ? "00:00" : parseTypedTime(shiftForm.end);
     if (!start || !end) {
       setCreateShiftError("Enter a valid start and end time.");
       return;
     }
     const startMinutes = timeToMinutes(start); const endMinutes = timeToMinutes(end);
-    if (startMinutes === null || endMinutes === null || startMinutes >= endMinutes) {
+    if (startMinutes === null || endMinutes === null || (isWorkShift(shiftForm) && startMinutes >= endMinutes)) {
       setCreateShiftError("Start time must be earlier than end time.");
       return;
     }
 
     const shiftDates = shiftDatesForWeekdays(shiftForm.date, createShiftWeekdays, scheduleEnforcement.workWeekStart);
-    const duplicateDate = shiftDates.find((date) => workingScheduleShifts.some((shift) => (
-      shift.id !== shiftForm.id
-      && shift.employeeId === shiftForm.employeeId
-      && shift.date === date
-    )));
-    if (duplicateDate) {
-      setCreateShiftError(`This employee already has a shift on ${formatTimeOffRequestDate(duplicateDate)}.`);
-      return;
-    }
+    const layoutError = shiftLayoutError([
+      ...workingScheduleShifts.filter(shift => shift.id !== shiftForm.id),
+      ...shiftDates.map((date, index) => ({ ...shiftForm, id: -index - 1, date, start, end })),
+    ]);
+    if (layoutError) { setCreateShiftError(layoutError); return; }
     const firstCreatedShiftId = nextScheduleShiftId(state);
     const createdShiftIds = shiftForm.id
       ? []
@@ -2231,6 +2232,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
       role: employee.role || "",
       station: "Floor",
       notes: "",
+      ...(copiedShift ? { start: copiedShift.start, end: copiedShift.end, role: copiedShift.role, shiftType: copiedShift.shiftType, color: copiedShift.color, notes: shared.data.permissions["schedule.notes.manage"] ? copiedShift.notes ?? "" : "" } : {}),
     });
     setCreateShiftWeekdays([weekdayForDate(date)]);
     setIsAddingShift(true);
@@ -2241,13 +2243,14 @@ export default function Home({ account }: { account: DashboardAccount }) {
     setCreateShiftError("");
     setShiftForm({
       id: 0,
-      employeeId: 0,
+      employeeId: copiedShift?.employeeId ?? 0,
       date,
       start: "",
       end: "",
       role: "",
       station: "Floor",
       notes: "",
+      ...(copiedShift ? { start: copiedShift.start, end: copiedShift.end, role: copiedShift.role, shiftType: copiedShift.shiftType, color: copiedShift.color, notes: shared.data.permissions["schedule.notes.manage"] ? copiedShift.notes ?? "" : "" } : {}),
     });
     setCreateShiftWeekdays([weekdayForDate(date)]);
     setIsAddingShift(true);
@@ -2714,8 +2717,8 @@ export default function Home({ account }: { account: DashboardAccount }) {
       setEditShiftError("You can only edit shifts for roles in your assigned departments.");
       return;
     }
-    const start = parseTypedTime(editingShift.start);
-    const end = parseTypedTime(editingShift.end);
+    const start = editingShift.shiftType === "day_off" ? "00:00" : parseTypedTime(editingShift.start);
+    const end = editingShift.shiftType === "day_off" ? "00:00" : parseTypedTime(editingShift.end);
     const role = editingShift.role.trim();
     const notes = editingShift.notes?.trim() ?? "";
     if (!start || !end) {
@@ -2723,28 +2726,8 @@ export default function Home({ account }: { account: DashboardAccount }) {
       return;
     }
     const startMinutes = timeToMinutes(start); const endMinutes = timeToMinutes(end);
-    if (startMinutes === null || endMinutes === null || startMinutes >= endMinutes) {
+    if (startMinutes === null || endMinutes === null || (isWorkShift(editingShift) && startMinutes >= endMinutes)) {
       setEditShiftError("Start time must be earlier than end time.");
-      return;
-    }
-    const shiftHasStarted = Boolean(savedShift && currentTime >= shiftStartDateTime(savedShift).getTime());
-    const shiftHasEnded = Boolean(savedShift && currentTime >= shiftEndDateTime(savedShift).getTime());
-    if (shiftHasEnded) {
-      setEditShiftError("This shift has ended and can no longer be changed.");
-      return;
-    }
-    if (shiftHasStarted && savedShift && (
-      editingShift.employeeId !== savedShift.employeeId
-      || editingShift.date !== savedShift.date
-      || start !== savedShift.start
-      || role !== savedShift.role.trim()
-      || notes !== (savedShift.notes?.trim() ?? "")
-    )) {
-      setEditShiftError("Once a shift starts, only its clock-out time can be changed.");
-      return;
-    }
-    if (shiftHasStarted && shiftEndDateTime({ ...editingShift, start, end, role }).getTime() <= currentTime) {
-      setEditShiftError("Clock-out time must remain in the future while the shift is active.");
       return;
     }
     if (!role || !shiftEmployeeIds.has(editingShift.employeeId)) return;
@@ -2757,20 +2740,11 @@ export default function Home({ account }: { account: DashboardAccount }) {
       editingShift.date,
       ...shiftDatesForWeekdays(editingShift.date, editingShiftWeekdays, scheduleEnforcement.workWeekStart),
     ]));
-    if (shiftHasStarted && savedShift && targetDates.some((date) => date !== savedShift.date)) {
-      setEditShiftError("Days cannot be added after a shift starts.");
-      return;
-    }
-    const duplicateDate = targetDates.find((date) => workingScheduleShifts.some((shift) => (
-      shift.id !== editingShift.id
-      && shift.employeeId === editingShift.employeeId
-      && shift.date === date
-    )));
-    if (duplicateDate) {
-      setEditShiftError(`This employee already has a shift on ${formatTimeOffRequestDate(duplicateDate)}.`);
-      return;
-    }
-
+    const layoutError = shiftLayoutError([
+      ...workingScheduleShifts.filter(shift => shift.id !== editingShift.id),
+      ...targetDates.map((date, index) => ({ ...editingShift, id: -index - 1, date, start, end })),
+    ]);
+    if (layoutError) { setEditShiftError(layoutError); return; }
     const additionalDates = targetDates.filter((date) => date !== editingShift.date);
     const firstAdditionalShiftId = nextScheduleShiftId(state);
     const additionalShifts = additionalDates.map((date, index) => ({
@@ -2843,6 +2817,21 @@ export default function Home({ account }: { account: DashboardAccount }) {
       };
     })) return;
     setEditingShift(null);
+  }
+
+  async function dropScheduleShift(event: DragEvent, employeeId: number, date: string) {
+    event.preventDefault();
+    const source = draggedShift.current; draggedShift.current = null;
+    if (!source || mode !== "manager" || !canEditScheduleRole(source.role)) return;
+    if (source.employeeId === employeeId && source.date === date) return;
+    const moved = { ...source, employeeId, date };
+    const layoutError = shiftLayoutError([...workingScheduleShifts.filter(shift => shift.id !== source.id), moved]);
+    if (layoutError) { setSchedulePermissionError(layoutError); return; }
+    const saved = await setState(current => ({ ...current, scheduleDraftsByManager: {
+      ...current.scheduleDraftsByManager,
+      [activeEmployeeId]: mergeScheduleDraft(current.shifts, current.scheduleDraftsByManager?.[activeEmployeeId], [moved], [], [source.employeeId, employeeId]),
+    } }));
+    if (saved) setSchedulePermissionError("Shift moved in your draft. Publish when ready.");
   }
 
   async function publishSchedule() {
@@ -4987,6 +4976,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                   ) : null}
                 </div>
               </div>
+              {copiedShift ? <div className="schedule-copy-notice" role="status">Copied {formatTimeRange(copiedShift)}. Select an add-shift cell to review and paste it. <button type="button" onClick={() => setCopiedShift(null)}>Finish pasting</button></div> : null}
               {(mode === "employee" || mode === "manager") && (
                 <div className="employee-schedule">
                   {schedulePermissionError ? <p className="schedule-permission-message" role="alert">{schedulePermissionError}</p> : null}
@@ -5076,12 +5066,16 @@ export default function Home({ account }: { account: DashboardAccount }) {
                                     <small className="created-timestamp">Created at {formatSavedTime(employeeLastCreatedAt)}</small>
                                   ) : null}
                                 </div>
-                                <div className="schedule-track">
+                                <div className="schedule-track" onDragOver={event => event.preventDefault()} onDrop={event => void dropScheduleShift(event, employee.id, scheduleDate)}>
                                   {employeeShifts.map((shift) => (
                                     <div
                                       className={`${shift.employeeId === activeEmployeeId ? "schedule-bar mine" : "schedule-bar"}${mode === "manager" ? " editable" : ""}${draftShiftIds.has(shift.id) ? " draft" : ""}`}
                                       key={shift.id}
                                       style={scheduleBarStyle(shift, scheduleEnforcement)}
+                                      data-shift-color={shift.color ?? "blue"}
+                                      draggable={mode === "manager" && canEditScheduleRole(shift.role)}
+                                      onDragStart={event => { draggedShift.current = shift; event.dataTransfer.setData("text/plain", String(shift.id)); }}
+                                      onDragEnd={() => { draggedShift.current = null; }}
                                       title={`${employee.name}: ${formatTimeRange(shift)} ${shift.role}`}
                                       role={mode === "manager" ? "button" : undefined}
                                       tabIndex={mode === "manager" ? 0 : undefined}
@@ -5102,13 +5096,13 @@ export default function Home({ account }: { account: DashboardAccount }) {
                                       <strong>Time off</strong><span>{timeOff.startTime && timeOff.endTime ? `${formatTime12(timeOff.startTime)}–${formatTime12(timeOff.endTime)}` : "All day"}</span>
                                     </button>
                                   ) : null}
-                                  {mode === "manager" && employeeShifts.length === 0 && !timeOff ? (
+                                  {mode === "manager" && !timeOff ? (
                                     <button
                                       type="button"
                                       className="shift-cell-add schedule-track-add"
                                       onClick={() => openShiftCreator(employee, scheduleDate)}
                                       aria-label={`Add shift for ${employee.name} on ${formatLongDate(scheduleDate)}`}
-                                      title="Add shift"
+                                      title={copiedShift ? "Paste copied shift" : "Add shift"}
                                     >
                                       <span aria-hidden="true" />
                                     </button>
@@ -5171,10 +5165,11 @@ export default function Home({ account }: { account: DashboardAccount }) {
                                 const hasCellContent = dayShifts.length > 0 || Boolean(timeOff);
 
                                 return (
-                                  <div className={`shift-week-cell${hasCellContent ? " has-content" : " empty"}`} role="cell" key={day.date}>
+                                  <div className={`shift-week-cell${hasCellContent ? " has-content" : " empty"}`} role="cell" key={day.date} onDragOver={event => event.preventDefault()} onDrop={event => void dropScheduleShift(event, employee.id, day.date)}>
                                     {dayShifts.map((shift) => (
                                       <button
                                         type="button"
+                                        data-shift-color={shift.color ?? "blue"} draggable={mode === "manager" && canEditScheduleRole(shift.role)} onDragStart={event => { draggedShift.current = shift; event.dataTransfer.setData("text/plain", String(shift.id)); }} onDragEnd={() => { draggedShift.current = null; }}
                                         className={`shift-week-card${shift.employeeId === activeEmployeeId ? " mine" : ""}${mode === "manager" ? " editable" : ""}${draftShiftIds.has(shift.id) ? " draft" : ""}`}
                                         key={shift.id}
                                         onClick={() => openShiftEditor(shift)}
@@ -5186,13 +5181,13 @@ export default function Home({ account }: { account: DashboardAccount }) {
                                     {timeOff ? (
                                       <button type="button" className="shift-time-off schedule-time-off-button" onClick={(event) => openScheduleTimeOff(event, timeOff)} disabled={isPublicSchedule || (mode !== "manager" && timeOff.employeeId !== activeEmployeeId)} aria-label={`View time off for ${employee.name} on ${formatLongDate(day.date)}`} aria-haspopup="dialog" aria-expanded={scheduleTimeOffRequestId === timeOff.id}><strong>⊘ Time off</strong><span>▣ {timeOff.startTime && timeOff.endTime ? `${formatTime12(timeOff.startTime)}–${formatTime12(timeOff.endTime)}` : "All day"}</span></button>
                                     ) : null}
-                                    {mode === "manager" && dayShifts.length === 0 && !timeOff ? (
+                                    {mode === "manager" && !timeOff ? (
                                       <button
                                         type="button"
                                         className="shift-cell-add"
                                         onClick={() => openShiftCreator(employee, day.date)}
                                         aria-label={`Add shift for ${employee.name} on ${formatLongDate(day.date)}`}
-                                        title="Add shift"
+                                        title={copiedShift ? "Paste copied shift" : "Add shift"}
                                       >
                                         <span aria-hidden="true" />
                                       </button>
@@ -5218,6 +5213,8 @@ export default function Home({ account }: { account: DashboardAccount }) {
                             <div
                               className={`${day.date === today ? "shift-month-day today" : "shift-month-day"}${day.inMonth ? "" : " outside"}${hasDayContent ? " has-content" : " empty"}${mode === "manager" ? " can-add-shift" : ""}`}
                               key={day.date}
+                              onDragOver={event => event.preventDefault()}
+                              onDrop={event => { if (draggedShift.current) void dropScheduleShift(event, draggedShift.current.employeeId, day.date); }}
                               onClick={(event) => {
                                 if (mode === "manager" && event.target === event.currentTarget) {
                                   openMonthShiftCreator(day.date);
@@ -5231,7 +5228,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                               {visibleDayShifts.map((shift) => {
                                 const employee = employeeById(state.employees, shift.employeeId);
                                 return (
-                                  <button type="button" className={`shift-month-card${shift.employeeId === activeEmployeeId ? " mine" : ""}${draftShiftIds.has(shift.id) ? " draft" : ""}`} key={shift.id} onClick={() => openShiftEditor(shift)}>
+                                  <button type="button" data-shift-color={shift.color ?? "blue"} draggable={mode === "manager" && canEditScheduleRole(shift.role)} onDragStart={event => { draggedShift.current = shift; event.dataTransfer.setData("text/plain", String(shift.id)); }} onDragEnd={() => { draggedShift.current = null; }} className={`shift-month-card${shift.employeeId === activeEmployeeId ? " mine" : ""}${draftShiftIds.has(shift.id) ? " draft" : ""}`} key={shift.id} onClick={() => openShiftEditor(shift)}>
                                     <strong>{formatCompactTimeRange(shift)}</strong>
                                     <span>{employee?.name ?? "Open shift"} {shift.role ? `(${shift.role})` : ""}</span>
                                   </button>
@@ -5249,7 +5246,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                                   className="shift-cell-add shift-month-add"
                                   onClick={() => openMonthShiftCreator(day.date)}
                                   aria-label={`Add shift on ${formatLongDate(day.date)}`}
-                                  title="Add shift"
+                                  title={copiedShift ? "Paste copied shift" : "Add shift"}
                                 >
                                   <span aria-hidden="true" />
                                 </button>
@@ -5357,7 +5354,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
               }}
               employees={state.employees}
               events={state.clockEvents}
-              shifts={state.shifts}
+              shifts={state.shifts.filter(isWorkShift)}
               adjustments={state.hoursAdjustments ?? []}
               pto={state.ptoRequests ?? []}
               departments={state.departments}
@@ -6650,6 +6647,8 @@ export default function Home({ account }: { account: DashboardAccount }) {
                 required
               />
             </label>
+            <ShiftBuilderOptions key={`${shiftForm.employeeId}:${shiftForm.date}`} value={shiftForm} employeeId={shiftForm.employeeId} date={shiftForm.date} suggest onChange={patch => setShiftForm(form => ({ ...form, ...patch }))} />
+            {isWorkShift(shiftForm) ? <>
             <label className="shift-edit-field">
               <span>Clock-in time</span>
               <TimeInput
@@ -6672,6 +6671,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                 required
               />
             </label>
+            </> : null}
             <label className="shift-edit-field">
               <span>Role</span>
               <select
@@ -6735,6 +6735,9 @@ export default function Home({ account }: { account: DashboardAccount }) {
                 <span aria-hidden="true">&times;</span>
               </button>
             </div>
+            <button type="button" className="shift-copy-button" onClick={() => { setCopiedShift({ ...editingShift }); setEditingShift(null); }} aria-label="Copy shift" title="Copy shift">⧉ Copy shift</button>
+            <label className="shift-edit-field"><span>Employee</span><select aria-label="Edit shift employee" value={editingShift.employeeId} onChange={event => setEditingShift(shift => shift ? { ...shift, employeeId: Number(event.target.value) } : shift)}>{orderedShiftEmployees.map(employee => <option key={employee.id} value={employee.id}>{employee.name}</option>)}</select></label>
+            <ShiftBuilderOptions value={editingShift} employeeId={editingShift.employeeId} date={editingShift.date} onChange={patch => setEditingShift(shift => shift ? { ...shift, ...patch } : shift)} />
             <label className="shift-edit-field">
               <span>Date</span>
               <input
@@ -6747,9 +6750,9 @@ export default function Home({ account }: { account: DashboardAccount }) {
                   if (date) setEditingShiftWeekdays([weekdayForDate(date)]);
                 }}
                 aria-label="Edit shift date"
-                disabled={editingShiftHasStarted}
               />
             </label>
+            {isWorkShift(editingShift) ? <>
             <label className="shift-edit-field">
               <span className="shift-edit-label-row">
                 <span>Clock-in time</span>
@@ -6765,7 +6768,6 @@ export default function Home({ account }: { account: DashboardAccount }) {
                 ariaLabel="Edit shift start"
                 placeholder="Start time"
                 selectOnFocus
-                disabled={editingShiftHasStarted}
                 suggestBefore={editingShift.end}
               />
             </label>
@@ -6782,17 +6784,16 @@ export default function Home({ account }: { account: DashboardAccount }) {
                 ariaLabel="Edit shift end"
                 placeholder="End time"
                 selectOnFocus
-                disabled={editingShiftHasEnded}
                 suggestAfter={editingShift.start}
               />
             </label>
+            </> : null}
             <label className="shift-edit-field">
               <span>Role</span>
               <select
                 value={editingShift.role}
                 onChange={(event) => setEditingShift((shift) => shift ? { ...shift, role: event.target.value } : shift)}
                 aria-label="Edit shift role"
-                disabled={editingShiftHasStarted}
               >
                 <option value="">Select role</option>
                 {availableRoles.filter(role => canEditScheduleRole(role)).map((role) => (
@@ -6800,7 +6801,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                 ))}
               </select>
             </label>
-            <fieldset className="shift-apply-days" disabled={editingShiftHasStarted}>
+            <fieldset className="shift-apply-days">
               <legend>Apply to:</legend>
               <div>
                 {shiftWeekdayOptions.map((option) => {
@@ -6814,7 +6815,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                         onClick={() => toggleEditingShiftWeekday(option.value)}
                         aria-label={`${option.label}, ${formatShiftApplyDate(editingShift.date, option.value, scheduleEnforcement.workWeekStart)}`}
                         aria-pressed={editingShiftWeekdays.includes(option.value)}
-                        disabled={editingShiftHasStarted || isAnchorDay}
+                        disabled={isAnchorDay}
                       >
                         {option.label}
                       </button>
@@ -6830,14 +6831,9 @@ export default function Home({ account }: { account: DashboardAccount }) {
                 onChange={(event) => setEditingShift((shift) => shift ? { ...shift, notes: event.target.value } : shift)}
                 placeholder="Leave a note for your employee, and they’ll see it when they clock in."
                 maxLength={500}
-                disabled={editingShiftHasStarted}
               />
             </label>
-            {editingShiftHasEnded ? (
-              <p className="shift-time-lock-note">This shift has ended. Its scheduled times are locked.</p>
-            ) : editingShiftHasStarted ? (
-              <p className="shift-time-lock-note">This shift is in progress. Only its clock-out time can be changed.</p>
-            ) : null}
+            <p className="shift-time-lock-note">Edits change the planned schedule only. Recorded punches stay unchanged.</p>
             {editShiftError ? <p className="shift-error-message" role="alert">{editShiftError}</p> : null}
             <div className="modal-actions">
               {activeUserIsAdmin ? (
@@ -6850,9 +6846,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
               >
                 Cancel
               </button>
-              {!editingShiftHasEnded ? (
-                <button type="submit" className="primary-action">Save changes</button>
-              ) : null}
+              <button type="submit" className="primary-action">Save changes</button>
             </div>
           </form>
         </div>
@@ -6961,7 +6955,7 @@ function noShowAlertsFor(
   if (!settings.noShowAlerts) return [];
   return shifts.flatMap((shift) => {
     const employee = employees.find((entry) => entry.id === shift.employeeId);
-    if (!employee?.active) return [];
+    if (shift.shiftType === "day_off" || !employee?.active) return [];
 
     const scheduledStart = shiftStartDateTime(shift);
     const alertTime = scheduledStart.getTime() + settings.noShowMinutes * 60000;
@@ -7186,14 +7180,15 @@ function clockEventLabel(event: ClockEvent, shifts: Shift[], settings: ScheduleE
 function shiftForClockEvent(event: ClockEvent, shifts: Shift[]) {
   const eventTime = new Date(event.at).getTime();
 
-  return shifts.find((shift) => {
-    if (shift.employeeId !== event.employeeId) return false;
+  return shifts.filter((shift) => {
+    if (event.role && shift.role !== event.role) return false;
+    if (shift.shiftType === "day_off" || shift.employeeId !== event.employeeId) return false;
     const start = shiftStartDateTime(shift).getTime();
     const end = shiftEndDateTime(shift).getTime();
     const windowStart = start - 12 * 60 * 60 * 1000;
     const windowEnd = end + 12 * 60 * 60 * 1000;
     return eventTime >= windowStart && eventTime <= windowEnd;
-  });
+  }).sort((a, b) => Math.abs(eventTime - (event.type === "out" ? shiftEndDateTime(a) : shiftStartDateTime(a)).getTime()) - Math.abs(eventTime - (event.type === "out" ? shiftEndDateTime(b) : shiftStartDateTime(b)).getTime()))[0];
 }
 
 function matchingBreakStartEvent(event: ClockEvent, events: ClockEvent[]) {
@@ -7703,10 +7698,12 @@ function capitalize(value: string) {
 }
 
 function formatTimeRange(shift: Shift) {
+  if (shift.shiftType === "day_off") return "Day off";
   return `${formatTime12(shift.start)} - ${formatTime12(shift.end)}`;
 }
 
 function formatCompactTimeRange(shift: Shift) {
+  if (shift.shiftType === "day_off") return "Day off";
   return `${formatTimeCompact(shift.start)}-${formatTimeCompact(shift.end)}`;
 }
 
@@ -7792,6 +7789,8 @@ function timeDraftHourLength(digits: string) {
 
 function formatTimeDraftInput(value: string, previousValue = "") {
   const normalized = value.toLowerCase().replace(/\s+/g, "");
+  // Preserve complete typed/pasted clock times instead of reinterpreting their digits.
+  if (/^(?:[01]?\d|2[0-3]):[0-5]\d(?:am|pm)?$/.test(normalized)) return normalized;
   const periodMatch = normalized.match(/([ap](?:m)?)$/);
   const period = periodMatch?.[1] ?? "";
   const timeText = period ? normalized.slice(0, -period.length) : normalized;
@@ -7876,6 +7875,7 @@ function isTimeWithinBounds(value: string, after?: string, before?: string) {
 }
 
 function formatScheduledHours(shift: Shift) {
+  if (shift.shiftType === "day_off") return "0.0";
   const startMinutes = timeToMinutes(shift.start);
   const endMinutes = timeToMinutes(shift.end);
 
@@ -7899,6 +7899,7 @@ function timeToMinutes(time: string) {
 }
 
 function scheduleBarStyle(shift: Shift, settings: ScheduleEnforcement = defaultScheduleEnforcement) {
+  if (shift.shiftType === "day_off") return { "--shift-left": "0%", "--shift-width": "100%" } as CSSProperties;
   const startMinutes = timeToMinutes(shift.start);
   const endMinutes = timeToMinutes(shift.end);
   const scheduleStartMinutes = settings.scheduleStartHour * 60;

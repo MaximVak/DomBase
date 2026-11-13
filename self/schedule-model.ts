@@ -6,7 +6,7 @@ export type EmployeeSchedule = {
   startDate: string;
   endDate: string;
   ownOnly: boolean;
-  shifts: { id: number; employeeId: number; employeeName: string; date: string; start: string; end: string; role: string; station: string }[];
+  shifts: { shiftType: "work" | "day_off"; color: import("../app/shift-builder").ShiftColor; id: number; employeeId: number; employeeName: string; date: string; start: string; end: string; role: string; station: string }[];
 };
 
 export function offsetScheduleDate(date: string, days: number) {

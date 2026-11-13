@@ -39,7 +39,7 @@ type ReliabilityInput = { employees: { id: number; name: string; terminated?: bo
 export function reliabilityFor(state: ReliabilityInput, start: string, end: string, now: number, settings: { lateMinutes: number; mandatoryMealBreak: boolean; mealBreakAfterHours: number }, zone = "America/Los_Angeles") {
   const rows: ShiftScore[] = [];
   for (const person of state.employees) {
-    const shifts = state.shifts.filter(s => s.employeeId === person.id);
+    const shifts = state.shifts.filter(s => s.shiftType !== "day_off" && s.employeeId === person.id);
     const sessions: { start: string; end: string | null; breaks: number; automatic: boolean; shiftId?: number }[] = [];
     let current: typeof sessions[number] | null = null, breaking: number | null = null;
     for (const event of state.clockEvents.filter(e => e.employeeId === person.id && Date.parse(e.at) <= now).sort((a, b) => Date.parse(a.at) - Date.parse(b.at) || a.id - b.id)) {

@@ -21,7 +21,7 @@ export async function readEmployeeSchedule(db: KioskOperatorDatabase, ctx: { acc
       .innerJoin(s.employees, eq(s.employees.id, ctx.account.employeeId ?? -1))
       .where(sql`${s.business.id} = 1 AND ${ctx.guard}`).limit(1),
     db.select({ id: s.shifts.id, employeeId: s.shifts.employeeId, employeeName: s.employees.name,
-      date: s.shifts.date, start: s.shifts.startTime, end: s.shifts.endTime, role: s.shifts.roleName, station: s.shifts.station })
+      shiftType: s.shifts.shiftType, color: s.shifts.color, date: s.shifts.date, start: s.shifts.startTime, end: s.shifts.endTime, role: s.shifts.roleName, station: s.shifts.station })
       .from(s.shifts).innerJoin(s.employees, eq(s.employees.id, s.shifts.employeeId))
       .innerJoin(s.locationSettings, eq(s.locationSettings.businessId, 1))
       .where(sql`${ctx.guard} AND ${s.shifts.archivedAt} IS NULL

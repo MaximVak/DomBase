@@ -85,6 +85,13 @@
       "when": 1794549870163,
       "tag": "0011_invitation_email",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1794608208518,
+      "tag": "0012_shift_builder",
+      "breakpoints": true
     }
   ]
 }

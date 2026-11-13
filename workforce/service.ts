@@ -8,6 +8,7 @@ import { workspaceSnapshot } from "./snapshot";
 import { departmentChange, employeeChange } from "./records";
 import type { RecordContext } from "./records";
 import { scheduleChange } from "./schedule";
+import { frequentShifts } from "./shift-suggestions";
 import { timeOffChange } from "./time-off";
 import { conversationChange } from "./messages";
 import { timecardChange } from "./timecards";
@@ -41,6 +42,7 @@ export function createWorkforceService(db: Database, access: ReturnType<typeof c
       const ctx = await access.workspaceContext(request);
       const url = new URL(request.url);
       const action = url.pathname.slice("/api/workspace/".length);
+      if (action === "frequent-shifts" && request.method === "GET") return json(await frequentShifts(db, ctx, url));
       if (action === "state" && request.method === "GET") return json(await workspaceSnapshot(db, ctx, options.fieldKey, requestPeriod(url, now())));
       if (action === "maintenance" && request.method === "POST") {
         ctx.requirePermission("timesheets.manage");
