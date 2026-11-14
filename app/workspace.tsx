@@ -8827,6 +8827,7 @@ function TeamAvailabilityBoard({
   onReject: (requestId: number, note: string) => Promise<boolean>;
 }) {
   const [weekDate, setWeekDate] = useState(initialDate);
+  const [includeInactive, setIncludeInactive] = useState(false);
   const [expandedEmployeeId, setExpandedEmployeeId] = useState<number | null>(null);
   const [rejectingRequestId, setRejectingRequestId] = useState<number | null>(null);
   const [rejectionNote, setRejectionNote] = useState("");
@@ -8840,7 +8841,7 @@ function TeamAvailabilityBoard({
   for (const employee of employees) for (const day of weekDays) {
     requestCells[`${employee.id}-${day.date}`] = availabilityForDate(requests, employee.id, day.date).slots;
   }
-  const orderedEmployees = [...employees].sort((first, second) => first.name.localeCompare(second.name));
+  const orderedEmployees = employees.filter(employee => includeInactive || (employee.active && !employee.terminated)).sort((first, second) => first.name.localeCompare(second.name));
   const dateFormatter = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" });
   const weekRangeLabel = `${dateFormatter.format(parseLocalDate(weekDays[0].date))} - ${dateFormatter.format(parseLocalDate(weekDays[6].date))}`;
   const visibleRequests = requests;
@@ -8913,6 +8914,7 @@ function TeamAvailabilityBoard({
   return (
     <section className="team-availability-section" aria-label="Team availability">
       <p className="ts-form-note">This grid shows approved availability effective on each date. Expand a person’s requests to review pending changes and retained history.</p>
+      <label className="availability-history-filter"><input type="checkbox" checked={includeInactive} onChange={event => setIncludeInactive(event.target.checked)} /> Include inactive employees’ history</label>
       <div className="team-availability-toolbar">
         <div className="team-availability-week-controls">
           <button type="button" onClick={() => moveWeek(-1)} aria-label="Previous week"><span aria-hidden="true">‹</span></button>
