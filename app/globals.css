@@ -11189,3 +11189,37 @@ body:has(dialog.time-exception-modal[open]) { overflow: hidden; }
 .schedule-warning-panel .warning-kind-list { display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 0; list-style: none; }
 .schedule-warning-panel .warning-kind-list li { margin: 0; font-weight: 600; }
 .schedule-track:has(.schedule-warning-badge) { min-height: 100px; }
+
+.schedule-tools-dialog { position: fixed; inset: 0; margin: auto; width: min(720px, calc(100vw - 24px)); max-height: calc(100dvh - 32px); overflow: auto; padding: 24px; border: 1px solid var(--line, #d5deea); border-radius: 10px; color: #12213a; background: #fff; }
+.schedule-tools-dialog::backdrop { background: rgb(18 33 58 / 38%); }
+.schedule-tools-dialog > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.schedule-tools-dialog h2 { margin: 0; font-size: 22px; }
+.schedule-tools-dialog h3 { margin: 0 0 12px; font-size: 16px; }
+.schedule-tools-dialog h4 { margin: 0 0 8px; }
+.schedule-tools-dialog p { font-size: 13px; line-height: 1.5; margin: 8px 0; }
+.schedule-tools-dialog button { min-height: 40px; padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 6px; background: #f3f7fb; color: #173657; font-weight: 650; }
+.schedule-tools-dialog button:disabled { opacity: .5; cursor: not-allowed; }
+.schedule-tools-dialog button.primary-action { background: #315a85; color: #fff; border-color: #315a85; }
+.schedule-tools-dialog .icon-button { font-size: 24px; line-height: 1; min-width: 40px; }
+.schedule-tools-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 20px 0; border-bottom: 1px solid #d5deea; padding-bottom: 16px; }
+.schedule-tools-tabs button[aria-pressed="true"] { background: #e4effa; border-color: #315a85; color: #173657; }
+.schedule-tools-content { display: grid; gap: 20px; }
+.schedule-tools-content > section, .schedule-tool-selection { padding: 16px 0; border: 0; border-top: 1px solid #d5deea; margin: 0; min-width: 0; }
+.schedule-tools-dialog label:not(.schedule-tool-check) { display: grid; gap: 6px; font-size: 13px; font-weight: 650; margin: 12px 0; }
+.schedule-tools-dialog :is(input:not([type="checkbox"]), select) { width: 100%; min-width: 0; min-height: 42px; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; color: inherit; font: inherit; }
+.schedule-tool-check { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; line-height: 1.5; margin: 12px 0; }
+.schedule-tool-check input { margin-top: 4px; flex: 0 0 auto; }
+.schedule-tool-selection legend { font-size: 16px; font-weight: 700; padding: 0; }
+.schedule-tool-people { max-height: 180px; overflow: auto; padding: 0 12px; border: 1px solid #d5deea; border-radius: 6px; }
+.schedule-template-list { display: grid; gap: 8px; max-height: 220px; overflow: auto; list-style: none; margin: 12px 0; padding: 0; }
+.schedule-template-list button { display: flex; width: 100%; justify-content: space-between; text-align: left; gap: 12px; overflow-wrap: anywhere; }
+.schedule-template-list button[aria-pressed="true"] { background: #e4effa; border-color: #315a85; }
+.schedule-template-list span { font-size: 12px; white-space: nowrap; font-weight: 400; }
+.schedule-template-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.schedule-tools-dialog summary { cursor: pointer; font-size: 13px; font-weight: 650; padding: 8px 0; }
+.schedule-tool-error { padding: 12px; background: #fff3ee; border-left: 3px solid #a44224; }
+.schedule-tool-review { background: #f6f9fc; padding: 16px !important; border: 1px solid #cbd5e1 !important; border-radius: 6px; }
+.schedule-tool-entry-list { max-height: 240px; overflow: auto; padding: 0 0 0 20px; }
+.schedule-tool-entry-list li { padding: 8px 0; font-size: 13px; }
+.schedule-tool-entry-list span { display: block; overflow-wrap: anywhere; }
+@media (max-width: 520px) { .schedule-tools-dialog { padding: 16px; } .schedule-tools-tabs button { flex: 1; } .schedule-template-list button { flex-direction: column; gap: 4px; } .schedule-template-actions button { width: 100%; } }

@@ -9,6 +9,7 @@ import { departmentChange, employeeChange } from "./records";
 import type { RecordContext } from "./records";
 import { scheduleChange } from "./schedule";
 import { frequentShifts } from "./shift-suggestions";
+import { scheduleTools } from "./schedule-tools";
 import { readScheduleConflicts } from "./conflicts";
 import { timeOffChange } from "./time-off";
 import { conversationChange } from "./messages";
@@ -43,10 +44,15 @@ export function createWorkforceService(db: Database, access: ReturnType<typeof c
       const ctx = await access.workspaceContext(request);
       const url = new URL(request.url);
       const action = url.pathname.slice("/api/workspace/".length);
+      if (action === "schedule-tools") {
+        if (request.method !== "POST") return json({ error: "Method not allowed." }, 405, { Allow: "POST" });
+        if (url.search) throw new AuthError(400, "Choose schedule tools in the request body.");
+        return json(await scheduleTools(db, ctx, await readAuthBody(request, 16384), options));
+      }
       if (action === "schedule-conflicts") {
         if (request.method !== "POST") return json({ error: "Method not allowed." }, 405, { Allow: "POST" });
         if (url.search) throw new AuthError(400, "Choose the warning dates in the request body.");
-        return json(await readScheduleConflicts(db, ctx, await readAuthBody(request, 32768)));
+        return json(await readScheduleConflicts(db, ctx, await readAuthBody(request, 256 * 1024)));
       }
       if (action === "frequent-shifts" && request.method === "GET") return json(await frequentShifts(db, ctx, url));
       if (action === "state" && request.method === "GET") return json(await workspaceSnapshot(db, ctx, options.fieldKey, requestPeriod(url, now())));
@@ -58,7 +64,7 @@ export function createWorkforceService(db: Database, access: ReturnType<typeof c
       }
       if (action !== "commit") throw new AuthError(404, "Not found.");
       if (request.method !== "POST") return json({ error: "Method not allowed." }, 405, { Allow: "POST" });
-      const body = await readAuthBody(request, 256 * 1024); v.keys(body, ["id", "revision", "employeeVersions", "changes", "period"]);
+      const body = await readAuthBody(request, 2 * 1024 * 1024); v.keys(body, ["id", "revision", "employeeVersions", "changes", "period"]);
       if (!tokenIsValid(body.id)) throw new AuthError(400, "Invalid save identifier.");
       const period = workspacePeriod(body.period, now());
       const revision = v.integer(body.revision, 0); const id = body.id;

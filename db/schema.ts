@@ -836,3 +836,26 @@ export const shoutoutModeration = sqliteTable("shoutout_moderation", {
   actorAccountId: integer("actor_account_id").notNull().references(() => accounts.id),
   createdAt: text("created_at").notNull(),
 });
+
+export const scheduleTemplates = sqliteTable("schedule_templates", {
+  id: id(),
+  name: text("name").notNull(),
+  createdByAccountId: integer("created_by_account_id").notNull().references(() => accounts.id),
+  version: integer("version").notNull().default(1),
+  archivedAt: text("archived_at"),
+  ...timestamps(),
+}, table => [check("schedule_templates_values_check", sql`length(trim(${table.name})) BETWEEN 1 AND 100 AND ${table.version} > 0`)]);
+
+export const scheduleTemplateEntries = sqliteTable("schedule_template_entries", {
+  id: id(),
+  templateId: integer("template_id").notNull().references(() => scheduleTemplates.id),
+  employeeId: integer("employee_id").notNull().references(() => employees.id),
+  roleId: integer("role_id").notNull().references(() => roles.id),
+  dayOfWeek: integer("day_of_week").notNull(),
+  startTime: text("start_time").notNull(),
+  endTime: text("end_time").notNull(),
+  shiftType: text("shift_type", { enum: ["work", "day_off"] }).notNull().default("work"),
+  color: text("color", { enum: ["blue", "green", "amber", "red", "violet", "gray"] }).notNull().default("blue"),
+  station: text("station").notNull().default("Floor"),
+  notes: text("notes").notNull().default(""),
+}, table => [index("schedule_template_entries_template_idx").on(table.templateId), check("schedule_template_entries_values_check", sql`${table.dayOfWeek} BETWEEN 0 AND 6 AND ${table.shiftType} IN ('work','day_off') AND ${table.color} IN ('blue','green','amber','red','violet','gray') AND ((${table.shiftType} = 'day_off' AND ${table.startTime} = '00:00' AND ${table.endTime} = '00:00') OR (${table.shiftType} = 'work' AND ${table.startTime} < ${table.endTime}))`)]);

@@ -8,6 +8,7 @@ import { ShiftAvailability } from "./shift-availability";
 import { approvedAvailability, availabilityForDate, availabilityTime, newestAvailability } from "./availability-model";
 import { useScheduleWarnings, ScheduleWarningPanel, ShiftWarningBadge } from "./schedule-warning-panel";
 import type { PlannedShift } from "./schedule-estimates";
+import { ScheduleTools } from "./schedule-tools";
 import { ShiftBuilderOptions } from "./shift-builder-options";
 import { isWorkShift, shiftLayoutError } from "./shift-builder";
 import { estimateSchedule } from "./schedule-estimates";
@@ -386,6 +387,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
   const [visibleEmployeeIds, setVisibleEmployeeIds] = useState<number[] | null>(null);
   const [editingShift, setEditingShift] = useState<Shift | null>(null);
   const [createShiftWeekdays, setCreateShiftWeekdays] = useState<number[]>([]);
+  const [isScheduleToolsOpen, setIsScheduleToolsOpen] = useState(false);
   const [editingShiftWeekdays, setEditingShiftWeekdays] = useState<number[]>([]);
   const [isAddingShift, setIsAddingShift] = useState(false);
   const [createShiftError, setCreateShiftError] = useState("");
@@ -2981,7 +2983,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
   }
 
   useEffect(() => {
-    shared.setEditing(Boolean(isSharedTimeCardEditing || ptoRequestForm || editingPayrollEmployeeId !== null || activeView === "profile" || isAddingEmployee || editingEmployeeId !== null || isAddingDepartment || editingDepartmentId !== null || isAddingShift || editingShift || scheduleEventDraft || editingHours || editingPtoPolicyId !== null || ptoPolicyForm || reviewingPtoRequestId !== null || certificateEmployeeId !== null || terminatingEmployeeId !== null || editingPersonalContactEmployeeId !== null || editingPersonalPayrollEmployeeId !== null || editingBasicInfoField !== null || activeView === "settings" || activeView === "my_availability" || activeView === "team_availability" || isCreatingConversation || editingConversationNameId !== null));
+    shared.setEditing(Boolean(isScheduleToolsOpen || isSharedTimeCardEditing || ptoRequestForm || editingPayrollEmployeeId !== null || activeView === "profile" || isAddingEmployee || editingEmployeeId !== null || isAddingDepartment || editingDepartmentId !== null || isAddingShift || editingShift || scheduleEventDraft || editingHours || editingPtoPolicyId !== null || ptoPolicyForm || reviewingPtoRequestId !== null || certificateEmployeeId !== null || terminatingEmployeeId !== null || editingPersonalContactEmployeeId !== null || editingPersonalPayrollEmployeeId !== null || editingBasicInfoField !== null || activeView === "settings" || activeView === "my_availability" || activeView === "team_availability" || isCreatingConversation || editingConversationNameId !== null));
   });
 
   if (!isUnlocked) return <main className="login-screen"><p role="status">Returning to sign in…</p></main>;
@@ -4991,6 +4993,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                       </div>
                     ) : null}
                   </div>
+                  {mode === "manager" && shared.data.permissions["schedule.read"] && shared.data.permissions["schedule.manage"] ? <ScheduleTools weekStart={scheduleWeekDays[0].date} enabled={employeeScheduleTab === "week"} onOpenChange={setIsScheduleToolsOpen} onDraftReady={date => { setScheduleDate(date); setEmployeeScheduleTab("week"); }} /> : null}
                   {mode === "manager" ? (
                     <button
                       type="button"

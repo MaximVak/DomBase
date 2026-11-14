@@ -24,6 +24,23 @@ export class WorkspaceTransaction {
     const onConflict = conflict ? sql`ON CONFLICT (${sql.join(conflict.target.map(column), sql`, `)}) DO UPDATE SET ${sql.join(conflict.update.map(key => sql`${column(key)} = excluded.${column(key)}`), sql`, `)} WHERE ${this.receipt}` : sql``;
     this.write(sql`INSERT INTO ${table} (${sql.join(names.map(column), sql`, `)}) SELECT ${sql.join(names.map(key => sql`${driver(values[key])}`), sql`, `)} WHERE ${this.receipt} AND ${extra} ${onConflict}`, 1);
   }
+  // One bounded JSON parameter avoids per-row subrequests and D1's bound-variable
+  // limit when copying several weeks. The write check still requires every row.
+  insertRows(table: SQLiteTable, rows: Record<string, unknown>[], extra = sql`1 = 1`) {
+    if (!rows.length) return;
+    const columns = getTableColumns(table), names = Object.keys(rows[0]);
+    const data = rows.map(row => Object.fromEntries(names.map(key => [key, driver(row[key])])));
+    this.write(sql`INSERT INTO ${table} (${sql.join(names.map(key => sql.identifier(columns[key].name)), sql`, `)})
+      SELECT ${sql.join(names.map(key => sql`json_extract(entry.value, ${`$.${key}`})`), sql`, `)}
+      FROM json_each(${JSON.stringify(data)}) entry WHERE ${this.receipt} AND ${extra}`, rows.length);
+  }
+  updateRows(table: SQLiteTable, rows: Record<string, unknown>[], key: string, extra = sql`1 = 1`) {
+    if (!rows.length) return;
+    const columns = getTableColumns(table), names = Object.keys(rows[0]);
+    const data = rows.map(row => Object.fromEntries(names.map(name => [name, driver(row[name])])));
+    this.write(sql`UPDATE ${table} SET ${sql.join(names.filter(name => name !== key).map(name => sql`${sql.identifier(columns[name].name)} = json_extract(entry.value, ${`$.${name}`})`), sql`, `)}
+      FROM json_each(${JSON.stringify(data)}) entry WHERE ${table}.${sql.identifier(columns[key].name)} = json_extract(entry.value, ${`$.${key}`}) AND ${this.receipt} AND ${extra}`, rows.length);
+  }
   update(table: SQLiteTable, values: Record<string, unknown>, where: SQL, expected = 1) {
     const columns = getTableColumns(table);
     this.write(sql`UPDATE ${table} SET ${sql.join(Object.entries(values).map(([key, value]) => sql`${sql.identifier(columns[key].name)} = ${driver(value)}`), sql`, `)} WHERE ${this.receipt} AND ${where}`, expected);
