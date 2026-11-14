@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { useSharedWorkspace } from "./shared-workspace";
+import { ScheduleClearWeek } from "./schedule-clear-week";
 import { ScheduleToolsSelection } from "./schedule-tools-selection";
 import { ScheduleWarningPanel } from "./schedule-warning-panel";
 import { offsetScheduleDate, repeatScheduleWeeks, weekFor } from "./schedule-tools-model";
@@ -21,7 +22,7 @@ export function ScheduleTools({ weekStart, enabled, onOpenChange, onDraftReady }
 }
 function ScheduleToolsDialog({ weekStart, onClose, onDraftReady }: { weekStart: string; onClose: () => void; onDraftReady: (date: string) => void }) {
   const shared = useSharedWorkspace(), dialog = useRef<HTMLDialogElement>(null), closeButton = useRef<HTMLButtonElement>(null);
-  const [tab, setTab] = useState<"templates" | "copy" | "repeat">("templates");
+  const [tab, setTab] = useState<"templates" | "copy" | "repeat" | "clear">("templates");
   const [archived, setArchived] = useState(false), [list, setList] = useState<ScheduleToolList | null>(null), [loading, setLoading] = useState(true), [error, setError] = useState(""), [notice, setNotice] = useState("");
   const [attempt, setAttempt] = useState(0), [selected, setSelected] = useState<TemplateSummary | null>(null), [name, setName] = useState("");
   const [from, setFrom] = useState(weekStart), [target, setTarget] = useState(weekStart), [count, setCount] = useState(1);
@@ -72,7 +73,7 @@ function ScheduleToolsDialog({ weekStart, onClose, onDraftReady }: { weekStart: 
   }
   return <dialog ref={dialog} className="schedule-tools-dialog" aria-labelledby="schedule-tools-title" onCancel={event => { event.preventDefault(); if (!disabled) onClose(); }}>
     <header><div><h2 id="schedule-tools-title">Templates & copy</h2><p>Current workweek: {weekStart} – {offsetScheduleDate(weekStart, 6)}</p></div><button ref={closeButton} type="button" className="icon-button" aria-label="Close schedule tools" disabled={shared.pending} onClick={onClose}>×</button></header>
-    <nav className="schedule-tools-tabs" aria-label="Schedule tools">{([ ["templates", "Templates"], ["copy", "Copy week"], ["repeat", "Repeat weeks"] ] as const).map(([value, label]) => <button type="button" key={value} aria-pressed={tab === value} disabled={shared.pending} onClick={() => changeTab(value)}>{label}</button>)}</nav>
+    <nav className="schedule-tools-tabs" aria-label="Schedule tools">{([ ["templates", "Templates"], ["copy", "Copy week"], ["repeat", "Repeat weeks"], ["clear", "Clear week"] ] as const).map(([value, label]) => <button type="button" key={value} aria-pressed={tab === value} disabled={shared.pending} onClick={() => changeTab(value)}>{label}</button>)}</nav>
     {error ? <p role="alert" className="schedule-tool-error">{error} <button type="button" disabled={disabled} onClick={() => { shared.setError("Reload the latest shared data before continuing with schedule tools."); onClose(); }}>Close and reload workspace</button></p> : null}
     {notice ? <p role="status">{notice}</p> : null}
     <div className="schedule-tools-content" aria-busy={disabled}>
@@ -83,14 +84,15 @@ function ScheduleToolsDialog({ weekStart, onClose, onDraftReady }: { weekStart: 
         <div className="schedule-template-actions"><button type="button" disabled={disabled || !name.trim()} onClick={() => void saveTemplate("save-template")}>Save current week as new template</button>{selected ? <><button type="button" disabled={disabled || !name.trim()} onClick={() => void saveTemplate("rename-template")}>Rename selected template</button><button type="button" disabled={disabled} onClick={() => void saveTemplate("archive-template")}>{archived ? "Restore selected template" : "Archive selected template"}</button></> : null}</div>
         <p>Templates are shared with schedulers who can manage every department and team member they contain. Saving captures the current week, including your draft changes. Dates, leave, punches and pay rates are not copied.</p>
         {selected && !archived ? <details><summary>Replace this saved template</summary><p>This replaces all entries in “{selected.name}” with the selected entries from the current week. Published shifts stay unchanged.</p><button type="button" disabled={disabled || !name.trim()} onClick={() => void saveTemplate("save-template", true)}>Replace selected template with current week</button></details> : null}
-      </section> : <section><h3>{tab === "copy" ? "Copy a workweek" : "Repeat a workweek"}</h3><label>Source week<input type="date" value={from} onChange={event => setFrom(event.target.value)} disabled={disabled} /></label><p>{sourceWeek ? `Copies ${sourceWeek} – ${offsetScheduleDate(sourceWeek, 6)}, including your saved draft changes.` : "Choose a source week."}</p>{tab === "repeat" ? <label>Number of following weeks<select value={count} disabled={disabled} onChange={event => setCount(Number(event.target.value))}>{[1, 2, 3, 4].map(value => <option value={value} key={value}>{value} {value === 1 ? "week" : "weeks"}</option>)}</select></label> : null}</section>}
+      </section> : tab === "copy" || tab === "repeat" ? <section><h3>{tab === "copy" ? "Copy a workweek" : "Repeat a workweek"}</h3><label>Source week<input type="date" value={from} onChange={event => setFrom(event.target.value)} disabled={disabled} /></label><p>{sourceWeek ? `Copies ${sourceWeek} – ${offsetScheduleDate(sourceWeek, 6)}, including your saved draft changes.` : "Choose a source week."}</p>{tab === "repeat" ? <label>Number of following weeks<select value={count} disabled={disabled} onChange={event => setCount(Number(event.target.value))}>{[1, 2, 3, 4].map(value => <option value={value} key={value}>{value} {value === 1 ? "week" : "weeks"}</option>)}</select></label> : null}</section> : null}
       <ScheduleToolsSelection disabled={disabled} value={selection} onChange={value => { setSelection(value); setReplaceConfirmed(false); }} departments={shared.data.state.departments} roles={list?.roles ?? []} employees={shared.data.state.employees} />
-      {canNotes ? <label className="schedule-tool-check"><input type="checkbox" checked={notes} disabled={disabled} onChange={event => setNotes(event.target.checked)} />Include shift notes when saving or copying</label> : <p>Shift notes are excluded. Viewing and managing notes are both required to copy them.</p>}
-      <section aria-label="Draft destination"><h3>{tab === "templates" ? "Apply selected template" : "Destination"}</h3>{tab !== "repeat" ? <label>Destination week<input type="date" value={target} onChange={event => setTarget(event.target.value)} disabled={disabled} /></label> : null}<p>Target workweeks: {choice.targets.filter(Boolean).join(", ") || "Choose a destination week."}</p>
+      {canNotes ? <label className="schedule-tool-check"><input type="checkbox" checked={notes} disabled={disabled} onChange={event => setNotes(event.target.checked)} />{tab === "clear" ? "Include shift notes in the saved template" : "Include shift notes when saving or copying"}</label> : <p>Shift notes are excluded. Viewing and managing notes are both required to copy them.</p>}
+      {tab === "clear" ? <ScheduleClearWeek weekStart={weekStart} selection={selection} includeNotes={notes && canNotes} onReady={() => { onDraftReady(weekStart); onClose(); }} /> : <><section aria-label="Draft destination"><h3>{tab === "templates" ? "Apply selected template" : "Destination"}</h3>{tab !== "repeat" ? <label>Destination week<input type="date" value={target} onChange={event => setTarget(event.target.value)} disabled={disabled} /></label> : null}<p>Target workweeks: {choice.targets.filter(Boolean).join(", ") || "Choose a destination week."}</p>
         <label>Existing entries<select value={mode} disabled={disabled} onChange={event => { setMode(event.target.value as "add" | "replace"); setReplaceConfirmed(false); }}><option value="add">Keep existing entries and add copied shifts</option><option value="replace">Replace entries within my selection in these weeks</option></select></label><p>Nothing is published automatically. Overlapping work and day-off conflicts must be resolved; availability and overtime warnings stay advisory.</p>
         <button type="button" className="primary-action" disabled={disabled || (tab === "templates" ? !selected || archived : !sourceWeek) || choice.targets.some(date => !date)} onClick={() => void previewDraft()}>{checking ? "Checking…" : "Review draft changes"}</button>
       </section>
       {preview ? <ScheduleToolReview preview={preview} mode={mode} confirmed={replaceConfirmed} onConfirm={setReplaceConfirmed} onApply={() => void apply()} disabled={disabled} /> : review ? <p role="status">Choices changed. Review the updated draft before applying.</p> : null}
+      </>}
     </div>
   </dialog>;
 }

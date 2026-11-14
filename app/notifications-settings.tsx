@@ -1,8 +1,10 @@
+"use client";
+import { useSharedWorkspace } from "./shared-workspace";
+import { ScheduleAlertPreferences } from "./schedule-alert-preferences";
 type ChannelState = "selected" | "off" | "unavailable";
 type NotificationRow = { label: string; channels: [ChannelState, ChannelState, ChannelState]; reminder?: boolean };
 
 const shiftNotifications: NotificationRow[] = [
-  { label: "Schedule publication and updates", channels: ["selected", "selected", "off"] },
   { label: "Shift trade and cover request updates", channels: ["off", "selected", "off"] },
   { label: "Time off request responses", channels: ["off", "selected", "off"] },
   { label: "Open shift claim responses", channels: ["off", "selected", "off"] },
@@ -56,7 +58,8 @@ function NotificationGroup({ title, rows }: { title: string; rows: NotificationR
   );
 }
 
-export function NotificationsSettingsPanel({ locationName }: { locationName: string }) {
+export function NotificationsSettingsPanel({ locationName, employeeLinked }: { locationName: string; employeeLinked: boolean }) {
+  const shared = useSharedWorkspace();
   return (
     <section className="panel settings-enforcement-panel settings-notifications-panel">
       <div className="settings-panel-heading"><h3>Notifications</h3><button type="button" disabled>Save</button></div>
@@ -71,6 +74,7 @@ export function NotificationsSettingsPanel({ locationName }: { locationName: str
           <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="m3 6 5 5 5-5Z" fill="currentColor" /></svg>
         </button>
       </div>
+      {employeeLinked ? <ScheduleAlertPreferences endpoint="/api/workspace/schedule-preferences" onSaved={() => { void shared.refresh().catch(() => shared.setError("Preferences saved. Reload the workspace before making other changes.")); }} /> : <p>Link your account to an active employee profile to manage personal schedule alerts.</p>}
       <NotificationGroup title="Shifts & schedule notifications" rows={shiftNotifications} />
       <NotificationGroup title="Manager alerts" rows={managerNotifications} />
     </section>

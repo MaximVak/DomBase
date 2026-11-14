@@ -9,6 +9,7 @@ import { cleanupDocumentUploads } from "../documents/maintenance";
 import { scheduleHostedBackup } from "../backup/schedule";
 import type { BackupScheduleEnv } from "../backup/schedule";
 import type { DocumentBucket } from "../documents/types";
+import { dispatchScheduleEmails } from "../workforce/schedule-email";
 import { dispatchInvitationEmails } from "../team/email";
 import type { InvitationEmailEnv } from "../team/email";
 
@@ -40,6 +41,7 @@ const worker = {
   async scheduled(_event: unknown, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil(scheduleHostedBackup(env));
     const db = drizzle(env.DB, { schema });
+    ctx.waitUntil(dispatchScheduleEmails(db, env).catch(() => { console.error("Schedule email status is temporarily unavailable."); }));
     ctx.waitUntil(dispatchInvitationEmails(db, env).catch(() => { console.error("Invitation email queue is temporarily unavailable."); }));
     ctx.waitUntil(runScheduledMaintenance(db).then(recorded => {
       // Scheduled-only, non-personal evidence that background work ran without a browser.
@@ -72,6 +74,7 @@ const worker = {
     }
 
     const response = await handler.fetch(request, env, ctx);
+    if (request.method === "POST" && url.pathname === "/api/workspace/commit" && response.ok) ctx.waitUntil(dispatchScheduleEmails(drizzle(env.DB, { schema }), env).catch(() => { console.error("Schedule email status is temporarily unavailable."); }));
     if (["/", "/login", "/setup", "/access", "/kiosk", "/kiosk-admin", "/me", "/me/schedule", "/me/availability", "/team", "/team/reports", "/community", "/invite", "/backups"].includes(url.pathname) || /^\/api\/(auth|access|workforce|workspace|documents|kiosk|kiosk-admin|self|team|community|invitations|backups)\//.test(url.pathname)) {
       const headers = new Headers(response.headers);
       headers.set("Cache-Control", "private, no-store");

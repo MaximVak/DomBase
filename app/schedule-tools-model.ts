@@ -11,7 +11,7 @@ export type TemplateSummary = { id: number; name: string; version: number; entri
 export type ScheduleToolRole = { id: number; name: string; departmentId: number | null };
 export type ScheduleToolList = { roles: ScheduleToolRole[]; revision: number; templates: TemplateSummary[]; nextCursor: number | null };
 export type ScheduleToolPreview = { revision: number; reviewToken: string; added: number; replaced: number; targets: string[]; shifts: Shift[]; warnings: ConflictAssessment; issues: string[] };
-export type ScheduleToolResult = { saved: true; revision: number; added?: number; replaced?: number; templateId?: number };
+export type ScheduleToolResult = { saved: true; revision: number; added?: number; replaced?: number; cleared?: number; templateId?: number };
 export const offsetScheduleDate = (date: string, days: number) => new Date(Date.parse(`${date}T12:00:00Z`) + days * 86400000).toISOString().slice(0, 10);
 export function repeatScheduleWeeks(week: string, count: number) { return Array.from({ length: count }, (_, i) => offsetScheduleDate(week, (i + 1) * 7)); }
 export function weekFor(date: string, start: number) { return scheduleWeekStart(date, start); }
@@ -37,4 +37,13 @@ export function buildScheduleToolPlan(input: { source: Shift[]; targets: string[
   if (upsertedShifts.length > maxScheduleEntries || deletedShiftIds.length > maxScheduleEntries) issues.push(`A draft can contain up to ${maxScheduleEntries} additions/edits and ${maxScheduleEntries} removals. Publish or reduce this draft first.`);
   if (!copied.length) issues.push("No shifts match this source and selection.");
   return { copied, removed, plan, issues, draft: { upsertedShifts, deletedShiftIds, affectedEmployeeIds: [...new Set([...upsertedShifts.map(shift => shift.employeeId), ...removed.map(shift => shift.employeeId), ...(draft?.affectedEmployeeIds ?? [])])] } };
+}
+export type ClearWeekPreview = { revision: number; reviewToken: string; cleared: number; publishedRemovals: number; discardedDraftEntries: number; templateEntries: number; issues: string[]; entries: { id: number; employee: string; date: string; label: string }[] };
+export function buildClearedSchedule(published: Shift[], current: ScheduleDraft | null | undefined, selected: (shift: Shift) => boolean) {
+  const removed = workingPlan(published, current).filter(selected), removedIds = new Set(removed.map(row => row.id));
+  // Discarding a draft move into this week must restore an original outside the
+  // selection, never delete that other week's or department's published shift.
+  const publishedRemovals = published.filter(row => removedIds.has(row.id) && selected(row));
+  const draft = { upsertedShifts: (current?.upsertedShifts ?? []).filter(row => !removedIds.has(row.id)), deletedShiftIds: [...new Set([...(current?.deletedShiftIds ?? []), ...publishedRemovals.map(row => row.id)])], affectedEmployeeIds: [...new Set([...(current?.affectedEmployeeIds ?? []), ...removed.map(row => row.employeeId), ...publishedRemovals.map(row => row.employeeId)])] };
+  return { removed, publishedRemovals, discardedDraftEntries: (current?.upsertedShifts ?? []).filter(row => removedIds.has(row.id)).length, draft };
 }

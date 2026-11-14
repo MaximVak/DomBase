@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import * as s from "../db/schema";
 import { AuthError, json, readAuthBody } from "../auth/http";
 import { rateKey, tokenIsValid } from "../auth/crypto";
@@ -9,6 +9,8 @@ import { departmentChange, employeeChange } from "./records";
 import type { RecordContext } from "./records";
 import { scheduleChange } from "./schedule";
 import { frequentShifts } from "./shift-suggestions";
+import { readSchedulePreferences, saveSchedulePreferences } from "../self/schedule-notifications";
+import { publicationPreview } from "./schedule-publication";
 import { scheduleTools } from "./schedule-tools";
 import { readScheduleConflicts } from "./conflicts";
 import { timeOffChange } from "./time-off";
@@ -36,7 +38,7 @@ function currentRecord(view: WorkspaceData, change: Change, employeeKey: number)
   }
   throw new AuthError(400, "Unknown operation.");
 }
-export function createWorkforceService(db: Database, access: ReturnType<typeof createAccessService>, options: { secret: string; fieldKey: string; now?: () => number }) {
+export function createWorkforceService(db: Database, access: ReturnType<typeof createAccessService>, options: { emailEnabled?: boolean; secret: string; fieldKey: string; now?: () => number }) {
   const now = options.now ?? Date.now;
   if (options.secret.length < 32) throw new Error("Workspace configuration unavailable.");
   async function handle(request: Request) {
@@ -44,6 +46,25 @@ export function createWorkforceService(db: Database, access: ReturnType<typeof c
       const ctx = await access.workspaceContext(request);
       const url = new URL(request.url);
       const action = url.pathname.slice("/api/workspace/".length);
+      if (action === "schedule-preferences") {
+        if (url.search) throw new AuthError(400, "Preferences do not accept employee selectors.");
+        const guard = sql`${ctx.activeActor()} AND EXISTS (SELECT 1 FROM employees e WHERE e.id=${ctx.account.employeeId ?? -1} AND e.active=1 AND e.terminated=0)`;
+        const own = { account: ctx.account, guard, contextToken: rateKey(options.secret, `schedule-preferences:${ctx.account.id}:${ctx.account.employeeId}:${ctx.sessionId}`) };
+        if (request.method === "GET") return json(await readSchedulePreferences(db, own));
+        if (request.method === "POST") return json(await saveSchedulePreferences(db, own, await readAuthBody(request, 4096), options.secret, now()));
+        return json({ error: "Method not allowed." }, 405, { Allow: "GET, POST" });
+      }
+      if (action === "publish-preview") {
+        if (request.method !== "POST") return json({ error: "Method not allowed." }, 405, { Allow: "POST" });
+        if (url.search) throw new AuthError(400, "Choose publication options in the request body.");
+        ctx.requirePermission("schedule.read"); ctx.requirePermission("schedule.manage");
+        const body = await readAuthBody(request, 4096); v.keys(body, ["revision", "options"]);
+        const values = v.object(body.options), period = values.period === null || values.period === undefined ? workspacePeriod(undefined, now()) : workspacePeriod(values.period, now());
+        const view = await workspaceSnapshot(db, ctx, options.fieldKey, period);
+        if (v.integer(body.revision, 0) !== view.revision) throw new AuthError(409, "Shared data changed. Close and reload before reviewing publication.");
+        const roles = await db.select({ id: s.roles.id, name: s.roles.name, departmentId: s.roles.departmentId, archived: s.roles.archived }).from(s.roles);
+        return json(await publicationPreview({ db, ctx, view, roles, tx: new WorkspaceTransaction(db, ctx, "preview", new Date(now()).toISOString()), fieldKey: options.fieldKey, today: "", publicationSecret: options.secret, emailEnabled: options.emailEnabled }, values));
+      }
       if (action === "schedule-tools") {
         if (request.method !== "POST") return json({ error: "Method not allowed." }, 405, { Allow: "POST" });
         if (url.search) throw new AuthError(400, "Choose schedule tools in the request body.");
@@ -55,7 +76,7 @@ export function createWorkforceService(db: Database, access: ReturnType<typeof c
         return json(await readScheduleConflicts(db, ctx, await readAuthBody(request, 256 * 1024)));
       }
       if (action === "frequent-shifts" && request.method === "GET") return json(await frequentShifts(db, ctx, url));
-      if (action === "state" && request.method === "GET") return json(await workspaceSnapshot(db, ctx, options.fieldKey, requestPeriod(url, now())));
+      if (action === "state" && request.method === "GET") return json({ ...await workspaceSnapshot(db, ctx, options.fieldKey, requestPeriod(url, now())), scheduleDelivery: { emailConfigured: !!options.emailEnabled } });
       if (action === "maintenance" && request.method === "POST") {
         ctx.requirePermission("timesheets.manage");
         if (!ctx.allDepartments) throw new AuthError(403, "This action requires company-wide time management.");
@@ -79,7 +100,7 @@ export function createWorkforceService(db: Database, access: ReturnType<typeof c
       const [previous] = await db.select().from(s.workforceCommits).where(eq(s.workforceCommits.id, id)).limit(1);
       if (previous) {
         if (previous.accountId !== ctx.account.id || previous.bodyHash !== hash) throw new AuthError(409, "This save identifier is already in use.");
-        return minimal ? json({ saved: true, id, revision: previous.revision }, 200, { "Preference-Applied": "return=minimal" }) : json(await workspaceSnapshot(db, ctx, options.fieldKey, period));
+        return minimal ? json({ saved: true, id, revision: previous.revision }, 200, { "Preference-Applied": "return=minimal" }) : json({ ...await workspaceSnapshot(db, ctx, options.fieldKey, period), scheduleDelivery: { emailConfigured: !!options.emailEnabled } });
       }
       const view = await workspaceSnapshot(db, ctx, options.fieldKey, period);
       if (revision !== view.revision) throw new AuthError(409, "Someone else saved changes. Reload the latest data and try again.");
@@ -91,7 +112,7 @@ export function createWorkforceService(db: Database, access: ReturnType<typeof c
       }
       const stamp = new Date(now()).toISOString(); const tx = new WorkspaceTransaction(db, ctx, id, stamp);
       const roles = await db.select({ id: s.roles.id, name: s.roles.name, departmentId: s.roles.departmentId, archived: s.roles.archived }).from(s.roles);
-      const r: RecordContext = { db, ctx, tx, view, roles, fieldKey: options.fieldKey, today: new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(now())) };
+      const r: RecordContext = { db, ctx, tx, view, roles, publicationSecret: options.secret, emailEnabled: options.emailEnabled, fieldKey: options.fieldKey, today: new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(now())) };
       const order = (entity: Entity) => entity === "department" ? 0 : entity === "employee" ? 1 : entity === "pto-policy" ? 2 : 3;
       for (const change of [...changes].sort((a, b) => order(a.entity) - order(b.entity))) {
         if (change.entity === "department") await departmentChange(r, change);
@@ -105,7 +126,7 @@ export function createWorkforceService(db: Database, access: ReturnType<typeof c
       if (!await tx.commit(revision, hash, [...new Set(changes.map(change => change.entity))])) throw new AuthError(409, "Your access or this workspace changed. Reload before saving.");
       // Reload is a separate request: compiling/projecting a second full snapshot
       // here can exceed the hosted Worker's CPU budget after an already committed save.
-      return minimal ? json({ saved: true, id, revision: revision + 1 }, 200, { "Preference-Applied": "return=minimal" }) : json(await workspaceSnapshot(db, ctx, options.fieldKey, period));
+      return minimal ? json({ saved: true, id, revision: revision + 1 }, 200, { "Preference-Applied": "return=minimal" }) : json({ ...await workspaceSnapshot(db, ctx, options.fieldKey, period), scheduleDelivery: { emailConfigured: !!options.emailEnabled } });
     } catch (error) {
       if (error instanceof AuthError) return json({ error: error.message }, error.status);
       // Never log a request, SQL parameter, message, private field or credential.

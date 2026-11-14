@@ -449,6 +449,13 @@ export const authRateLimits = sqliteTable("auth_rate_limits", {
 
 export const schedulePublications = sqliteTable("schedule_publications", {
   id: id(),
+  departmentId: integer("department_id").references(() => departments.id),
+  periodStart: text("period_start"),
+  periodEnd: text("period_end"),
+  notifyMode: text("notify_mode", { enum: ["all", "changed", "none"] }),
+  notifyInApp: integer("notify_in_app", { mode: "boolean" }),
+  notifyEmail: integer("notify_email", { mode: "boolean" }),
+  scopeDepartments: text("scope_departments", { mode: "json" }).$type<number[]>().notNull().default(sql`'[]'`),
   version: integer("version").notNull().unique(),
   publishedByAccountId: integer("published_by_account_id").notNull().references(() => accounts.id),
   publishedAt: text("published_at").notNull().default(sql`CURRENT_TIMESTAMP`),
@@ -859,3 +866,30 @@ export const scheduleTemplateEntries = sqliteTable("schedule_template_entries", 
   station: text("station").notNull().default("Floor"),
   notes: text("notes").notNull().default(""),
 }, table => [index("schedule_template_entries_template_idx").on(table.templateId), check("schedule_template_entries_values_check", sql`${table.dayOfWeek} BETWEEN 0 AND 6 AND ${table.shiftType} IN ('work','day_off') AND ${table.color} IN ('blue','green','amber','red','violet','gray') AND ((${table.shiftType} = 'day_off' AND ${table.startTime} = '00:00' AND ${table.endTime} = '00:00') OR (${table.shiftType} = 'work' AND ${table.startTime} < ${table.endTime}))`)]);
+
+export const scheduleNotificationPreferences = sqliteTable("schedule_notification_preferences", {
+  employeeId: integer("employee_id").primaryKey().references(() => employees.id),
+  inApp: integer("in_app", { mode: "boolean" }).notNull().default(true),
+  email: integer("email", { mode: "boolean" }).notNull().default(true),
+  version: integer("version").notNull().default(1),
+  ...timestamps(),
+}, table => [check("schedule_notification_preferences_values_check", sql`${table.inApp} IN (0,1) AND ${table.email} IN (0,1) AND ${table.version} > 0`)]);
+
+export const scheduleEmails = sqliteTable("schedule_emails", {
+  id: text("id").primaryKey().notNull(),
+  publicationId: integer("publication_id").notNull().references(() => schedulePublications.id),
+  recipient: text("recipient").notNull(),
+  state: text("state", { enum: ["pending", "sending", "accepted", "uncertain", "cancelled"] }).notNull().default("pending"),
+  leaseToken: text("lease_token"),
+  leaseUntil: text("lease_until"),
+  acceptedAt: text("accepted_at"),
+  ...timestamps(),
+}, table => [uniqueIndex("schedule_emails_publication_recipient_idx").on(table.publicationId, table.recipient), index("schedule_emails_pending_idx").on(table.state, table.createdAt), check("schedule_emails_state_check", sql`${table.state} IN ('pending','sending','accepted','uncertain','cancelled')`)]);
+
+export const schedulePublicationRecipients = sqliteTable("schedule_publication_recipients", {
+  publicationId: integer("publication_id").notNull().references(() => schedulePublications.id),
+  employeeId: integer("employee_id").notNull().references(() => employees.id),
+  inApp: integer("in_app", { mode: "boolean" }).notNull(),
+  emailRequested: integer("email_requested", { mode: "boolean" }).notNull(),
+  emailId: text("email_id").references(() => scheduleEmails.id),
+}, table => [primaryKey({ columns: [table.publicationId, table.employeeId] }), check("schedule_publication_recipients_flags_check", sql`${table.inApp} IN (0,1) AND ${table.emailRequested} IN (0,1)`)]);

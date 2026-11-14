@@ -40,7 +40,8 @@ export async function startAuthApp({ seed } = {}) {
       method: "POST", signal: AbortSignal.timeout(30000), headers: { Origin: origin, "Content-Type": "application/json" },
       body: JSON.stringify({ token: grant.token, password: testPassword }),
     });
-    if (setup.status !== 200) throw new Error(`Isolated Worker setup failed (${setup.status}): ${await setup.text()}`);
+    const setupBody = await setup.text();
+    if (setup.status !== 200) throw new Error(`Isolated Worker setup failed (${setup.status}): ${setupBody}`);
     return { origin, email: testEmail, password: testPassword, fixtureData, setupLink: `${origin}/setup#token=${previewGrant.token}`, close };
   } catch (error) { await close(); throw error; }
 }

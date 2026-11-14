@@ -5,6 +5,7 @@ export type { BasicInfo, StaffState };
 export type Entity = "employee" | "department" | "schedule-event" | "schedule-draft" | "schedule-publish" | "timecard" | "hours-adjustment" | "pto-request" | "pto-policy" | "availability" | "conversation" | "settings" | "business" | "notifications";
 export type Change = { entity: Entity; id: number; before: unknown; after: unknown };
 export type WorkspaceData = {
+  scheduleDelivery?: { emailConfigured: boolean };
   period?: import("./period").WorkspacePeriod;
   scheduleEstimateScopeComplete?: boolean;
   revision: number;

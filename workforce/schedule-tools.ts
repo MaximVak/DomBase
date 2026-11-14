@@ -10,7 +10,7 @@ import { readScheduleConflicts } from "./conflicts";
 import * as v from "./validation";
 import type { Context, Database } from "./context";
 import type { Shift } from "./model";
-import { buildScheduleToolPlan, maxScheduleEntries, offsetScheduleDate, weekFor, workingPlan } from "../app/schedule-tools-model";
+import { buildScheduleToolPlan, buildClearedSchedule, maxScheduleEntries, offsetScheduleDate, weekFor, workingPlan } from "../app/schedule-tools-model";
 import type { ScheduleSelection, ScheduleSource, ScheduleToolChoice } from "../app/schedule-tools-model";
 
 type Options = { secret: string; fieldKey: string; now?: () => number };
@@ -84,7 +84,7 @@ function sourceIssues(rows: Shift[], data: Awaited<ReturnType<typeof context>>) 
 
 export async function scheduleTools(db: Database, ctx: Context, body: Record<string, unknown>, options: Options) {
   ctx.requirePermission("schedule.read"); ctx.requirePermission("schedule.manage");
-  const action = v.oneOf(body.action, ["list", "save-template", "rename-template", "archive-template", "preview", "apply"]);
+  const action = v.oneOf(body.action, ["list", "save-template", "rename-template", "archive-template", "preview", "apply", "clear-preview", "clear"]);
   if (action === "list") {
     v.keys(body, ["action", "archived", "cursor"]); const archived = v.boolean(body.archived), cursor = body.cursor === undefined ? Number.MAX_SAFE_INTEGER : v.integer(body.cursor);
     const meta = await revision(db, ctx);
@@ -94,7 +94,7 @@ export async function scheduleTools(db: Database, ctx: Context, body: Record<str
     await revision(db, ctx, meta.revision);
     return { roles, revision: meta.revision, templates: rows.slice(0, 50).map(row => ({ id: row.id, name: row.name, version: row.version, entries: row.entries, archived: !!row.archivedAt })), nextCursor: rows.length > 50 ? rows[49].id : null };
   }
-  const expected = v.integer(body.revision, 0), mutation = action !== "preview";
+  const expected = v.integer(body.revision, 0), mutation = action !== "preview" && action !== "clear-preview";
   const id = mutation && tokenIsValid(body.id) ? body.id : null;
   if (mutation && !id) throw new AuthError(400, "Invalid save identifier.");
   const hash = rateKey(options.secret, canonical(body));
@@ -115,6 +115,29 @@ export async function scheduleTools(db: Database, ctx: Context, body: Record<str
     tx.update(s.scheduleTemplates, { ...values, version: header.version + 1, updatedAt: stamp }, sql`id = ${header.id} AND version = ${header.version}`);
     tx.insert(s.auditLog, { actorAccountId: ctx.account.id, action: `schedule.template_${action === "rename-template" ? "renamed" : body.archived ? "archived" : "restored"}`, entityType: "schedule-template", entityId: String(header.id), metadata: { version: header.version + 1 }, createdAt: stamp });
     return commit({ templateId: header.id }, "schedule-template");
+  }
+  if (action === "clear-preview" || action === "clear") {
+    v.keys(body, ["action", "revision", "weekStart", "selection", "templateName", "includeNotes", ...(action === "clear" ? ["id", "reviewToken"] : [])]);
+    const from = week(body.weekStart, meta.start), selected = selection(body.selection), templateName = body.templateName === null ? null : v.text(body.templateName, 100, true), includeNotes = v.boolean(body.includeNotes);
+    if (includeNotes && templateName && !canNotes(ctx)) throw new AuthError(403, "Viewing and managing notes are required to include them in a template.");
+    const data = await context(db, ctx, options, from, offsetScheduleDate(from, 6), expected), matches = selectedRows(data, selected);
+    const result = buildClearedSchedule(data.view.state.shifts, data.draft, row => weekFor(row.date, meta.start) === from && matches(row));
+    const issues = templateName ? sourceIssues(result.removed, data) : [];
+    if (!result.removed.length) issues.push("There are no entries to clear in this selection.");
+    if (result.draft.upsertedShifts.length > maxScheduleEntries || result.draft.deletedShiftIds.length > maxScheduleEntries) issues.push("This would exceed the 500-entry draft limit. Clear a smaller selection.");
+    const reviewed = rateKey(options.secret, canonical({ actor: ctx.account.id, revision: expected, from, selected, templateName, includeNotes }));
+    if (action === "clear-preview") { await revision(db, ctx, expected); return { revision: expected, reviewToken: reviewed, cleared: result.removed.length, publishedRemovals: result.publishedRemovals.length, discardedDraftEntries: result.discardedDraftEntries, templateEntries: templateName ? result.removed.length : 0, issues, entries: result.removed.map(row => ({ id: row.id, employee: data.view.state.employees.find(employee => employee.id === row.employeeId)?.name ?? "Team member", date: row.date, label: `${row.shiftType === "day_off" ? "Day off" : `${row.start}–${row.end}`} · ${row.role}` })) }; }
+    if (body.reviewToken !== reviewed) throw new AuthError(409, "Review these exact clearing choices before saving.");
+    if (issues.length) throw new AuthError(409, issues[0]);
+    let templateId: number | undefined;
+    if (templateName) {
+      templateId = newRecordId(); tx.insert(s.scheduleTemplates, { id: templateId, name: templateName, createdByAccountId: ctx.account.id });
+      tx.insertRows(s.scheduleTemplateEntries, result.removed.map(row => ({ templateId, employeeId: row.employeeId, roleId: data.roles.find(role => role.name === row.role)!.id, dayOfWeek: new Date(`${row.date}T12:00:00Z`).getUTCDay(), startTime: row.start, endTime: row.end, station: row.station, notes: includeNotes ? row.notes ?? "" : "", shiftType: row.shiftType ?? "work", color: row.color ?? "blue" })));
+      tx.insert(s.auditLog, { actorAccountId: ctx.account.id, action: "schedule.template_created_before_clear", entityType: "schedule-template", entityId: String(templateId), metadata: { entries: result.removed.length, sourceWeek: from }, createdAt: stamp });
+    }
+    await scheduleChange({ db, ctx, tx, view: data.view, roles: data.roles, fieldKey: options.fieldKey, today: stamp.slice(0, 10) }, { entity: "schedule-draft", id: 1, before: data.draft ?? null, after: result.draft });
+    tx.insert(s.auditLog, { actorAccountId: ctx.account.id, action: "schedule.week_cleared_in_draft", entityType: "schedule-draft", entityId: String(ctx.account.id), metadata: { weekStart: from, entries: result.removed.length, savedTemplate: !!templateId }, createdAt: stamp });
+    return commit({ cleared: result.removed.length, ...(templateId ? { templateId } : {}) }, "schedule-draft");
   }
   if (action === "save-template") {
     v.keys(body, ["action", "id", "revision", "name", "weekStart", "selection", "includeNotes", "templateId"]);

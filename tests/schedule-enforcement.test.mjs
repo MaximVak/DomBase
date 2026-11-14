@@ -31,7 +31,7 @@ function runtime(extra = {}) {
     "isWithinScheduledMinute", "workWeekCalendarDays", "hoursDateRange", "hoursDateLabel", "dateRangeForCalendarTab", "shiftsForCalendarRange",
     "parseLocalDate", "startOfDay", "toDateInputValue", "shiftDateForWeekday", "shiftDatesForWeekdays",
     "formatShortDate", "formatLongDate", "formatMonthYear", "formatClockTime", "saveScheduleEnforcement",
-    "saveAlertsPermissions", "publishSchedule", "applyScheduleDraft", "submitAvailabilityRequest", "saveEventsTrades", "saveScheduleEvent", "deleteScheduleEvent", "saveOvertime",
+    "saveAlertsPermissions", "applyScheduleDraft", "submitAvailabilityRequest", "saveEventsTrades", "saveScheduleEvent", "deleteScheduleEvent", "saveOvertime",
     "saveBreaksCompliance", "operationalAlertsFor", "matchingBreakStartEvent", "breakEndTime", "breakDurationMs", "isWithinClockInGrace",
     "timeToMinutes", "adjustedWorkedHoursForRange", "workedHoursForRange", "clockIntervals", "breakIntervalsForEvents",
     "clippedDuration", "overlapDuration", "startOfNextDay", "saveMessagesSettings", "createTeamConversation", "sendTeamMessage",
@@ -165,32 +165,8 @@ test("department permissions cover creates, role changes, deletes, and admin exc
   assert.equal(rules.scheduleDraftIsAllowed({ upsertedShifts: [], deletedShiftIds: [2] }, shifts, allowed), false);
 });
 
-test("publishing honors notification preferences and rejects an unauthorized saved draft", () => {
-  function publisher(settings, allowed = () => true) {
-    const draft = { upsertedShifts: [{ ...shift, role: "Sales" }], deletedShiftIds: [], affectedEmployeeIds: [1] };
-    const state = { shifts: [], scheduleDraftsByManager: { 1: draft }, employees: [
-      { id: 1, name: "Active", active: true, locationSettings: { sendLocationAlerts: true } },
-      { id: 2, name: "Muted", active: true, locationSettings: { sendLocationAlerts: false } },
-      { id: 3, name: "Inactive", active: false, locationSettings: { sendLocationAlerts: true } },
-    ], scheduleUpdates: [] };
-    let updated = state, error;
-    const app = runtime({ state, scheduleEnforcement: settings, mode: "manager", activeEmployeeId: 1, activeScheduleDraft: draft,
-      canEditScheduleRole: allowed, setState: updater => { updated = updater(updated); },
-      setSchedulePermissionError: value => { error = value; }, setCreatedShiftTimes() {}, setEditedShiftTimes() {}, setLastEditedShiftId() {},
-    });
-    app.publishSchedule();
-    return { updated, state, error };
-  }
-  const enabled = publisher(defaults);
-  assert.equal(enabled.updated.shifts.length, 1);
-  assert.equal(enabled.updated.scheduleUpdates.length, 1);
-  assert.equal(enabled.updated.scheduleUpdates[0].employeeId, 1);
-  assert.equal(publisher({ ...defaults, notifyScheduleChanges: false }).updated.scheduleUpdates.length, 0);
-  const blocked = publisher(defaults, () => false);
-  assert.equal(blocked.updated, blocked.state);
-  assert.match(blocked.error, /outside your assigned departments/);
-});
-
+// Publication preferences and authorization are exercised through real D1 and HTTP
+// in schedule-publication.test.mjs and schedule-publication-app.test.mjs.
 test("availability submissions persist pending or approved status according to the setting", () => {
   for (const requireAvailabilityApproval of [true, false]) {
     let state = { availabilityRequests: [] };

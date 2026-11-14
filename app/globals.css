@@ -11223,3 +11223,18 @@ body:has(dialog.time-exception-modal[open]) { overflow: hidden; }
 .schedule-tool-entry-list li { padding: 8px 0; font-size: 13px; }
 .schedule-tool-entry-list span { display: block; overflow-wrap: anywhere; }
 @media (max-width: 520px) { .schedule-tools-dialog { padding: 16px; } .schedule-tools-tabs button { flex: 1; } .schedule-template-list button { flex-direction: column; gap: 4px; } .schedule-template-actions button { width: 100%; } }
+
+.schedule-publish-success { padding: 12px; background: #edf7ee; color: #245b31; border-radius: 8px; }
+.schedule-alert-preferences, .schedule-alert-feed, .schedule-alert-settings { padding: 18px; margin-block: 16px; border: 1px solid var(--border, #dedee6); border-radius: 10px; background: var(--surface, #fff); }
+.schedule-alert-preferences h3, .schedule-alert-heading h2 { margin-top: 0; }
+.schedule-alert-preferences > button { margin: 8px 10px 0 0; }
+.schedule-alert-heading, .schedule-alert-feed li { display: flex; justify-content: space-between; gap: 16px; align-items: start; }
+.schedule-alert-feed ul { list-style: none; margin: 0; padding: 0; }
+.schedule-alert-feed li { padding-block: 14px; border-top: 1px solid var(--border, #dedee6); overflow-wrap: anywhere; }
+.schedule-alert-feed li p { margin: 6px 0; }
+.schedule-alert-feed time { font-size: 12px; color: #646579; }
+.schedule-alert-actions { display: flex; flex-wrap: wrap; gap: 8px; flex-shrink: 0; }
+.schedule-alert-settings summary { cursor: pointer; font-weight: 600; }
+.schedule-publish-dialog details { margin-block: 12px; }
+.schedule-publish-dialog button, .schedule-alert-feed button, .schedule-alert-preferences button { white-space: normal; }
+@media (max-width: 600px) { .schedule-alert-heading, .schedule-alert-feed li { flex-direction: column; } .schedule-tools-tabs { flex-wrap: wrap; } .schedule-alert-preferences, .schedule-alert-feed, .schedule-alert-settings { padding: 12px; } }

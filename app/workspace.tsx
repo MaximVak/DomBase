@@ -8,6 +8,7 @@ import { ShiftAvailability } from "./shift-availability";
 import { approvedAvailability, availabilityForDate, availabilityTime, newestAvailability } from "./availability-model";
 import { useScheduleWarnings, ScheduleWarningPanel, ShiftWarningBadge } from "./schedule-warning-panel";
 import type { PlannedShift } from "./schedule-estimates";
+import { SchedulePublishControl } from "./schedule-publish";
 import { ScheduleTools } from "./schedule-tools";
 import { ShiftBuilderOptions } from "./shift-builder-options";
 import { isWorkShift, shiftLayoutError } from "./shift-builder";
@@ -20,7 +21,7 @@ import { useSharedWorkspace } from "./shared-workspace";
 import { equal, newRecordId } from "../workforce/contract";
 import { PrintTable } from "./print-table";
 import { rosterCopyHeaders, rosterCopyRows, rosterCsv } from "./roster-export";
-import { alertsPermissionsFields, automaticClockOutAt, canManageScheduleRole, canViewTeamSchedule, clockInTiming, defaultScheduleEnforcement, normalizeScheduleEnforcement, scheduleDraftIsAllowed, scheduleEnforcementFields, schedulingSettingsForSave, workWeekOffset } from "./schedule-enforcement";
+import { alertsPermissionsFields, automaticClockOutAt, canManageScheduleRole, canViewTeamSchedule, clockInTiming, defaultScheduleEnforcement, normalizeScheduleEnforcement, scheduleEnforcementFields, schedulingSettingsForSave, workWeekOffset } from "./schedule-enforcement";
 import type { ScheduleEnforcement } from "./schedule-enforcement";
 import { breaksComplianceFields, eventsTradesFields, overtimeFields, messagesSettingsFields } from "./schedule-enforcement";
 import { normalizeScheduleEvents, scheduleEventsForDate, validEventDate } from "./schedule-events";
@@ -387,6 +388,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
   const [visibleEmployeeIds, setVisibleEmployeeIds] = useState<number[] | null>(null);
   const [editingShift, setEditingShift] = useState<Shift | null>(null);
   const [createShiftWeekdays, setCreateShiftWeekdays] = useState<number[]>([]);
+  const [isPublicationOpen, setIsPublicationOpen] = useState(false);
   const [isScheduleToolsOpen, setIsScheduleToolsOpen] = useState(false);
   const [editingShiftWeekdays, setEditingShiftWeekdays] = useState<number[]>([]);
   const [isAddingShift, setIsAddingShift] = useState(false);
@@ -2861,49 +2863,6 @@ export default function Home({ account }: { account: DashboardAccount }) {
     if (saved) setSchedulePermissionError("Shift moved in your draft. Publish when ready.");
   }
 
-  async function publishSchedule() {
-    if (mode !== "manager") return;
-    if (activeScheduleDraft && !scheduleDraftIsAllowed(activeScheduleDraft, state.shifts, role => canEditScheduleRole(role))) {
-      setSchedulePermissionError("This draft contains shifts outside your assigned departments. Ask an admin to publish it.");
-      return;
-    }
-    setSchedulePermissionError("");
-    const publishedAt = new Date().toISOString();
-    const publishId = Date.now();
-    if (!await setState((current) => {
-      const scheduleDraft = current.scheduleDraftsByManager?.[activeEmployeeId];
-      if (!scheduleDraft) return current;
-      if (!scheduleDraftIsAllowed(scheduleDraft, current.shifts, role => canEditScheduleRole(role, current))) return current;
-      const publishedShifts = applyScheduleDraft(current.shifts, scheduleDraft);
-      const publisherName = current.employees.find((employee) => employee.id === activeEmployeeId)?.name ?? "A manager";
-      const scheduleUpdates = [
-        ...(current.scheduleUpdates ?? []).slice(-200),
-        ...current.employees
-          .filter(employee => scheduleEnforcement.notifyScheduleChanges && employee.active && employee.locationSettings.sendLocationAlerts)
-          .map((employee) => ({
-            id: `${publishId}-${employee.id}`,
-            employeeId: employee.id,
-            title: "New schedule published",
-            detail: `${publisherName} published a new schedule for the team.`,
-            at: publishedAt,
-          })),
-      ];
-      const remainingScheduleDrafts = { ...(current.scheduleDraftsByManager ?? {}) };
-      delete remainingScheduleDrafts[activeEmployeeId];
-
-      return {
-        ...current,
-        shifts: publishedShifts,
-        scheduleUpdates,
-        scheduleHasBeenPublished: true,
-        pendingScheduleUpdateEmployeeIds: [],
-        scheduleDraftsByManager: remainingScheduleDrafts,
-      };
-    })) return;
-    setCreatedShiftTimes({});
-    setEditedShiftTimes({});
-    setLastEditedShiftId(null);
-  }
 
   function requestTimeException(action: TimeExceptionAction) {
     if (!canLaunchTimeClock) return;
@@ -2983,7 +2942,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
   }
 
   useEffect(() => {
-    shared.setEditing(Boolean(isScheduleToolsOpen || isSharedTimeCardEditing || ptoRequestForm || editingPayrollEmployeeId !== null || activeView === "profile" || isAddingEmployee || editingEmployeeId !== null || isAddingDepartment || editingDepartmentId !== null || isAddingShift || editingShift || scheduleEventDraft || editingHours || editingPtoPolicyId !== null || ptoPolicyForm || reviewingPtoRequestId !== null || certificateEmployeeId !== null || terminatingEmployeeId !== null || editingPersonalContactEmployeeId !== null || editingPersonalPayrollEmployeeId !== null || editingBasicInfoField !== null || activeView === "settings" || activeView === "my_availability" || activeView === "team_availability" || isCreatingConversation || editingConversationNameId !== null));
+    shared.setEditing(Boolean(isPublicationOpen || isScheduleToolsOpen || isSharedTimeCardEditing || ptoRequestForm || editingPayrollEmployeeId !== null || activeView === "profile" || isAddingEmployee || editingEmployeeId !== null || isAddingDepartment || editingDepartmentId !== null || isAddingShift || editingShift || scheduleEventDraft || editingHours || editingPtoPolicyId !== null || ptoPolicyForm || reviewingPtoRequestId !== null || certificateEmployeeId !== null || terminatingEmployeeId !== null || editingPersonalContactEmployeeId !== null || editingPersonalPayrollEmployeeId !== null || editingBasicInfoField !== null || activeView === "settings" || activeView === "my_availability" || activeView === "team_availability" || isCreatingConversation || editingConversationNameId !== null));
   });
 
   if (!isUnlocked) return <main className="login-screen"><p role="status">Returning to sign in…</p></main>;
@@ -3910,7 +3869,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                   pin={activeEmployee.pin}
                 /> : null
               ) : activeSettingsTab === "Notifications" ? (
-                <NotificationsSettingsPanel locationName={activeEmployee?.location.trim() || sidebarLocationName} />
+                <NotificationsSettingsPanel employeeLinked={account.employeeId !== null} locationName={activeEmployee?.location.trim() || sidebarLocationName} />
               ) : activeSettingsTab === "Password & security" ? (
                 <section className="panel settings-enforcement-panel settings-security-panel">
                   <div className="settings-panel-heading"><h3>Password &amp; security</h3></div>
@@ -4994,16 +4953,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                     ) : null}
                   </div>
                   {mode === "manager" && shared.data.permissions["schedule.read"] && shared.data.permissions["schedule.manage"] ? <ScheduleTools weekStart={scheduleWeekDays[0].date} enabled={employeeScheduleTab === "week"} onOpenChange={setIsScheduleToolsOpen} onDraftReady={date => { setScheduleDate(date); setEmployeeScheduleTab("week"); }} /> : null}
-                  {mode === "manager" ? (
-                    <button
-                      type="button"
-                      className={`shift-publish-button${unpublishedShiftCount > 0 ? " pending" : ""}`}
-                      onClick={publishSchedule}
-                      disabled={unpublishedShiftCount === 0}
-                    >
-                      {unpublishedShiftCount > 0 ? `↑ Publish (${unpublishedShiftCount})` : "↑ Publish"}
-                    </button>
-                  ) : null}
+                  {mode === "manager" && shared.data.permissions["schedule.manage"] && shared.data.permissions["schedule.read"] ? <SchedulePublishControl count={unpublishedShiftCount} weekStart={scheduleWeekDays[0].date} onOpenChange={setIsPublicationOpen} onPublished={() => { setCreatedShiftTimes({}); setEditedShiftTimes({}); setLastEditedShiftId(null); }} /> : null}
                 </div>
               </div>
               {copiedShift ? <div className="schedule-copy-notice" role="status">Copied {formatTimeRange(copiedShift)}. Select an add-shift cell to review and paste it. <button type="button" onClick={() => setCopiedShift(null)}>Finish pasting</button></div> : null}

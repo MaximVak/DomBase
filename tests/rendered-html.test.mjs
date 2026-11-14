@@ -268,8 +268,7 @@ test("shift editor uses clear time labels and available role options", async () 
   assert.match(page, /aria-label=\{`Previous \$\{employeeScheduleTab\}`\}>\s*<span aria-hidden="true">‹<\/span>\s*<\/button>\s*<label className="shift-date-control">[^]*?<\/label>\s*<button[^]*?aria-label=\{`Next \$\{employeeScheduleTab\}`\}>\s*<span aria-hidden="true">›<\/span>/);
   assert.match(page, /className="shift-date-navigation"/);
   assert.match(page, /className="shift-view-control">\s*<select className="shift-view-select"[^]*?<span aria-hidden="true">▾<\/span>/);
-  assert.match(page, /className=\{`shift-publish-button\$\{unpublishedShiftCount > 0 \? " pending" : ""\}`\}/);
-  assert.match(page, /disabled=\{unpublishedShiftCount === 0\}/);
+  assert.match(page, /<SchedulePublishControl count=\{unpublishedShiftCount\}/);
   assert.match(page, /type ScheduleDraft = \{/);
   assert.match(page, /scheduleDraftsByManager: Record<number, ScheduleDraft>/);
   assert.doesNotMatch(page, /localStorage/);
@@ -278,9 +277,6 @@ test("shift editor uses clear time labels and available role options", async () 
   assert.match(page, /const draftShiftIds = new Set\(activeScheduleDraft\?\.upsertedShifts\.map\(\(shift\) => shift\.id\) \?\? \[\]\)/);
   assert.match(page, /applyScheduleDraft\(state\.shifts, activeScheduleDraft\)/);
   assert.match(page, /\[activeEmployeeId\]: scheduleDraft/);
-  assert.match(page, /const publishedShifts = applyScheduleDraft\(current\.shifts, scheduleDraft\)/);
-  assert.match(page, /delete remainingScheduleDrafts\[activeEmployeeId\]/);
-  assert.match(page, /shifts: publishedShifts/);
   assert.match(page, /function nextScheduleShiftId\(state: StaffState\)/);
   assert.equal((page.match(/draftShiftIds\.has\(shift\.id\) \? " draft" : ""/g) ?? []).length, 3);
   assert.match(styles, /\.schedule-bar\.draft \{[^}]*border: 2px dotted var\(--blue-accent\);[^}]*background: #dceeff;/s);
@@ -967,13 +963,9 @@ test("signed-in users have a header account menu instead of a sidebar logout pan
   assert.match(page, /state\.scheduleUpdates/);
   assert.match(page, /notification\.employeeId === activeEmployeeId/);
   assert.doesNotMatch(page, /const employeeScheduleNotifications = !activeUserCanManage/);
-  assert.match(page, /scheduleHasBeenPublished: true/);
-  assert.match(page, /\.\.\.current\.employees\s*\.filter\(employee => scheduleEnforcement\.notifyScheduleChanges && employee\.active && employee\.locationSettings\.sendLocationAlerts\)\s*\.map\(\(employee\) => \(\{/);
+  assert.match(page, /SchedulePublishControl/);
   assert.doesNotMatch(page, /current\.employees\s*\.filter\(\(employee\) => employee\.active\)\s*\.map\(\(employee\) => \(\{/);
-  assert.match(page, /\.\.\.\(current\.scheduleUpdates \?\? \[\]\)\.slice\(-200\),\s*\.\.\.current\.employees/);
-  assert.match(page, /title: "New schedule published"/);
-  assert.match(page, /const publisherName = current\.employees\.find\(\(employee\) => employee\.id === activeEmployeeId\)\?\.name \?\? "A manager"/);
-  assert.match(page, /detail: `\$\{publisherName\} published a new schedule for the team\.`/);
+  // Server publication recipient preferences are covered by native D1 and HTTP tests.
   assert.doesNotMatch(page, /<small>Message · \{formatOperationalAlertTime\(notification\.at\)\}<\/small>/);
   assert.doesNotMatch(page, /<small>Request · \{formatOperationalAlertTime\(notification\.at\)\}<\/small>/);
   assert.doesNotMatch(page, /`\$\{capitalize\(notification\.kind\)\} · \$\{formatOperationalAlertTime\(notification\.at\)\}`/);

@@ -13,6 +13,7 @@ import * as v from "../workforce/validation";
 import { profileFields, profileError } from "./profile";
 import type { PersonalProfile, MyProfile } from "./profile";
 import { readEmployeeSchedule } from "./schedule";
+import { readSchedulePreferences, saveSchedulePreferences, readScheduleAlerts, saveScheduleAlertReceipt } from "./schedule-notifications";
 import { readMyAvailability, saveMyAvailability } from "./availability";
 
 type Auth = Pick<ReturnType<typeof createAuthService>, "getSession">;
@@ -103,6 +104,18 @@ export function createSelfService(db: KioskOperatorDatabase, auth: Auth, secret:
   async function handle(request: Request) {
     try {
       const ctx = await context(request); const url = new URL(request.url);
+      if (url.pathname === "/api/self/schedule-preferences") {
+        if (url.search) throw new AuthError(400, "Preferences do not accept employee selectors.");
+        if (request.method === "GET") return json(await readSchedulePreferences(db, ctx));
+        if (request.method === "POST") return json(await saveSchedulePreferences(db, ctx, await readAuthBody(request, 4096), secret, now()));
+        return json({ error: "Method not allowed." }, 405, { Allow: "GET, POST" });
+      }
+      if (url.pathname === "/api/self/schedule-alerts") {
+        if (request.method === "GET") return json(await readScheduleAlerts(db, ctx, url));
+        if (url.search) throw new AuthError(400, "Alerts do not accept selectors.");
+        if (request.method === "POST") return json(await saveScheduleAlertReceipt(db, ctx, await readAuthBody(request, 4096), now()));
+        return json({ error: "Method not allowed." }, 405, { Allow: "GET, POST" });
+      }
       if (url.pathname === "/api/self/availability") {
         if (request.method === "GET") return json(await readMyAvailability(db, ctx, url, now()));
         if (url.search) throw new AuthError(400, "Availability does not accept employee selectors.");

@@ -12,7 +12,7 @@ import { terminationReasons } from "../team/rules";
 import { requireOtherEmployee } from "./self-edit";
 
 type Role = { id: number; name: string; departmentId: number | null; archived: boolean };
-export type RecordContext = { db: Database; ctx: Context; tx: WorkspaceTransaction; view: WorkspaceData; roles: Role[]; fieldKey: string; today: string };
+export type RecordContext = { db: Database; ctx: Context; tx: WorkspaceTransaction; view: WorkspaceData; roles: Role[]; publicationSecret?: string; emailEnabled?: boolean; fieldKey: string; today: string };
 function permission(r: RecordContext, key: Parameters<Context["requirePermission"]>[0]) { r.ctx.requirePermission(key); }
 export function roleFor(r: RecordContext, name: unknown) {
   const value = v.text(name, 100, true); const role = r.roles.find(role => !role.archived && role.name === value);

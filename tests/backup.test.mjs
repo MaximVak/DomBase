@@ -65,12 +65,16 @@ test("encrypted local backups restore all D1 data, protected files and private-f
   await db.insert(s.shoutoutModeration).values({ shoutoutId: recognitionId, actorAccountId: owner.id, createdAt: new Date().toISOString() });
   const [scheduleTemplate] = await db.insert(s.scheduleTemplates).values({ name: "Fictional preserved template", createdByAccountId: owner.id, version: 2, archivedAt: "2026-11-01T12:00:00Z" }).returning();
   await db.insert(s.scheduleTemplateEntries).values({ templateId: scheduleTemplate.id, employeeId: 900001, roleId: 902001, dayOfWeek: 1, startTime: "09:15", endTime: "17:15", shiftType: "work", color: "green", notes: "Preserved fictional template note" });
+  await db.insert(s.scheduleNotificationPreferences).values({ employeeId: 900001, inApp: true, email: false, version: 2 });
+  const [publication] = await db.insert(s.schedulePublications).values({ version: 2, publishedByAccountId: owner.id, publishedAt: "2026-11-09T12:00:00Z", notifyMode: "all", notifyInApp: true, notifyEmail: true, scopeDepartments: [] }).returning();
+  await db.insert(s.scheduleEmails).values({ id: "backup-schedule-email", publicationId: publication.id, recipient: "fictional@example.test", state: "uncertain" });
+  await db.insert(s.schedulePublicationRecipients).values({ publicationId: publication.id, employeeId: 900001, inApp: true, emailRequested: true, emailId: "backup-schedule-email" });
   const directory = join(root, "archives"), keyPath = join(root, "keys/recovery.key"); const key = await recoveryKey(keyPath); let backup, payload;
   await t.test("private encrypted bundle includes the full schema, data, replaced files and recovery keys", async () => {
     backup = await createBackup({ database: source.env.DB, bucket: source.env.FILES, secrets, directory, key });
     const bytes = await readFile(backup.file); assert.equal(bytes.includes(Buffer.from(email)), false); assert.equal(bytes.includes(Buffer.from("scrypt$16384")), false); assert.equal(bytes.includes(certificate.bytes), false); assert.equal(bytes.includes(Buffer.from(secrets.AUTH_RATE_LIMIT_SECRET)), false);
     assert.equal((await stat(backup.file)).mode & 0o777, 0o600); assert.equal((await stat(keyPath)).mode & 0o777, 0o600); assert.equal((await stat(directory)).mode & 0o777, 0o700);
-    payload = await readBackup(backup.file, key); assert.equal(payload.snapshot.tables.length, 66); assert.equal(payload.objects.length, 4); assert.equal(payload.secrets.AUTH_PRIVATE_FIELD_KEY, secrets.AUTH_PRIVATE_FIELD_KEY);
+    payload = await readBackup(backup.file, key); assert.equal(payload.snapshot.tables.length, 69); assert.equal(payload.objects.length, 4); assert.equal(payload.secrets.AUTH_PRIVATE_FIELD_KEY, secrets.AUTH_PRIVATE_FIELD_KEY);
     assert.equal(await containedBackup(backup.file, directory), backup.file);
   });
   await t.test("wrong key, damaged ciphertext, loose permissions and external paths are rejected", async () => {
@@ -93,7 +97,7 @@ test("encrypted local backups restore all D1 data, protected files and private-f
   await t.test("fresh isolated D1/R2 restores all table contents, migrations, sequences, indexes and triggers", async () => {
     destination = await open(destinationPath);
     const result = await restoreIntoEmpty({ database: destination.env.DB, bucket: destination.env.FILES, payload });
-    assert.deepEqual(result, { tables: 65, migrations: 17, objects: 4, exactDatabase: true, exactFiles: true });
+    assert.deepEqual(result, { tables: 68, migrations: 18, objects: 4, exactDatabase: true, exactFiles: true });
     await assert.rejects(destination.env.DB.prepare("UPDATE clock_events SET event_type=event_type").run());
     await assert.rejects(destination.env.DB.prepare("UPDATE audit_log SET action=action").run());
     await assert.rejects(destination.env.DB.prepare("UPDATE wage_rates SET amount_cents=amount_cents").run());
