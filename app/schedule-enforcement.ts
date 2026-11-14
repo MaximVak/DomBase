@@ -1,5 +1,7 @@
 export type ScheduleEnforcement = {
   workWeekStart: number;
+  minRestHours: number;
+  availabilityReviewDays: number;
   scheduleStartHour: number;
   scheduleEndHour: number;
   lateMinutes: number;
@@ -25,6 +27,8 @@ export type ScheduleEnforcement = {
 
 export const defaultScheduleEnforcement: ScheduleEnforcement = {
   workWeekStart: 1,
+  minRestHours: 10,
+  availabilityReviewDays: 90,
   scheduleStartHour: 7,
   scheduleEndHour: 17,
   lateMinutes: 1,
@@ -53,7 +57,7 @@ export const eventsTradesFields = ["enableScheduleEvents"] as const;
 export const overtimeFields = ["workWeekStart"] as const;
 export const breaksComplianceFields = ["mealBreakAfterHours", "mealBreakMinutes", "mandatoryMealBreak"] as const;
 export const messagesSettingsFields = ["enableTeamMessaging"] as const;
-export const scheduleEnforcementFields = ["workWeekStart", "scheduleStartHour", "scheduleEndHour", "lateMinutes", "earlyClockInMinutes", "requireEarlyClockInExplanation", "requireLateClockInExplanation", "requireClockOutExplanation", "requireUnscheduledExplanation", "noShowAlerts", "noShowMinutes", "automaticClockOut", "automaticClockOutMinutes"] as const;
+export const scheduleEnforcementFields = ["workWeekStart", "minRestHours", "availabilityReviewDays", "scheduleStartHour", "scheduleEndHour", "lateMinutes", "earlyClockInMinutes", "requireEarlyClockInExplanation", "requireLateClockInExplanation", "requireClockOutExplanation", "requireUnscheduledExplanation", "noShowAlerts", "noShowMinutes", "automaticClockOut", "automaticClockOutMinutes"] as const;
 
 export function schedulingSettingsForSave(saved: ScheduleEnforcement, draft: ScheduleEnforcement, fields: readonly (keyof ScheduleEnforcement)[]) {
   return { ...saved, ...Object.fromEntries(fields.map(field => [field, draft[field]])) } as ScheduleEnforcement;
@@ -97,7 +101,7 @@ export function normalizeScheduleEnforcement(value: unknown): ScheduleEnforcemen
       if (typeof input[key] === "boolean") Object.assign(result, { [key]: input[key] });
       continue;
     }
-    const maximum = key === "workWeekStart" ? 6
+    const maximum = key === "workWeekStart" ? 6 : key === "minRestHours" ? 24 : key === "availabilityReviewDays" ? 365
       : key === "scheduleStartHour" ? 23
       : key === "scheduleEndHour" ? 24
       : key === "automaticClockOutMinutes" ? 1440 : key === "mealBreakAfterHours" ? 24 : 120;

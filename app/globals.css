@@ -11172,3 +11172,20 @@ body:has(dialog.time-exception-modal[open]) { overflow: hidden; }
 .availability-review-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 12px 0; }
 @media (max-width: 1000px) { .availability-period { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 400px) { .availability-period { grid-template-columns: minmax(0, 1fr); } .availability-editor { padding: 12px; } }
+.schedule-warning-panel { padding: 12px 16px; border-bottom: 1px solid var(--line); background: #fff8e8; color: var(--ink); overflow-wrap: anywhere; }
+.schedule-warning-panel h3 { font-size: 14px; margin: 0 0 8px; }
+.schedule-warning-panel p { margin: 6px 0; font-size: 12px; }
+.schedule-warning-panel summary { cursor: pointer; font-weight: 700; font-size: 13px; }
+.schedule-warning-panel li { margin: 8px 0; font-size: 12px; }
+.schedule-warning-panel button { padding: 8px; border: 1px solid var(--line); background: var(--panel); border-radius: 6px; }
+.schedule-warning-badge { display: inline-block; font-size: 11px !important; line-height: 1.4; font-weight: 700; color: #693d00 !important; background: #fff0c2; border-radius: 3px; padding: 2px 4px; white-space: nowrap; }
+.shift-edit-modal .schedule-warning-panel { border: 1px solid var(--line); border-radius: 6px; }
+.shift-week-card:has(.schedule-warning-badge), .shift-month-card:has(.schedule-warning-badge), .schedule-bar:has(.schedule-warning-badge) { min-height: 76px; }
+.schedule-warning-settings { display: grid; gap: 12px; padding: 16px; margin: 16px 0; border: 1px solid var(--line); }
+.schedule-warning-settings legend { font-weight: 700; padding: 0 6px; }
+.schedule-warning-settings label { display: grid; grid-template-columns: minmax(0, 1fr) 90px; gap: 12px; align-items: center; }
+.schedule-warning-settings input { min-width: 0; width: 100%; border: 1px solid var(--line); padding: 8px; border-radius: 6px; }
+.schedule-warning-settings p { font-size: 12px; color: var(--muted); margin: 0; }
+.schedule-warning-panel .warning-kind-list { display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 0; list-style: none; }
+.schedule-warning-panel .warning-kind-list li { margin: 0; font-weight: 600; }
+.schedule-track:has(.schedule-warning-badge) { min-height: 100px; }

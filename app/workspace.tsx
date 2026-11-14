@@ -6,6 +6,8 @@ import { AvailabilityEditor } from "./availability-editor";
 import { AvailabilityHistory } from "./availability-history";
 import { ShiftAvailability } from "./shift-availability";
 import { approvedAvailability, availabilityForDate, availabilityTime, newestAvailability } from "./availability-model";
+import { useScheduleWarnings, ScheduleWarningPanel, ShiftWarningBadge } from "./schedule-warning-panel";
+import type { PlannedShift } from "./schedule-estimates";
 import { ShiftBuilderOptions } from "./shift-builder-options";
 import { isWorkShift, shiftLayoutError } from "./shift-builder";
 import { estimateSchedule } from "./schedule-estimates";
@@ -922,17 +924,9 @@ export default function Home({ account }: { account: DashboardAccount }) {
       ),
     [accessibleShifts, activeCalendarTab, shiftEmployeeIds, today, scheduleEnforcement.workWeekStart],
   );
-  const scheduleDayShifts = useMemo(
-    () =>
-      accessibleShifts
-        .filter((shift) => (
-          shift.date === scheduleDate
-          && shiftEmployeeIds.has(shift.employeeId)
-          && !employeeHasApprovedTimeOffOnDate(state.ptoRequests ?? [], shift.employeeId, shift.date)
-        ))
-        .sort((a, b) => a.start.localeCompare(b.start)),
-    [accessibleShifts, scheduleDate, shiftEmployeeIds, state.ptoRequests, scheduleEnforcement.workWeekStart],
-  );
+  const scheduleDayShifts = accessibleShifts
+    .filter(shift => shift.date === scheduleDate && shiftEmployeeIds.has(shift.employeeId))
+    .sort((a, b) => a.start.localeCompare(b.start));
   const scheduleWeekDays = useMemo(
     () =>
       workWeekCalendarDays(scheduleDate, scheduleEnforcement.workWeekStart).map((day) => ({
@@ -941,11 +935,10 @@ export default function Home({ account }: { account: DashboardAccount }) {
           .filter((shift) => (
             shift.date === day.date
             && shiftEmployeeIds.has(shift.employeeId)
-            && !employeeHasApprovedTimeOffOnDate(state.ptoRequests ?? [], shift.employeeId, shift.date)
-          ))
+            ))
           .sort((a, b) => a.start.localeCompare(b.start)),
       })),
-    [accessibleShifts, scheduleDate, shiftEmployeeIds, state.ptoRequests, scheduleEnforcement.workWeekStart],
+    [accessibleShifts, scheduleDate, shiftEmployeeIds, scheduleEnforcement.workWeekStart],
   );
   const scheduleMonthDays = useMemo(
     () => scheduleMonthCalendarDays(scheduleDate, scheduleEnforcement.workWeekStart).map((day) => ({
@@ -954,11 +947,10 @@ export default function Home({ account }: { account: DashboardAccount }) {
         .filter((shift) => (
           shift.date === day.date
           && shiftEmployeeIds.has(shift.employeeId)
-          && !employeeHasApprovedTimeOffOnDate(state.ptoRequests ?? [], shift.employeeId, shift.date)
         ))
         .sort((a, b) => a.start.localeCompare(b.start)),
     })),
-    [accessibleShifts, scheduleDate, shiftEmployeeIds, state.ptoRequests, scheduleEnforcement.workWeekStart],
+    [accessibleShifts, scheduleDate, shiftEmployeeIds, scheduleEnforcement.workWeekStart],
   );
   const visibleScheduleEmployees = orderedShiftEmployees.filter((employee) => visibleEmployeeIds === null || visibleEmployeeIds.includes(employee.id));
   const scheduleEstimates = estimateSchedule(accessibleShifts, state.employees, scheduleEnforcement, {
@@ -969,6 +961,26 @@ export default function Home({ account }: { account: DashboardAccount }) {
   const summaryShiftIds = new Set((employeeScheduleTab === "day" ? scheduleDayShifts : employeeScheduleTab === "week" ? scheduleWeekDays.flatMap(day => day.shifts) : scheduleMonthDays.flatMap(day => day.shifts)).map(shift => shift.id));
   const summaryEmployeeIds = new Set(visibleScheduleEmployees.map(employee => employee.id));
   const summaryRows = scheduleEstimates.filter(row => summaryShiftIds.has(row.shiftId) && summaryEmployeeIds.has(row.employeeId));
+  const warningShift = (shift: Shift): PlannedShift => ({ id: shift.id, employeeId: shift.employeeId, date: shift.date, start: shift.start, end: shift.end, role: shift.role, shiftType: shift.shiftType ?? "work" });
+  const draftWarningShifts = (activeScheduleDraft?.upsertedShifts ?? []).map(warningShift);
+  const warningPeriod = shared.data.period;
+  const warningsEnabled = activeView === "schedule" && mode === "manager" && warningPeriod && Date.parse(warningPeriod.end) - Date.parse(warningPeriod.start) <= 61 * 86400000;
+  const scheduleWarnings = useScheduleWarnings(warningsEnabled ? { period: warningPeriod, revision: shared.data.revision, upserts: draftWarningShifts, deletedShiftIds: activeScheduleDraft?.deletedShiftIds ?? [] } : null);
+  const warningsByShift = new Map(scheduleWarnings.data?.warnings.map(warning => [warning.shiftId, warning.codes]) ?? []);
+  const previewShift = editingShift ?? (isAddingShift ? shiftForm : null);
+  const previewWeekdays = editingShift ? editingShiftWeekdays : createShiftWeekdays;
+  const previewStart = previewShift && (isWorkShift(previewShift) ? parseTypedTime(previewShift.start) : "00:00");
+  const previewEnd = previewShift && (isWorkShift(previewShift) ? parseTypedTime(previewShift.end) : "00:00");
+  const previewDates = previewShift?.date && Number.isFinite(Date.parse(previewShift.date)) && previewWeekdays.length ? [...new Set([...(editingShift ? [previewShift.date] : []), ...shiftDatesForWeekdays(previewShift.date, previewWeekdays, scheduleEnforcement.workWeekStart)])] : [];
+  const previewShifts: PlannedShift[] = previewShift && previewStart && previewEnd ? previewDates.map((date, index) => ({ ...warningShift(previewShift), id: -index - 1, date, start: previewStart, end: previewEnd })) : [];
+  const previewValid = !!previewShift?.employeeId && !!previewShift.role && !!previewStart && !!previewEnd && (!isWorkShift(previewShift) || previewStart < previewEnd) && previewShifts.length > 0;
+  const sortedPreviewDates = [...previewDates].sort();
+  const previewPeriod = previewDates.length ? { start: workWeekCalendarDays(sortedPreviewDates[0], scheduleEnforcement.workWeekStart)[0].date, end: workWeekCalendarDays(sortedPreviewDates.at(-1)!, scheduleEnforcement.workWeekStart).at(-1)!.date } : null;
+  const previewWarnings = useScheduleWarnings(previewValid && previewPeriod ? { period: previewPeriod, revision: shared.data.revision,
+    upserts: [...draftWarningShifts.filter(shift => shift.id !== editingShift?.id), ...previewShifts], deletedShiftIds: [...new Set([...(activeScheduleDraft?.deletedShiftIds ?? []), ...(editingShift && editingShift.id > 0 ? [editingShift.id] : [])])] } : null);
+  const previewWarningPlan = [...workingScheduleShifts.filter(shift => shift.id !== editingShift?.id), ...previewShifts];
+  const previewWarningIds = new Set(previewWarningPlan.filter(shift => shift.employeeId === previewShift?.employeeId && previewPeriod && shift.date >= previewPeriod.start && shift.date <= previewPeriod.end).map(shift => shift.id));
+  function shiftWarningPreview() { return <ScheduleWarningPanel result={previewWarnings} shifts={previewWarningPlan} employees={state.employees} visibleIds={previewWarningIds} label="Shift warning preview" placeholder={previewValid ? undefined : "Choose an employee, role, date and valid times to preview warnings."} />; }
   const myShift = todaysShifts.find(shift => shift.employeeId === activeEmployeeId && shiftEndDateTime(shift).getTime() > currentTime) ?? todaysShifts.filter(shift => shift.employeeId === activeEmployeeId).at(-1);
   const clockedInIds = useMemo(() => {
     return new Set(
@@ -4993,6 +5005,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
               </div>
               {copiedShift ? <div className="schedule-copy-notice" role="status">Copied {formatTimeRange(copiedShift)}. Select an add-shift cell to review and paste it. <button type="button" onClick={() => setCopiedShift(null)}>Finish pasting</button></div> : null}
               <ScheduleEstimateSummary rows={summaryRows} canReadWages={mode === "manager" && shared.data.permissions["wages.read"]} />
+              {mode === "manager" ? <ScheduleWarningPanel result={scheduleWarnings} shifts={workingScheduleShifts} employees={state.employees} visibleIds={summaryShiftIds.size ? new Set([...summaryShiftIds].filter(id => summaryEmployeeIds.has(workingScheduleShifts.find(shift => shift.id === id)?.employeeId ?? -1))) : new Set()} /> : null}
               {(mode === "employee" || mode === "manager") && (
                 <div className="employee-schedule">
                   {schedulePermissionError ? <p className="schedule-permission-message" role="alert">{schedulePermissionError}</p> : null}
@@ -5104,7 +5117,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                                       }}
                                     >
                                       <strong>{formatCompactTimeRange(shift)}</strong>
-                                      <span>{shift.role} | {formatScheduledHours(shift)} hours</span>
+                                      <span>{shift.role} | {formatScheduledHours(shift)} hours</span><ShiftWarningBadge codes={warningsByShift.get(shift.id)} />
                                     </div>
                                   ))}
                                   {employeeShifts.length === 0 && timeOff ? (
@@ -5112,7 +5125,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                                       <strong>Time off</strong><span>{timeOff.startTime && timeOff.endTime ? `${formatTime12(timeOff.startTime)}–${formatTime12(timeOff.endTime)}` : "All day"}</span>
                                     </button>
                                   ) : null}
-                                  {mode === "manager" && !timeOff ? (
+                                  {mode === "manager" ? (
                                     <button
                                       type="button"
                                       className="shift-cell-add schedule-track-add"
@@ -5191,13 +5204,13 @@ export default function Home({ account }: { account: DashboardAccount }) {
                                         onClick={() => openShiftEditor(shift)}
                                       >
                                         <strong>{formatCompactTimeRange(shift)}</strong>
-                                        <span>{shift.role || "Shift"}</span>
+                                        <span>{shift.role || "Shift"}</span><ShiftWarningBadge codes={warningsByShift.get(shift.id)} />
                                       </button>
                                     ))}
                                     {timeOff ? (
                                       <button type="button" className="shift-time-off schedule-time-off-button" onClick={(event) => openScheduleTimeOff(event, timeOff)} disabled={isPublicSchedule || (mode !== "manager" && timeOff.employeeId !== activeEmployeeId)} aria-label={`View time off for ${employee.name} on ${formatLongDate(day.date)}`} aria-haspopup="dialog" aria-expanded={scheduleTimeOffRequestId === timeOff.id}><strong>⊘ Time off</strong><span>▣ {timeOff.startTime && timeOff.endTime ? `${formatTime12(timeOff.startTime)}–${formatTime12(timeOff.endTime)}` : "All day"}</span></button>
                                     ) : null}
-                                    {mode === "manager" && !timeOff ? (
+                                    {mode === "manager" ? (
                                       <button
                                         type="button"
                                         className="shift-cell-add"
@@ -5246,7 +5259,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                                 return (
                                   <button type="button" data-shift-color={shift.color ?? "blue"} draggable={mode === "manager" && canEditScheduleRole(shift.role)} onDragStart={event => { draggedShift.current = shift; event.dataTransfer.setData("text/plain", String(shift.id)); }} onDragEnd={() => { draggedShift.current = null; }} className={`shift-month-card${shift.employeeId === activeEmployeeId ? " mine" : ""}${draftShiftIds.has(shift.id) ? " draft" : ""}`} key={shift.id} onClick={() => openShiftEditor(shift)}>
                                     <strong>{formatCompactTimeRange(shift)}</strong>
-                                    <span>{employee?.name ?? "Open shift"} {shift.role ? `(${shift.role})` : ""}</span>
+                                    <span>{employee?.name ?? "Open shift"} {shift.role ? `(${shift.role})` : ""}</span><ShiftWarningBadge codes={warningsByShift.get(shift.id)} />
                                   </button>
                                 );
                               })}
@@ -6659,6 +6672,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                 required
               />
             </label>
+            {shiftWarningPreview()}
             <ShiftAvailability key={`availability:${shiftForm.employeeId}`} requests={state.availabilityRequests} employeeId={shiftForm.employeeId} date={shiftForm.date} permitted={shared.data.permissions["availability.read"]} />
             <ShiftBuilderOptions key={`${shiftForm.employeeId}:${shiftForm.date}`} value={shiftForm} employeeId={shiftForm.employeeId} date={shiftForm.date} suggest onChange={patch => setShiftForm(form => ({ ...form, ...patch }))} />
             {isWorkShift(shiftForm) ? <>
@@ -6750,6 +6764,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
             </div>
             <button type="button" className="shift-copy-button" onClick={() => { setCopiedShift({ ...editingShift }); setEditingShift(null); }} aria-label="Copy shift" title="Copy shift">⧉ Copy shift</button>
             <label className="shift-edit-field"><span>Employee</span><select aria-label="Edit shift employee" value={editingShift.employeeId} onChange={event => setEditingShift(shift => shift ? { ...shift, employeeId: Number(event.target.value) } : shift)}>{orderedShiftEmployees.map(employee => <option key={employee.id} value={employee.id}>{employee.name}</option>)}</select></label>
+            {shiftWarningPreview()}
             <ShiftAvailability key={`availability:${editingShift.employeeId}`} requests={state.availabilityRequests} employeeId={editingShift.employeeId} date={editingShift.date} permitted={shared.data.permissions["availability.read"]} />
             <ShiftBuilderOptions value={editingShift} employeeId={editingShift.employeeId} date={editingShift.date} onChange={patch => setEditingShift(shift => shift ? { ...shift, ...patch } : shift)} />
             <label className="shift-edit-field">
@@ -7930,15 +7945,6 @@ function employeeInitials(name: string) {
     .join("");
 }
 
-function employeeHasApprovedTimeOffOnDate(requests: PtoRequest[], employeeId: number, date: string) {
-  return requests.some((request) => (
-    request.employeeId === employeeId
-    && request.status === "approved"
-    && request.startDate <= date
-    && request.endDate >= date
-  ));
-}
-
 function weeklyShiftCount(days: { shifts: Shift[] }[]) {
   return days.reduce((count, day) => count + day.shifts.length, 0);
 }
@@ -8435,6 +8441,11 @@ function ScheduleEnforcementPanel({ settings, dirty, message, onChange, onSave }
           <span>minutes after their shift is scheduled to start</span>
         </div>
       </div>
+      <fieldset className="schedule-warning-settings"><legend>Schedule warning defaults</legend>
+        <label>Minimum rest between workdays (hours)<input type="number" min={0} max={24} step={1} required value={settings.minRestHours} onChange={event => onChange({ minRestHours: Number(event.target.value) })} /></label>
+        <label>Availability review interval (days)<input type="number" min={0} max={365} step={1} required value={settings.availabilityReviewDays} onChange={event => onChange({ availabilityReviewDays: Number(event.target.value) })} /></label>
+        <p>Company planning reminders. Zero turns off that reminder. Short-rest checks compare different workdays and exclude same-day split shifts. Availability older than the review interval is flagged for the shift date; missing availability is always flagged when you can view it. Saving these values does not change shifts, availability history or pay.</p>
+      </fieldset>
       <div className="enforcement-rules">
         <div className="enforcement-rule">
           <div className="enforcement-rule-line">

@@ -9,6 +9,7 @@ import { departmentChange, employeeChange } from "./records";
 import type { RecordContext } from "./records";
 import { scheduleChange } from "./schedule";
 import { frequentShifts } from "./shift-suggestions";
+import { readScheduleConflicts } from "./conflicts";
 import { timeOffChange } from "./time-off";
 import { conversationChange } from "./messages";
 import { timecardChange } from "./timecards";
@@ -42,6 +43,11 @@ export function createWorkforceService(db: Database, access: ReturnType<typeof c
       const ctx = await access.workspaceContext(request);
       const url = new URL(request.url);
       const action = url.pathname.slice("/api/workspace/".length);
+      if (action === "schedule-conflicts") {
+        if (request.method !== "POST") return json({ error: "Method not allowed." }, 405, { Allow: "POST" });
+        if (url.search) throw new AuthError(400, "Choose the warning dates in the request body.");
+        return json(await readScheduleConflicts(db, ctx, await readAuthBody(request, 32768)));
+      }
       if (action === "frequent-shifts" && request.method === "GET") return json(await frequentShifts(db, ctx, url));
       if (action === "state" && request.method === "GET") return json(await workspaceSnapshot(db, ctx, options.fieldKey, requestPeriod(url, now())));
       if (action === "maintenance" && request.method === "POST") {

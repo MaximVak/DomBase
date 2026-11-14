@@ -199,6 +199,8 @@ export const business = sqliteTable("business", {
 export const locationSettings = sqliteTable("location_settings", {
   businessId: integer("business_id").primaryKey().references(() => business.id),
   workWeekStart: integer("work_week_start").notNull().default(1),
+  minRestHours: integer("min_rest_hours").notNull().default(10),
+  availabilityReviewDays: integer("availability_review_days").notNull().default(90),
   scheduleStartHour: integer("schedule_start_hour").notNull().default(7),
   scheduleEndHour: integer("schedule_end_hour").notNull().default(17),
   lateMinutes: integer("late_minutes").notNull().default(1),
@@ -226,6 +228,7 @@ export const locationSettings = sqliteTable("location_settings", {
   ...timestamps(),
 }, table => [
   check("location_settings_week_check", sql`${table.workWeekStart} BETWEEN 0 AND 6`),
+  check("location_settings_conflict_limits_check", sql`${table.minRestHours} BETWEEN 0 AND 24 AND ${table.availabilityReviewDays} BETWEEN 0 AND 365`),
   check("location_settings_meal_duration_check", sql`${table.mealBreakMinutes} BETWEEN 30 AND 120`),
   check("location_settings_schedule_check", sql`${table.scheduleStartHour} BETWEEN 0 AND 23 AND ${table.scheduleEndHour} BETWEEN 1 AND 24 AND ${table.scheduleStartHour} < ${table.scheduleEndHour}`),
   check("location_settings_timing_check", sql`${table.lateMinutes} BETWEEN 1 AND 120 AND ${table.earlyClockInMinutes} BETWEEN 0 AND 120 AND ${table.noShowMinutes} BETWEEN 0 AND 120 AND ${table.automaticClockOutMinutes} BETWEEN 1 AND 1440 AND ${table.mealBreakAfterHours} BETWEEN 1 AND 24`),
