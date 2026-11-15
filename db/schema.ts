@@ -449,6 +449,7 @@ export const authRateLimits = sqliteTable("auth_rate_limits", {
 
 export const schedulePublications = sqliteTable("schedule_publications", {
   id: id(),
+  noticeType: text("notice_type", { enum: ["schedule", "open_shift_request"] }).notNull().default("schedule"),
   departmentId: integer("department_id").references(() => departments.id),
   periodStart: text("period_start"),
   periodEnd: text("period_end"),
@@ -893,3 +894,27 @@ export const schedulePublicationRecipients = sqliteTable("schedule_publication_r
   emailRequested: integer("email_requested", { mode: "boolean" }).notNull(),
   emailId: text("email_id").references(() => scheduleEmails.id),
 }, table => [primaryKey({ columns: [table.publicationId, table.employeeId] }), check("schedule_publication_recipients_flags_check", sql`${table.inApp} IN (0,1) AND ${table.emailRequested} IN (0,1)`)]);
+
+export const openShifts = sqliteTable("open_shifts", {
+  id: id(), roleId: integer("role_id").notNull().references(() => roles.id),
+  date: text("date").notNull(), startTime: text("start_time").notNull(), endTime: text("end_time").notNull(),
+  station: text("station").notNull().default("Floor"), notes: text("notes").notNull().default(""), color: text("color", { enum: ["blue", "green", "amber", "red", "violet", "gray"] }).notNull().default("blue"),
+  version: integer("version").notNull().default(1), publicationId: integer("publication_id").notNull().references(() => schedulePublications.id),
+  createdByAccountId: integer("created_by_account_id").notNull().references(() => accounts.id), filledShiftId: integer("filled_shift_id").references(() => shifts.id), archivedAt: text("archived_at"), ...timestamps(),
+}, table => [index("open_shifts_date_idx").on(table.date), uniqueIndex("open_shifts_filled_idx").on(table.filledShiftId), check("open_shifts_values_check", sql`${table.startTime} < ${table.endTime} AND ${table.version} > 0 AND ${table.color} IN ('blue','green','amber','red','violet','gray')`)]);
+export const openShiftDraftChanges = sqliteTable("open_shift_draft_changes", {
+  id: id(), ownerAccountId: integer("owner_account_id").notNull().references(() => accounts.id), clientKey: text("client_key").notNull(),
+  openShiftId: integer("open_shift_id").references(() => openShifts.id), operation: text("operation", { enum: ["upsert", "delete"] }).notNull(),
+  roleId: integer("role_id").notNull().references(() => roles.id), date: text("date").notNull(), startTime: text("start_time").notNull(), endTime: text("end_time").notNull(),
+  station: text("station").notNull().default("Floor"), notes: text("notes").notNull().default(""), color: text("color", { enum: ["blue", "green", "amber", "red", "violet", "gray"] }).notNull().default("blue"),
+  baseVersion: integer("base_version").notNull().default(0), basePublicationVersion: integer("base_publication_version").notNull().default(0), ...timestamps(),
+}, table => [uniqueIndex("open_shift_draft_owner_key_idx").on(table.ownerAccountId, table.clientKey), check("open_shift_draft_values_check", sql`${table.operation} IN ('upsert','delete') AND (${table.operation} != 'delete' OR ${table.openShiftId} IS NOT NULL) AND ${table.startTime} < ${table.endTime} AND ${table.baseVersion} >= 0 AND ${table.basePublicationVersion} >= 0 AND ${table.color} IN ('blue','green','amber','red','violet','gray')`)]);
+export const openShiftClaims = sqliteTable("open_shift_claims", {
+  id: id(), openShiftId: integer("open_shift_id").notNull().references(() => openShifts.id), employeeId: integer("employee_id").notNull().references(() => employees.id),
+  status: text("status", { enum: ["pending", "approved", "declined", "withdrawn", "cancelled"] }).notNull().default("pending"), version: integer("version").notNull().default(1), openVersion: integer("open_version").notNull(),
+  requestedAt: text("requested_at").notNull().default(sql`CURRENT_TIMESTAMP`), decidedAt: text("decided_at"), decidedByAccountId: integer("decided_by_account_id").references(() => accounts.id), reason: text("reason").notNull().default(""),
+}, table => [uniqueIndex("open_shift_claim_pending_idx").on(table.openShiftId, table.employeeId).where(sql`${table.status} = 'pending'`), uniqueIndex("open_shift_claim_approved_idx").on(table.openShiftId).where(sql`${table.status} = 'approved'`), index("open_shift_claim_employee_idx").on(table.employeeId, table.id), check("open_shift_claim_values_check", sql`${table.status} IN ('pending','approved','declined','withdrawn','cancelled') AND ${table.version} > 0 AND ${table.openVersion} > 0`)]);
+export const scheduleOpenTemplateEntries = sqliteTable("schedule_open_template_entries", {
+ id:id(),templateId:integer("template_id").notNull().references(()=>scheduleTemplates.id),roleId:integer("role_id").notNull().references(()=>roles.id),dayOfWeek:integer("day_of_week").notNull(),
+ startTime:text("start_time").notNull(),endTime:text("end_time").notNull(),station:text("station").notNull().default("Floor"),notes:text("notes").notNull().default(""),color:text("color",{enum:["blue","green","amber","red","violet","gray"]}).notNull().default("blue"),
+},table=>[index("schedule_open_template_idx").on(table.templateId),check("schedule_open_template_values_check",sql`${table.dayOfWeek} BETWEEN 0 AND 6 AND ${table.startTime}<${table.endTime} AND ${table.color} IN ('blue','green','amber','red','violet','gray')`)]);

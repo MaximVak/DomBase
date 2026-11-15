@@ -10,7 +10,7 @@ export type ScheduleToolChoice = { revision: number; source: ScheduleSource; tar
 export type TemplateSummary = { id: number; name: string; version: number; entries: number; archived: boolean };
 export type ScheduleToolRole = { id: number; name: string; departmentId: number | null };
 export type ScheduleToolList = { roles: ScheduleToolRole[]; revision: number; templates: TemplateSummary[]; nextCursor: number | null };
-export type ScheduleToolPreview = { revision: number; reviewToken: string; added: number; replaced: number; targets: string[]; shifts: Shift[]; warnings: ConflictAssessment; issues: string[] };
+export type ScheduleToolPreview = { openShifts?: import("./open-shifts-model").OpenShift[]; revision: number; reviewToken: string; added: number; replaced: number; targets: string[]; shifts: Shift[]; warnings: ConflictAssessment; issues: string[] };
 export type ScheduleToolResult = { saved: true; revision: number; added?: number; replaced?: number; cleared?: number; templateId?: number };
 export const offsetScheduleDate = (date: string, days: number) => new Date(Date.parse(`${date}T12:00:00Z`) + days * 86400000).toISOString().slice(0, 10);
 export function repeatScheduleWeeks(week: string, count: number) { return Array.from({ length: count }, (_, i) => offsetScheduleDate(week, (i + 1) * 7)); }

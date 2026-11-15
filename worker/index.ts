@@ -74,9 +74,10 @@ const worker = {
     }
 
     const response = await handler.fetch(request, env, ctx);
-    if (request.method === "POST" && url.pathname === "/api/workspace/commit" && response.ok) ctx.waitUntil(dispatchScheduleEmails(drizzle(env.DB, { schema }), env).catch(() => { console.error("Schedule email status is temporarily unavailable."); }));
+    if (request.method === "POST" && (url.pathname === "/api/workspace/commit" || (url.pathname === "/api/workspace/open-shifts" && response.headers.get("X-Schedule-Dispatch") === "1")) && response.ok) ctx.waitUntil(dispatchScheduleEmails(drizzle(env.DB, { schema }), env).catch(() => { console.error("Schedule email status is temporarily unavailable."); }));
     if (["/", "/login", "/setup", "/access", "/kiosk", "/kiosk-admin", "/me", "/me/schedule", "/me/availability", "/team", "/team/reports", "/community", "/invite", "/backups"].includes(url.pathname) || /^\/api\/(auth|access|workforce|workspace|documents|kiosk|kiosk-admin|self|team|community|invitations|backups)\//.test(url.pathname)) {
       const headers = new Headers(response.headers);
+      headers.delete("X-Schedule-Dispatch");
       headers.set("Cache-Control", "private, no-store");
       headers.set("Referrer-Policy", "no-referrer");
       headers.set("X-Content-Type-Options", "nosniff");

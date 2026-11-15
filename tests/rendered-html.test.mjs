@@ -268,7 +268,7 @@ test("shift editor uses clear time labels and available role options", async () 
   assert.match(page, /aria-label=\{`Previous \$\{employeeScheduleTab\}`\}>\s*<span aria-hidden="true">‹<\/span>\s*<\/button>\s*<label className="shift-date-control">[^]*?<\/label>\s*<button[^]*?aria-label=\{`Next \$\{employeeScheduleTab\}`\}>\s*<span aria-hidden="true">›<\/span>/);
   assert.match(page, /className="shift-date-navigation"/);
   assert.match(page, /className="shift-view-control">\s*<select className="shift-view-select"[^]*?<span aria-hidden="true">▾<\/span>/);
-  assert.match(page, /<SchedulePublishControl count=\{unpublishedShiftCount\}/);
+  assert.match(page, /<SchedulePublishControl count=\{unpublishedShiftCount \+/);
   assert.match(page, /type ScheduleDraft = \{/);
   assert.match(page, /scheduleDraftsByManager: Record<number, ScheduleDraft>/);
   assert.doesNotMatch(page, /localStorage/);

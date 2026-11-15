@@ -1,3 +1,5 @@
+import { sourceOpenShifts, selectedOpenShift, copyOpenShifts, clearOpenShifts } from "./open-shift-tools";
+import { openShiftDraftChange } from "./open-shift-drafts";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import * as s from "../db/schema";
 import { AuthError } from "../auth/http";
@@ -31,7 +33,7 @@ function source(value: unknown, start: number): ScheduleSource {
   v.keys(row, kind === "week" ? ["kind", "weekStart"] : ["kind", "id"]);
   return kind === "week" ? { kind, weekStart: week(row.weekStart, start) } : { kind, id: v.integer(row.id) };
 }
-function templateScope(ctx: Context) { return sql`NOT EXISTS (SELECT 1 FROM schedule_template_entries te WHERE te.template_id = ${s.scheduleTemplates.id} AND (NOT (${ctx.employeeFilter(sql`te.employee_id`)}) OR NOT (${ctx.roleFilter(sql`te.role_id`)})))`; }
+function templateScope(ctx: Context) { return sql`NOT EXISTS (SELECT 1 FROM schedule_template_entries te WHERE te.template_id = ${s.scheduleTemplates.id} AND (NOT (${ctx.employeeFilter(sql`te.employee_id`)}) OR NOT (${ctx.roleFilter(sql`te.role_id`)}))) AND NOT EXISTS (SELECT 1 FROM schedule_open_template_entries oe WHERE oe.template_id=${s.scheduleTemplates.id} AND NOT (${ctx.roleFilter(sql`oe.role_id`)}))`; }
 async function template(db: Database, ctx: Context, id: number) {
   const [header] = await db.select().from(s.scheduleTemplates).where(and(eq(s.scheduleTemplates.id, id), templateScope(ctx), ctx.activeActor())).limit(1);
   if (!header) throw new AuthError(404, "Template is not available in your current access.");
@@ -88,7 +90,7 @@ export async function scheduleTools(db: Database, ctx: Context, body: Record<str
   if (action === "list") {
     v.keys(body, ["action", "archived", "cursor"]); const archived = v.boolean(body.archived), cursor = body.cursor === undefined ? Number.MAX_SAFE_INTEGER : v.integer(body.cursor);
     const meta = await revision(db, ctx);
-    const rows = await db.select({ id: s.scheduleTemplates.id, name: s.scheduleTemplates.name, version: s.scheduleTemplates.version, archivedAt: s.scheduleTemplates.archivedAt, entries: sql<number>`(SELECT count(*) FROM schedule_template_entries te WHERE te.template_id = schedule_templates.id)` }).from(s.scheduleTemplates).where(and(templateScope(ctx), ctx.activeActor(), archived ? sql`${s.scheduleTemplates.archivedAt} IS NOT NULL` : isNull(s.scheduleTemplates.archivedAt), sql`${s.scheduleTemplates.id} < ${cursor}`)).orderBy(desc(s.scheduleTemplates.id)).limit(51);
+    const rows = await db.select({ id: s.scheduleTemplates.id, name: s.scheduleTemplates.name, version: s.scheduleTemplates.version, archivedAt: s.scheduleTemplates.archivedAt, entries: sql<number>`((SELECT count(*) FROM schedule_template_entries te WHERE te.template_id = schedule_templates.id) + (SELECT count(*) FROM schedule_open_template_entries oe WHERE oe.template_id = schedule_templates.id))` }).from(s.scheduleTemplates).where(and(templateScope(ctx), ctx.activeActor(), archived ? sql`${s.scheduleTemplates.archivedAt} IS NOT NULL` : isNull(s.scheduleTemplates.archivedAt), sql`${s.scheduleTemplates.id} < ${cursor}`)).orderBy(desc(s.scheduleTemplates.id)).limit(51);
     const roles = await db.select({ id: s.roles.id, name: s.roles.name, departmentId: s.roles.departmentId }).from(s.roles).where(and(eq(s.roles.archived, false), ctx.roleFilter(s.roles.id), ctx.activeActor())).limit(2001);
     if (roles.length > 2000) throw new AuthError(503, "Too many job roles to review safely.");
     await revision(db, ctx, meta.revision);
@@ -122,38 +124,44 @@ export async function scheduleTools(db: Database, ctx: Context, body: Record<str
     if (includeNotes && templateName && !canNotes(ctx)) throw new AuthError(403, "Viewing and managing notes are required to include them in a template.");
     const data = await context(db, ctx, options, from, offsetScheduleDate(from, 6), expected), matches = selectedRows(data, selected);
     const result = buildClearedSchedule(data.view.state.shifts, data.draft, row => weekFor(row.date, meta.start) === from && matches(row));
-    const issues = templateName ? sourceIssues(result.removed, data) : [];
-    if (!result.removed.length) issues.push("There are no entries to clear in this selection.");
+    const openResult = clearOpenShifts(data.view.openSchedule!, row => weekFor(row.date, meta.start) === from && selectedOpenShift(selected)(row));
+    const issues = templateName ? [...sourceIssues(result.removed, data), ...openResult.removed.filter(row => !data.roles.some(role => role.id === row.roleId)).map(() => "An open-shift job is unavailable. Update the source or skip saving a template.")] : [];
+    if (templateName && result.removed.length + openResult.removed.length > maxScheduleEntries) issues.push("Choose at most500 assigned/open entries to save as one template.");
+    if (!result.removed.length && !openResult.removed.length) issues.push("There are no entries to clear in this selection.");
     if (result.draft.upsertedShifts.length > maxScheduleEntries || result.draft.deletedShiftIds.length > maxScheduleEntries) issues.push("This would exceed the 500-entry draft limit. Clear a smaller selection.");
     const reviewed = rateKey(options.secret, canonical({ actor: ctx.account.id, revision: expected, from, selected, templateName, includeNotes }));
-    if (action === "clear-preview") { await revision(db, ctx, expected); return { revision: expected, reviewToken: reviewed, cleared: result.removed.length, publishedRemovals: result.publishedRemovals.length, discardedDraftEntries: result.discardedDraftEntries, templateEntries: templateName ? result.removed.length : 0, issues, entries: result.removed.map(row => ({ id: row.id, employee: data.view.state.employees.find(employee => employee.id === row.employeeId)?.name ?? "Team member", date: row.date, label: `${row.shiftType === "day_off" ? "Day off" : `${row.start}–${row.end}`} · ${row.role}` })) }; }
+    if (action === "clear-preview") { await revision(db, ctx, expected); return { revision: expected, reviewToken: reviewed, cleared: result.removed.length + openResult.removed.length, publishedRemovals: result.publishedRemovals.length + openResult.publishedRemovals.length, discardedDraftEntries: result.discardedDraftEntries + openResult.discarded, templateEntries: templateName ? result.removed.length + openResult.removed.length : 0, issues, entries: [...openResult.removed.map(row => ({ id: row.id, employee: "Open shift", date: row.date, label: `${row.start}–${row.end} · ${row.role}` })), ...result.removed.map(row => ({ id: row.id, employee: data.view.state.employees.find(employee => employee.id === row.employeeId)?.name ?? "Team member", date: row.date, label: `${row.shiftType === "day_off" ? "Day off" : `${row.start}–${row.end}`} · ${row.role}` }))] }; }
     if (body.reviewToken !== reviewed) throw new AuthError(409, "Review these exact clearing choices before saving.");
     if (issues.length) throw new AuthError(409, issues[0]);
     let templateId: number | undefined;
     if (templateName) {
       templateId = newRecordId(); tx.insert(s.scheduleTemplates, { id: templateId, name: templateName, createdByAccountId: ctx.account.id });
       tx.insertRows(s.scheduleTemplateEntries, result.removed.map(row => ({ templateId, employeeId: row.employeeId, roleId: data.roles.find(role => role.name === row.role)!.id, dayOfWeek: new Date(`${row.date}T12:00:00Z`).getUTCDay(), startTime: row.start, endTime: row.end, station: row.station, notes: includeNotes ? row.notes ?? "" : "", shiftType: row.shiftType ?? "work", color: row.color ?? "blue" })));
-      tx.insert(s.auditLog, { actorAccountId: ctx.account.id, action: "schedule.template_created_before_clear", entityType: "schedule-template", entityId: String(templateId), metadata: { entries: result.removed.length, sourceWeek: from }, createdAt: stamp });
+      tx.insertRows(s.scheduleOpenTemplateEntries, openResult.removed.map(row => ({ templateId, roleId: row.roleId, dayOfWeek: new Date(`${row.date}T12:00:00Z`).getUTCDay(), startTime: row.start, endTime: row.end, station: row.station, notes: includeNotes ? row.notes ?? "" : "", color: row.color })));
+      tx.insert(s.auditLog, { actorAccountId: ctx.account.id, action: "schedule.template_created_before_clear", entityType: "schedule-template", entityId: String(templateId), metadata: { entries: result.removed.length + openResult.removed.length, sourceWeek: from }, createdAt: stamp });
     }
     await scheduleChange({ db, ctx, tx, view: data.view, roles: data.roles, fieldKey: options.fieldKey, today: stamp.slice(0, 10) }, { entity: "schedule-draft", id: 1, before: data.draft ?? null, after: result.draft });
-    tx.insert(s.auditLog, { actorAccountId: ctx.account.id, action: "schedule.week_cleared_in_draft", entityType: "schedule-draft", entityId: String(ctx.account.id), metadata: { weekStart: from, entries: result.removed.length, savedTemplate: !!templateId }, createdAt: stamp });
-    return commit({ cleared: result.removed.length, ...(templateId ? { templateId } : {}) }, "schedule-draft");
+    if (openResult.removed.length) await openShiftDraftChange({ db, ctx, tx, view: data.view, roles: data.roles, fieldKey: options.fieldKey, today: stamp.slice(0,10) }, { entity: "open-shift-draft", id: 1, before: data.view.openSchedule!.draft, after: openResult.draft });
+    tx.insert(s.auditLog, { actorAccountId: ctx.account.id, action: "schedule.week_cleared_in_draft", entityType: "schedule-draft", entityId: String(ctx.account.id), metadata: { weekStart: from, entries: result.removed.length + openResult.removed.length, savedTemplate: !!templateId }, createdAt: stamp });
+    return commit({ cleared: result.removed.length + openResult.removed.length, ...(templateId ? { templateId } : {}) }, "schedule-draft");
   }
   if (action === "save-template") {
     v.keys(body, ["action", "id", "revision", "name", "weekStart", "selection", "includeNotes", "templateId"]);
     const from = week(body.weekStart, meta.start), data = await context(db, ctx, options, from, offsetScheduleDate(from, 6), expected), selected = selectedRows(data, selection(body.selection));
     const notes = v.boolean(body.includeNotes); if (notes && !canNotes(ctx)) throw new AuthError(403, "Viewing and managing shift notes are required to include them.");
     const rows = (await sourceRows(db, ctx, { kind: "week", weekStart: from }, data, meta.start)).filter(selected);
-    if (!rows.length || rows.length > maxScheduleEntries) throw new AuthError(400, `Choose between 1 and ${maxScheduleEntries} entries to save.`);
-    const issues = sourceIssues(rows, data); if (issues.length) throw new AuthError(409, issues[0]);
+    const openRows = (await sourceOpenShifts(db, ctx, { kind: "week", weekStart: from }, data.view.openSchedule!, meta.start, notes)).filter(selectedOpenShift(selection(body.selection)));
+    if ((!rows.length && !openRows.length) || rows.length + openRows.length > maxScheduleEntries) throw new AuthError(400, `Choose between 1 and ${maxScheduleEntries} entries to save.`);
+    const issues = [...sourceIssues(rows, data), ...openRows.filter(row => !data.roles.some(role => role.id === row.roleId)).map(() => "An open-shift job is unavailable.")]; if (issues.length) throw new AuthError(409, issues[0]);
     const header = body.templateId === undefined ? null : await template(db, ctx, v.integer(body.templateId));
     if (header?.archivedAt) throw new AuthError(409, "Restore this template before replacing it.");
-    if (header && !ctx.permissions["schedule.notes.manage"] && await db.get(sql`SELECT 1 FROM schedule_template_entries WHERE template_id = ${header.id} AND notes != '' LIMIT 1`)) throw new AuthError(403, "Managing shift notes is required to replace a template containing notes.");
+    if (header && !ctx.permissions["schedule.notes.manage"] && await db.get(sql`SELECT 1 FROM (SELECT notes FROM schedule_template_entries WHERE template_id=${header.id} UNION ALL SELECT notes FROM schedule_open_template_entries WHERE template_id=${header.id}) WHERE notes != '' LIMIT 1`)) throw new AuthError(403, "Managing shift notes is required to replace a template containing notes.");
     const templateId = header?.id ?? newRecordId(), name = v.text(body.name, 100, true);
-    if (header) { tx.update(s.scheduleTemplates, { name, version: header.version + 1, updatedAt: stamp }, sql`id = ${templateId} AND version = ${header.version}`); tx.remove(s.scheduleTemplateEntries, sql`template_id = ${templateId}`); }
+    if (header) { tx.update(s.scheduleTemplates, { name, version: header.version + 1, updatedAt: stamp }, sql`id = ${templateId} AND version = ${header.version}`); tx.remove(s.scheduleTemplateEntries, sql`template_id = ${templateId}`); tx.remove(s.scheduleOpenTemplateEntries, sql`template_id = ${templateId}`); }
     else tx.insert(s.scheduleTemplates, { id: templateId, name, createdByAccountId: ctx.account.id });
     tx.insertRows(s.scheduleTemplateEntries, rows.map(row => ({ templateId, employeeId: row.employeeId, roleId: data.roles.find(role => role.name === row.role)!.id, dayOfWeek: new Date(`${row.date}T12:00:00Z`).getUTCDay(), startTime: row.start, endTime: row.end, station: row.station, notes: notes ? row.notes ?? "" : "", shiftType: row.shiftType ?? "work", color: row.color ?? "blue" })));
-    tx.insert(s.auditLog, { actorAccountId: ctx.account.id, action: header ? "schedule.template_replaced" : "schedule.template_created", entityType: "schedule-template", entityId: String(templateId), metadata: { entries: rows.length, sourceWeek: from }, createdAt: stamp });
+    tx.insertRows(s.scheduleOpenTemplateEntries, openRows.map(row => ({ templateId, roleId: row.roleId, dayOfWeek: new Date(`${row.date}T12:00:00Z`).getUTCDay(), startTime: row.start, endTime: row.end, station: row.station, notes: notes ? row.notes ?? "" : "", color: row.color })));
+    tx.insert(s.auditLog, { actorAccountId: ctx.account.id, action: header ? "schedule.template_replaced" : "schedule.template_created", entityType: "schedule-template", entityId: String(templateId), metadata: { entries: rows.length + openRows.length, sourceWeek: from }, createdAt: stamp });
     return commit({ templateId }, "schedule-template");
   }
   v.keys(body, ["action", "revision", "source", "targets", "selection", "mode", "includeNotes", ...(action === "apply" ? ["id", "reviewToken"] : [])]);
@@ -171,6 +179,10 @@ export async function scheduleTools(db: Database, ctx: Context, body: Record<str
   const rows = allSource.filter(selected);
   let next = 0;
   const result = buildScheduleToolPlan({ source: rows, targets, weekStart: meta.start, published: data.view.state.shifts, draft: data.draft, mode: choice.mode, selected, includeNotes: choice.includeNotes, nextId: action === "preview" ? () => --next : newRecordId });
+  const openSource = await sourceOpenShifts(db, ctx, from, data.view.openSchedule!, meta.start, choice.includeNotes);
+  const openResult = copyOpenShifts({ current: data.view.openSchedule!, source: openSource, targets, weekStart: meta.start, selection: choice.selection, mode: choice.mode, includeNotes: choice.includeNotes, nextId: action === "preview" ? () => --next : newRecordId });
+  if (openResult.copied.length) result.issues = result.issues.filter(issue => issue !== "No shifts match this source and selection.");
+  result.issues.push(...openResult.issues, ...openSource.filter(row => selectedOpenShift(choice.selection)(row) && !data.roles.some(role => role.id === row.roleId)).map(() => "An open-shift job is unavailable. Update the source before copying."));
   result.issues.push(...sourceIssues([...rows, ...unavailable], data));
   // Check complete employee days, including private shifts from other departments.
   const affected = [...new Set(result.copied.map(row => row.employeeId))];
@@ -182,10 +194,11 @@ export async function scheduleTools(db: Database, ctx: Context, body: Record<str
   if (action === "preview") {
     await revision(db, ctx, expected);
     const warnings = result.issues.length ? { revision: expected, availability: ctx.permissions["availability.read"], timeOff: ctx.permissions["time_off.read"], warnings: [] } : await readScheduleConflicts(db, ctx, { period: { start: targets[0], end: offsetScheduleDate(targets.at(-1)!, 6) }, revision: expected, upserts: result.draft.upsertedShifts.map(row => ({ id: row.id, employeeId: row.employeeId, date: row.date, start: row.start, end: row.end, role: row.role, shiftType: row.shiftType ?? "work" })), deletedShiftIds: result.draft.deletedShiftIds });
-    return { revision: expected, reviewToken, added: result.copied.length, replaced: result.removed.length, targets, shifts: result.plan.filter(row => targets.includes(weekFor(row.date, meta.start))).map(row => ({ ...row, notes: ctx.permissions["schedule.notes.read"] ? row.notes : "" })), warnings, issues: result.issues };
+    return { revision: expected, reviewToken, added: result.copied.length + openResult.copied.length, replaced: result.removed.length + openResult.removed.length, targets, openShifts: openResult.plan.filter(row => targets.includes(weekFor(row.date, meta.start))), shifts: result.plan.filter(row => targets.includes(weekFor(row.date, meta.start))).map(row => ({ ...row, notes: ctx.permissions["schedule.notes.read"] ? row.notes : "" })), warnings, issues: result.issues };
   }
   if (result.issues.length) throw new AuthError(409, result.issues[0]);
   await scheduleChange({ db, ctx, tx, view: data.view, roles: data.roles, fieldKey: options.fieldKey, today: stamp.slice(0, 10) }, { entity: "schedule-draft", id: 1, before: data.draft ?? null, after: result.draft });
+  if (openResult.copied.length || openResult.removed.length) await openShiftDraftChange({ db, ctx, tx, view: data.view, roles: data.roles, fieldKey: options.fieldKey, today: stamp.slice(0,10) }, { entity: "open-shift-draft", id: 1, before: data.view.openSchedule!.draft, after: openResult.draft });
   tx.insert(s.auditLog, { actorAccountId: ctx.account.id, action: "schedule.draft_copied", entityType: "schedule-draft", entityId: String(ctx.account.id), metadata: { source: from, targets, mode: choice.mode, added: result.copied.length, replaced: result.removed.length }, createdAt: stamp });
-  return commit({ added: result.copied.length, replaced: result.removed.length }, "schedule-draft");
+  return commit({ added: result.copied.length + openResult.copied.length, replaced: result.removed.length + openResult.removed.length }, "schedule-draft");
 }

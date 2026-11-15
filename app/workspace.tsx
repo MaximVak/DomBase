@@ -8,6 +8,8 @@ import { ShiftAvailability } from "./shift-availability";
 import { approvedAvailability, availabilityForDate, availabilityTime, newestAvailability } from "./availability-model";
 import { useScheduleWarnings, ScheduleWarningPanel, ShiftWarningBadge } from "./schedule-warning-panel";
 import type { PlannedShift } from "./schedule-estimates";
+import { OpenShiftRequests } from "./open-shift-requests";
+import { OpenShiftManager } from "./open-shift-manager";
 import { SchedulePublishControl } from "./schedule-publish";
 import { ScheduleTools } from "./schedule-tools";
 import { ShiftBuilderOptions } from "./shift-builder-options";
@@ -388,6 +390,8 @@ export default function Home({ account }: { account: DashboardAccount }) {
   const [visibleEmployeeIds, setVisibleEmployeeIds] = useState<number[] | null>(null);
   const [editingShift, setEditingShift] = useState<Shift | null>(null);
   const [createShiftWeekdays, setCreateShiftWeekdays] = useState<number[]>([]);
+  const [showOpenRequests, setShowOpenRequests] = useState(false);
+  const [isOpenShiftDialogOpen, setIsOpenShiftDialogOpen] = useState(false);
   const [isPublicationOpen, setIsPublicationOpen] = useState(false);
   const [isScheduleToolsOpen, setIsScheduleToolsOpen] = useState(false);
   const [editingShiftWeekdays, setEditingShiftWeekdays] = useState<number[]>([]);
@@ -787,7 +791,9 @@ export default function Home({ account }: { account: DashboardAccount }) {
     detail: notification.detail,
     at: notification.at,
   }));
+  const openRequestNotifications: HeaderNotification[] = (shared.data.openRequests ?? []).map(request => ({ id: `request-open-${request.id}`, kind: "open-request", title: `${request.employee} · Open shift request`, detail: `${request.role} · Pending approval`, at: request.requestedAt }));
   const allHeaderNotifications = [
+    ...openRequestNotifications,
     ...requestNotifications,
     ...alertNotifications,
     ...scheduleNotifications,
@@ -2848,6 +2854,18 @@ export default function Home({ account }: { account: DashboardAccount }) {
     setEditingShift(null);
   }
 
+  async function dropScheduleIntoOpen(event: DragEvent, date: string) {
+    event.preventDefault(); const source = draggedShift.current; draggedShift.current = null;
+    if (!source || mode !== "manager" || !canEditScheduleRole(source.role) || !shared.data.openSchedule) return;
+    if (source.shiftType === "day_off") { setSchedulePermissionError("A day off cannot become an open work shift."); return; }
+    const role = shared.data.openSchedule.roles.find(role => role.name === source.role); if (!role) return;
+    const before = shared.data.openSchedule.draft, current = before ?? { upserted: [], deletedIds: [] };
+    const scheduleDraft = mergeScheduleDraft(state.shifts, activeScheduleDraft, [], [source.id], [source.employeeId]);
+    const assignedAfter = scheduleDraft.upsertedShifts.length || scheduleDraft.deletedShiftIds.length ? scheduleDraft : null;
+    const open = { id: newRecordId(), roleId: role.id, role: role.name, departmentId: role.departmentId, date, start: source.start, end: source.end, station: source.station, notes: shared.data.permissions["schedule.notes.read"] && shared.data.permissions["schedule.notes.manage"] ? source.notes ?? "" : "", color: source.color ?? "blue", version: 0 };
+    if (await shared.save([{ entity: "schedule-draft", id: 1, before: activeScheduleDraft ?? null, after: assignedAfter }, { entity: "open-shift-draft", id: 1, before, after: { ...current, upserted: [...current.upserted, open] } }])) setSchedulePermissionError("Shift moved to Open shifts in your draft. Publish to offer it to eligible employees.");
+  }
+
   async function dropScheduleShift(event: DragEvent, employeeId: number, date: string) {
     event.preventDefault();
     const source = draggedShift.current; draggedShift.current = null;
@@ -2942,7 +2960,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
   }
 
   useEffect(() => {
-    shared.setEditing(Boolean(isPublicationOpen || isScheduleToolsOpen || isSharedTimeCardEditing || ptoRequestForm || editingPayrollEmployeeId !== null || activeView === "profile" || isAddingEmployee || editingEmployeeId !== null || isAddingDepartment || editingDepartmentId !== null || isAddingShift || editingShift || scheduleEventDraft || editingHours || editingPtoPolicyId !== null || ptoPolicyForm || reviewingPtoRequestId !== null || certificateEmployeeId !== null || terminatingEmployeeId !== null || editingPersonalContactEmployeeId !== null || editingPersonalPayrollEmployeeId !== null || editingBasicInfoField !== null || activeView === "settings" || activeView === "my_availability" || activeView === "team_availability" || isCreatingConversation || editingConversationNameId !== null));
+    shared.setEditing(Boolean(isOpenShiftDialogOpen || isPublicationOpen || isScheduleToolsOpen || isSharedTimeCardEditing || ptoRequestForm || editingPayrollEmployeeId !== null || activeView === "profile" || isAddingEmployee || editingEmployeeId !== null || isAddingDepartment || editingDepartmentId !== null || isAddingShift || editingShift || scheduleEventDraft || editingHours || editingPtoPolicyId !== null || ptoPolicyForm || reviewingPtoRequestId !== null || certificateEmployeeId !== null || terminatingEmployeeId !== null || editingPersonalContactEmployeeId !== null || editingPersonalPayrollEmployeeId !== null || editingBasicInfoField !== null || activeView === "settings" || activeView === "my_availability" || activeView === "team_availability" || isCreatingConversation || editingConversationNameId !== null));
   });
 
   if (!isUnlocked) return <main className="login-screen"><p role="status">Returning to sign in…</p></main>;
@@ -3495,7 +3513,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                       <div className="notification-list">
                         {headerNotifications.length > 0 ? headerNotifications.map((notification) => (
                           <div className="notification-item" key={notification.id}>
-                            {notification.kind === "request" && notification.requestId ? (
+                            {notification.kind === "open-request" ? <button type="button" className="notification-message-item notification-request-item" onClick={() => { setShowOpenRequests(true); setIsOpenShiftDialogOpen(true); setIsNotificationsOpen(false); }}><strong>{notification.title}</strong><span>{notification.detail}</span><small>{formatOperationalAlertTime(notification.at)}</small></button> : notification.kind === "request" && notification.requestId ? (
                               <button
                                 type="button"
                                 className="notification-message-item notification-request-item"
@@ -4953,7 +4971,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                     ) : null}
                   </div>
                   {mode === "manager" && shared.data.permissions["schedule.read"] && shared.data.permissions["schedule.manage"] ? <ScheduleTools weekStart={scheduleWeekDays[0].date} enabled={employeeScheduleTab === "week"} onOpenChange={setIsScheduleToolsOpen} onDraftReady={date => { setScheduleDate(date); setEmployeeScheduleTab("week"); }} /> : null}
-                  {mode === "manager" && shared.data.permissions["schedule.manage"] && shared.data.permissions["schedule.read"] ? <SchedulePublishControl count={unpublishedShiftCount} weekStart={scheduleWeekDays[0].date} onOpenChange={setIsPublicationOpen} onPublished={() => { setCreatedShiftTimes({}); setEditedShiftTimes({}); setLastEditedShiftId(null); }} /> : null}
+                  {mode === "manager" && shared.data.permissions["schedule.manage"] && shared.data.permissions["schedule.read"] ? <SchedulePublishControl count={unpublishedShiftCount + (shared.data.openSchedule?.draft?.upserted.length ?? 0) + (shared.data.openSchedule?.draft?.deletedIds.length ?? 0)} weekStart={scheduleWeekDays[0].date} onOpenChange={setIsPublicationOpen} onPublished={() => { setCreatedShiftTimes({}); setEditedShiftTimes({}); setLastEditedShiftId(null); }} /> : null}
                 </div>
               </div>
               {copiedShift ? <div className="schedule-copy-notice" role="status">Copied {formatTimeRange(copiedShift)}. Select an add-shift cell to review and paste it. <button type="button" onClick={() => setCopiedShift(null)}>Finish pasting</button></div> : null}
@@ -5000,6 +5018,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                       onChange={(event) => setScheduleDate(event.target.value)}
                       aria-label="Schedule date"
                     />
+                    {employeeScheduleTab !== "week" ? <OpenShiftManager dates={employeeScheduleTab === "day" ? [scheduleDate] : scheduleMonthDays.filter(day => day.inMonth).map(day => day.date)} onOpenChange={setIsOpenShiftDialogOpen} onDropAssignedShift={dropScheduleIntoOpen} /> : null}
                     {employeeScheduleTab === "day" ? (
                       visibleScheduleEmployees.length > 0 ? (
                         <div className="schedule-chart" style={{ "--schedule-hour-width": `${100 / scheduleHourLabels.length}%` } as CSSProperties} aria-label={`Team schedule for ${formatLongDate(scheduleDate)}`}>
@@ -5125,6 +5144,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                             {scheduleWeekDays.map(day => <div className="shift-week-cell schedule-events-cell" role="cell" key={day.date}>{scheduleEventList(day.date)}</div>)}
                           </div>
                         ) : null}
+                        <OpenShiftManager table dates={scheduleWeekDays.map(day => day.date)} onOpenChange={setIsOpenShiftDialogOpen} onDropAssignedShift={dropScheduleIntoOpen} />
                         <div className="shift-week-section-label">Team members ({visibleScheduleEmployees.length})</div>
                         {visibleScheduleEmployees.map((employee) => {
                           const employeeWeekShifts = scheduleWeekDays.flatMap((day) => day.shifts.filter((shift) => shift.employeeId === employee.id));
@@ -6703,6 +6723,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
         </div>
       ) : null}
 
+      {showOpenRequests ? <OpenShiftRequests onClose={() => { setShowOpenRequests(false); setIsOpenShiftDialogOpen(false); }} /> : null}
       {mode === "manager" && editingShift ? (
         <div className="modal-backdrop" role="presentation">
           <form className="shift-edit-modal" onSubmit={saveEditedShift} role="dialog" aria-modal="true" aria-labelledby="shift-edit-title">

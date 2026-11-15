@@ -1,3 +1,4 @@
+import { readOwnOpenShifts, saveOwnOpenClaim } from "./open-shifts";
 import { eq, sql } from "drizzle-orm";
 import { timingSafeEqual } from "node:crypto";
 import { Buffer } from "node:buffer";
@@ -104,6 +105,11 @@ export function createSelfService(db: KioskOperatorDatabase, auth: Auth, secret:
   async function handle(request: Request) {
     try {
       const ctx = await context(request); const url = new URL(request.url);
+      if (url.pathname === "/api/self/open-shifts") {
+        if (request.method === "GET") return json(await readOwnOpenShifts(db, ctx, url, now()));
+        if (request.method === "POST") { if (url.search) throw new AuthError(400, "Claims do not accept employee selectors."); return json(await saveOwnOpenClaim(db, ctx, await readAuthBody(request, 4096), secret, now())); }
+        return json({ error: "Method not allowed." }, 405, { Allow: "GET, POST" });
+      }
       if (url.pathname === "/api/self/schedule-preferences") {
         if (url.search) throw new AuthError(400, "Preferences do not accept employee selectors.");
         if (request.method === "GET") return json(await readSchedulePreferences(db, ctx));

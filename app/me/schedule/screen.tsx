@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { EmployeeOpenShifts } from "./open-shifts";
 import { ScheduleAlerts } from "./alerts";
 import { ScheduleAlertPreferences } from "../../schedule-alert-preferences";
 import { offsetScheduleDate, type EmployeeSchedule } from "../../../self/schedule-model";
@@ -58,6 +59,7 @@ export function EmployeeScheduleScreen() {
     </div>
     {error ? <p role="alert">{error} Use Reload schedule to try again.</p> : null}
     {pending ? <p role="status">Loading your schedule…</p> : null}
+    <EmployeeOpenShifts date={date} onAssignedChange={() => { void load(); }} />
     {data ? <>
       <p className="employee-schedule-context">{data.locationName} · All times in {data.timeZone}</p>
       <h2>{dayLabel(data.startDate)} – {dayLabel(data.endDate)}</h2>

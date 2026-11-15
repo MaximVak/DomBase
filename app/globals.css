@@ -11238,3 +11238,25 @@ body:has(dialog.time-exception-modal[open]) { overflow: hidden; }
 .schedule-publish-dialog details { margin-block: 12px; }
 .schedule-publish-dialog button, .schedule-alert-feed button, .schedule-alert-preferences button { white-space: normal; }
 @media (max-width: 600px) { .schedule-alert-heading, .schedule-alert-feed li { flex-direction: column; } .schedule-tools-tabs { flex-wrap: wrap; } .schedule-alert-preferences, .schedule-alert-feed, .schedule-alert-settings { padding: 12px; } }
+
+.open-shift-member { display:flex; flex-direction:column; align-items:flex-start; gap:8px; }
+.open-shift-member small, .open-shift-heading small { color:var(--muted,#596579); font-size:12px; font-weight:400; }
+.open-shift-member button, .open-shift-add { font-size:12px; padding:7px 8px; }
+.open-shift-card { background:var(--shift-tint,#e5f1ff); border:1px solid var(--border,#d5deea); border-left:4px solid var(--shift-color,#155fa8); border-radius:6px; margin-bottom:8px; overflow-wrap:anywhere; }
+.open-shift-card > button { display:flex; flex-direction:column; align-items:flex-start; gap:4px; width:100%; white-space:normal; text-align:left; background:transparent; color:var(--ink,#15263d); border:0; padding:8px; }
+.open-shift-card > button:disabled { opacity:1; cursor:default; }
+.open-shift-card.draft { border:2px dotted var(--blue-accent,#155fa8); }
+.open-shift-card.cancelling { opacity:.7; }
+.open-shift-heading { display:flex; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:12px; }
+.open-shifts-manager,.employee-open-shifts { border:1px solid var(--border,#d5deea); padding:16px; margin-block:16px; border-radius:8px; background:var(--surface,#fff); }
+.open-shifts-days { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; }
+.open-shift-day { min-width:0; }
+.open-shift-day h4 { margin:0 0 8px; }
+.open-shift-draft-tools { grid-column:1 / -1; display:flex; flex-wrap:wrap; gap:12px; align-items:center; padding:12px 16px; background:var(--surface,#fff); }
+.open-shift-time-fields { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
+.open-shift-actions { display:flex; flex-wrap:wrap; gap:12px; }
+.open-shift-request-list { list-style:none; padding:0; margin:12px 0; }
+.open-shift-request-list li { display:flex; flex-direction:column; align-items:flex-start; gap:8px; padding:14px 0; border-top:1px solid var(--border,#d5deea); overflow-wrap:anywhere; }
+.open-shift-request-list li p { margin:0; }
+.open-shift-request-list li button { white-space:normal; }
+@media (max-width:600px) { .open-shift-time-fields { grid-template-columns:1fr; } .open-shifts-manager,.employee-open-shifts { padding:12px; } .open-shifts-days { grid-template-columns:1fr; } }

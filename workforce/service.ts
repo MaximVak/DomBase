@@ -1,3 +1,5 @@
+import { readOpenClaimRequests, decideOpenClaim } from "./open-shift-claims";
+import { openShiftDraftChange } from "./open-shift-drafts";
 import { eq, sql } from "drizzle-orm";
 import * as s from "../db/schema";
 import { AuthError, json, readAuthBody } from "../auth/http";
@@ -24,11 +26,12 @@ import * as v from "./validation";
 import { requestPeriod, workspacePeriod } from "./period";
 import { runClockMaintenance } from "./maintenance";
 
-const entities: Entity[] = ["employee", "department", "schedule-event", "schedule-draft", "schedule-publish", "timecard", "hours-adjustment", "pto-request", "pto-policy", "availability", "conversation", "settings", "business", "notifications"];
+const entities: Entity[] = ["employee", "department", "schedule-event", "schedule-draft", "schedule-publish", "open-shift-draft", "timecard", "hours-adjustment", "pto-request", "pto-policy", "availability", "conversation", "settings", "business", "notifications"];
 function currentRecord(view: WorkspaceData, change: Change, employeeKey: number): unknown {
   const collections = { employee: view.state.employees, department: view.state.departments, "schedule-event": view.state.scheduleEvents, "hours-adjustment": view.state.hoursAdjustments, "pto-request": view.state.ptoRequests, "pto-policy": view.state.ptoPolicies, availability: view.state.availabilityRequests, conversation: view.state.conversations };
   if (change.entity in collections) return collections[change.entity as keyof typeof collections].find(row => row.id === change.id) ?? null;
   if (change.entity === "schedule-draft" || change.entity === "schedule-publish") return view.state.scheduleDraftsByManager[employeeKey] ?? null;
+  if (change.entity === "open-shift-draft") return view.openSchedule?.draft ?? null;
   if (change.entity === "settings") return { ...view.settings, hoursRoundingMinutes: view.state.hoursRoundingMinutes };
   if (change.entity === "business") return view.basicInfo;
   if (change.entity === "notifications") return { opened: view.opened[employeeKey] ?? [], dismissed: view.dismissed[employeeKey] ?? [] };
@@ -46,6 +49,11 @@ export function createWorkforceService(db: Database, access: ReturnType<typeof c
       const ctx = await access.workspaceContext(request);
       const url = new URL(request.url);
       const action = url.pathname.slice("/api/workspace/".length);
+      if (action === "open-shifts") {
+        if (request.method === "GET") return json(await readOpenClaimRequests(db, ctx, url));
+        if (request.method === "POST") { if (url.search) throw new AuthError(400, "Choose request options in the body."); const body = await readAuthBody(request, 4096); return json(await decideOpenClaim(db, ctx, body, options), 200, body.action === "decide" ? { "X-Schedule-Dispatch": "1" } : {}); }
+        return json({ error: "Method not allowed." }, 405, { Allow: "GET, POST" });
+      }
       if (action === "schedule-preferences") {
         if (url.search) throw new AuthError(400, "Preferences do not accept employee selectors.");
         const guard = sql`${ctx.activeActor()} AND EXISTS (SELECT 1 FROM employees e WHERE e.id=${ctx.account.employeeId ?? -1} AND e.active=1 AND e.terminated=0)`;
@@ -108,7 +116,7 @@ export function createWorkforceService(db: Database, access: ReturnType<typeof c
       for (const change of changes) {
         if (!equal(change.before, currentRecord(view, change, employeeKey))) throw new AuthError(409, "This record changed or is outside your access. Reload before saving.");
         if (change.entity === "employee" && change.before && versions[String(change.id)] !== view.employeeVersions[change.id]) throw new AuthError(409, "Employee access or data changed. Reload before saving.");
-        if (change.after && !["timecard", "schedule-draft", "schedule-publish", "settings", "business", "notifications"].includes(change.entity) && v.object(change.after).id !== change.id) throw new AuthError(400, "Record identifier does not match.");
+        if (change.after && !["timecard", "schedule-draft", "schedule-publish", "open-shift-draft", "settings", "business", "notifications"].includes(change.entity) && v.object(change.after).id !== change.id) throw new AuthError(400, "Record identifier does not match.");
       }
       const stamp = new Date(now()).toISOString(); const tx = new WorkspaceTransaction(db, ctx, id, stamp);
       const roles = await db.select({ id: s.roles.id, name: s.roles.name, departmentId: s.roles.departmentId, archived: s.roles.archived }).from(s.roles);
@@ -117,6 +125,7 @@ export function createWorkforceService(db: Database, access: ReturnType<typeof c
       for (const change of [...changes].sort((a, b) => order(a.entity) - order(b.entity))) {
         if (change.entity === "department") await departmentChange(r, change);
         else if (change.entity === "employee") await employeeChange(r, change);
+        else if (change.entity === "open-shift-draft") await openShiftDraftChange(r, change);
         else if (["schedule-event", "schedule-draft", "schedule-publish"].includes(change.entity)) await scheduleChange(r, change);
         else if (["pto-policy", "pto-request", "availability"].includes(change.entity)) await timeOffChange(r, change);
         else if (change.entity === "conversation") await conversationChange(r, change);
