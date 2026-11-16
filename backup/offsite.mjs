@@ -29,6 +29,7 @@ export async function offsiteStatus(env, now = Date.now()) {
 export async function runOffsiteCopy(env, { now = Date.now(), clientFactory = createB2Client, maxParts = 4 } = {}) {
   if (!env.BACKUP_B2) return { skipped: true };
   let token, config, state, prior;
+  let phase = "configuration";
   const started = Date.now(), logicalNow = () => now + Math.max(0, Date.now() - started);
   async function save(next) {
     const current = await readJson(env.BACKUPS, stateKey);
@@ -47,6 +48,7 @@ export async function runOffsiteCopy(env, { now = Date.now(), clientFactory = cr
     if (!await putJson(env.BACKUPS, stateKey, state, prior?.etag ?? null)) return { skipped: true };
     if (config.identity === "invalid") throw new Error("Invalid configuration.");
     const client = clientFactory(config);
+    phase = "inventory";
     for (const day of days) {
       const complete = await readJson(env.BACKUPS, `daily/${day}.json`);
       if (!complete) continue;
@@ -56,19 +58,24 @@ export async function runOffsiteCopy(env, { now = Date.now(), clientFactory = cr
       if (copy && copy.id !== receipt.id) throw new Error("Completed source archive changed.");
       if (copy?.completedAt) continue;
       copy = copy ?? { day, id: receipt.id, next: 0 };
+      phase = "checkpoint";
       await save({ ...state, copies: [...state.copies.filter(item => item.day !== day), copy], lastAttempt: { at: new Date(now).toISOString(), state: "running", localDay: day } });
       const keys = [root + "manifest.bin", ...Array.from({ length: receipt.objects }, (_, index) => root + `object-${String(index).padStart(4, "0")}.bin`)];
       for (let count = 0; copy.next < keys.length && count < maxParts; count++) {
+        phase = "source";
         const key = keys[copy.next], object = await env.BACKUPS.get(key);
         const limit = copy.next === 0 ? hostedLimits.manifestBytes + 16 : hostedLimits.objectBytes + 16;
         if (!object || object.size > limit) throw new Error("Encrypted archive part is missing.");
         const bytes = new Uint8Array(await object.arrayBuffer());
         if (bytes.length !== object.size || copy.next === 0 && (bytes.length !== receipt.manifest.size || hash(bytes) !== receipt.manifest.sha256)) throw new Error("Encrypted archive part is damaged.");
+        phase = "transfer";
         await client.copy(offsitePrefix + key, bytes);
         copy = { ...copy, next: copy.next + 1 };
+        phase = "checkpoint";
         await save({ ...state, copies: state.copies.map(item => item.day === day ? copy : item) });
       }
       if (copy.next === keys.length) {
+        phase = "completion";
         // Publication marker is last. An interrupted archive cannot be mistaken
         // for a complete recovery point in the independent provider.
         await client.copy(offsitePrefix + `daily/${day}.json`, encode(receipt));
@@ -80,10 +87,12 @@ export async function runOffsiteCopy(env, { now = Date.now(), clientFactory = cr
     }
     await save({ ...state, alerts: nextBackupAlerts(state, logicalNow()) });
     return { completed: true };
-  } catch {
+  } catch (error) {
     // Never log B2 keys, request URLs, provider bodies or employee information.
     if (token && state) try {
-      const failed = { ...state, lastAttempt: { at: new Date(logicalNow()).toISOString(), state: "failed", localDay: backupCalendar(now).day }, retryAt: logicalNow() + 15 * 60000 };
+      const diagnostic = { category: phase, ...(error?.name === "OffsiteStorageError" && ["GET", "HEAD", "PUT"].includes(error.operation) ? { operation: error.operation, ...(Number.isInteger(error.httpStatus) ? { httpStatus: error.httpStatus } : {}) } : {}) };
+      console.error("Off-site copy failed", diagnostic);
+      const failed = { ...state, lastAttempt: { at: new Date(logicalNow()).toISOString(), state: "failed", localDay: backupCalendar(now).day, ...diagnostic }, retryAt: logicalNow() + 15 * 60000 };
       await save({ ...failed, alerts: nextBackupAlerts(failed, logicalNow()) });
     } catch { /* A missing completion still becomes stale. */ }
     return { failed: true };

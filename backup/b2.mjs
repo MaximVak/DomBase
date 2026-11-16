@@ -54,17 +54,19 @@ export function createB2Client(config, { fetcher = fetch, clock = Date.now } = {
       || !["", "acl=", "lifecycle="].includes(query)) throw new Error("Off-site operation is not permitted.");
     const path = `/${encode(config.bucket)}/${key.split("/").map(encode).join("/")}`;
     const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), 20000);
+    let httpStatus = null;
     try {
       const headers = signedS3Headers({ method, host, path, query, bytes, ...config, now: clock(), extra: method === "PUT" ? { "content-type": "application/octet-stream", "x-amz-meta-sha256": sha256(bytes) } : {} });
       // workerd supports manual/follow, but rejects redirect:"error" before
       // sending a request. Manual keeps signed credentials on this origin;
       // the non-OK check below rejects every redirect response.
       const response = await fetcher(`https://${host}${path}${query ? `?${query}` : ""}`, { method, headers, body: method === "PUT" ? bytes : undefined, redirect: "manual", signal: controller.signal });
+      httpStatus = response.status;
       if (response.status === 404) { await response.body?.cancel(); return null; }
       if (!response.ok) { await response.body?.cancel(); throw new Error("Off-site storage request failed."); }
       if (method === "HEAD") return { size: Number(response.headers.get("content-length")), sha256: response.headers.get("x-amz-meta-sha256") };
       return await boundedBody(response, limit);
-    } catch { throw new Error("Off-site storage request failed."); }
+    } catch { throw Object.assign(new Error("Off-site storage request failed."), { name: "OffsiteStorageError", operation: method, httpStatus }); }
     finally { clearTimeout(timeout); }
   }
   return {
