@@ -1,4 +1,4 @@
-import { b2Config, createB2Client, offsitePrefix } from "./b2.mjs";
+import { b2Config, createB2Client, offsitePrefix, b2FailureCodes } from "./b2.mjs";
 import { readJson, putJson } from "./control.mjs";
 import { backupCalendar, validateCompletion, hostedLimits } from "./hosted-format.mjs";
 import { expectedBackupDay, previousBackupDay, nextBackupAlerts } from "./alerts.mjs";
@@ -90,7 +90,7 @@ export async function runOffsiteCopy(env, { now = Date.now(), clientFactory = cr
   } catch (error) {
     // Never log B2 keys, request URLs, provider bodies or employee information.
     if (token && state) try {
-      const diagnostic = { category: phase, ...(error?.name === "OffsiteStorageError" && ["GET", "HEAD", "PUT"].includes(error.operation) ? { operation: error.operation, ...(Number.isInteger(error.httpStatus) ? { httpStatus: error.httpStatus } : {}) } : {}) };
+      const diagnostic = { category: phase, ...(error?.name === "OffsiteStorageError" && ["GET", "HEAD", "PUT"].includes(error.operation) ? { operation: error.operation, ...(Number.isInteger(error.httpStatus) ? { httpStatus: error.httpStatus } : {}), ...(b2FailureCodes.includes(error.providerCode) ? { providerCode: error.providerCode } : {}) } : {}) };
       console.error("Off-site copy failed", diagnostic);
       const failed = { ...state, lastAttempt: { at: new Date(logicalNow()).toISOString(), state: "failed", localDay: backupCalendar(now).day, ...diagnostic }, retryAt: logicalNow() + 15 * 60000 };
       await save({ ...failed, alerts: nextBackupAlerts(failed, logicalNow()) });

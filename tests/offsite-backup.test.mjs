@@ -125,6 +125,14 @@ test("Owner API projection strips off-site credentials and internal paths", asyn
   const service = { fetch: async () => Response.json({ configured: true, stale: false, checkedAt: new Date(at).toISOString(), offsite: { configured: true, state: "ready", lastSuccess: { localDay: "2026-11-13", createdAt: new Date(at).toISOString(), secret: "PRIVATE" }, applicationKey: "PRIVATE", path: "PRIVATE" } }) };
   const status = await readBackupStatus(service); assert.equal(JSON.stringify(status).includes("PRIVATE"), false);
 });
+test("provider failures retain only a known error code and never their private request body", async () => {
+  const client = createB2Client(config, { fetcher: async () => new Response('<Error><Code>SignatureDoesNotMatch</Code><Secret>PRIVATE_PROVIDER_REQUEST</Secret></Error>', { status: 403 }) });
+  await assert.rejects(client.get(offsitePrefix + 'checks/failure.bin'), error => {
+    assert.equal(error.httpStatus, 403); assert.equal(error.providerCode, 'SignatureDoesNotMatch'); assert.equal(JSON.stringify(error).includes('PRIVATE_PROVIDER_REQUEST'), false); return true;
+  });
+  const untrusted = createB2Client(config, { fetcher: async () => new Response('<Code>PRIVATE_PROVIDER_REQUEST</Code>', { status: 403 }) });
+  await assert.rejects(untrusted.get(offsitePrefix + 'checks/failure.bin'), error => { assert.equal(error.providerCode, null); return true; });
+});
 test("activation rejects public buckets, short retention and account-wide/admin keys before enabling copying", async () => {
   const auth = { accountId: "fictional-account", authorizationToken: "fictional-token", apiInfo: { storageApi: { s3ApiUrl: "https://s3.us-west-004.backblazeb2.com", apiUrl: "https://api004.backblazeb2.com", allowed: { buckets: [{ id: "one-bucket", name: config.bucket }], namePrefix: offsitePrefix, capabilities: ["listBuckets", "readBuckets", "readFiles", "writeFiles"] } } } };
   const listing = { buckets: [{ bucketName: config.bucket, bucketType: "allPrivate", corsRules: [], lifecycleRules: [{ fileNamePrefix: offsitePrefix, daysFromUploadingToHiding: 30, daysFromHidingToDeleting: 1 }] }] };

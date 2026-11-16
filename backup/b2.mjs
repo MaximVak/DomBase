@@ -1,6 +1,7 @@
 import { createHash, createHmac } from "node:crypto";
 
 export const offsitePrefix = "dombase/staging/";
+export const b2FailureCodes = Object.freeze(["AccessDenied", "SignatureDoesNotMatch", "InvalidAccessKeyId", "RequestTimeTooSkewed", "RequestExpired", "ExpiredToken", "BadDigest"]);
 const sha256 = bytes => createHash("sha256").update(bytes).digest("hex");
 const hmac = (key, value) => createHmac("sha256", key).update(value).digest();
 const encode = value => encodeURIComponent(value).replace(/[!'()*]/g, c => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
@@ -55,26 +56,36 @@ export function createB2Client(config, { fetcher = fetch, clock = Date.now } = {
     const path = `/${encode(config.bucket)}/${key.split("/").map(encode).join("/")}`;
     const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), 20000);
     let httpStatus = null;
+    let providerCode = null;
     try {
       const headers = signedS3Headers({ method, host, path, query, bytes, ...config, now: clock(), extra: method === "PUT" ? { "content-type": "application/octet-stream", "x-amz-meta-sha256": sha256(bytes) } : {} });
       // workerd supports manual/follow, but rejects redirect:"error" before
       // sending a request. Manual keeps signed credentials on this origin;
       // the non-OK check below rejects every redirect response.
-      const response = await fetcher(`https://${host}${path}${query ? `?${query}` : ""}`, { method, headers, body: method === "PUT" ? bytes : undefined, redirect: "manual", signal: controller.signal });
+      const response = await fetcher(`https://${host}${path}${query ? `?${query}` : ""}`, { method, headers, body: method === "PUT" ? bytes : undefined, redirect: "manual", cache: "no-store", signal: controller.signal });
       httpStatus = response.status;
       if (response.status === 404) { await response.body?.cancel(); return null; }
-      if (!response.ok) { await response.body?.cancel(); throw new Error("Off-site storage request failed."); }
+      if (!response.ok) {
+        // Provider bodies can contain signed request details. Retain only a
+        // fixed error-code vocabulary; never log or propagate the body.
+        try { const code = new TextDecoder().decode(await boundedBody(response, 4096)).match(/<Code>([A-Za-z]+)<\/Code>/)?.[1]; if (b2FailureCodes.includes(code)) providerCode = code; } catch { /* No unbounded provider response is read. */ }
+        throw new Error("Off-site storage request failed.");
+      }
       if (method === "HEAD") return { size: Number(response.headers.get("content-length")), sha256: response.headers.get("x-amz-meta-sha256") };
       return await boundedBody(response, limit);
-    } catch { throw Object.assign(new Error("Off-site storage request failed."), { name: "OffsiteStorageError", operation: method, httpStatus }); }
+    } catch { throw Object.assign(new Error("Off-site storage request failed."), { name: "OffsiteStorageError", operation: method, httpStatus, providerCode }); }
     finally { clearTimeout(timeout); }
   }
   return {
     async get(key, limit) { return request("GET", key, undefined, "", limit); },
     async bucketInfo(query) { const bytes = await request("GET", "", undefined, `${query}=`, 65536); if (!bytes) throw new Error("Off-site bucket configuration is unavailable."); return new TextDecoder().decode(bytes); },
     async copy(key, bytes) {
-      const prior = await request("HEAD", key);
-      if (prior && (prior.size !== bytes.length || prior.sha256 !== sha256(bytes))) throw new Error("Off-site object differs from the archive.");
+      // Verify existing bytes directly. This avoids a signed HEAD request
+      // being converted to GET by an intermediary cache, and avoids trusting
+      // user-defined checksum metadata as proof of the stored object.
+      const prior = await request("GET", key, undefined, "", bytes.length);
+      if (prior && (prior.length !== bytes.length || sha256(prior) !== sha256(bytes))) throw new Error("Off-site object differs from the archive.");
+      if (prior) return;
       if (!prior) await request("PUT", key, bytes);
       // Read actual provider bytes: an acknowledged PUT/HEAD is not integrity
       // proof. Resuming after a timeout reuses the same key and verifies it.
