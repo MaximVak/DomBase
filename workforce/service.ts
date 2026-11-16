@@ -16,6 +16,7 @@ import { readSchedulePreferences, saveSchedulePreferences } from "../self/schedu
 import { publicationPreview } from "./schedule-publication";
 import { scheduleTools } from "./schedule-tools";
 import { readScheduleConflicts } from "./conflicts";
+import { readSchedulePrint } from "./schedule-print";
 import { timeOffChange } from "./time-off";
 import { conversationChange } from "./messages";
 import { timecardChange } from "./timecards";
@@ -50,6 +51,10 @@ export function createWorkforceService(db: Database, access: ReturnType<typeof c
       const ctx = await access.workspaceContext(request);
       const url = new URL(request.url);
       const action = url.pathname.slice("/api/workspace/".length);
+      if (action === "schedule-print") {
+        if (request.method !== "GET") return json({ error: "Method not allowed." }, 405, { Allow: "GET" });
+        return json(await readSchedulePrint(db, ctx, url, options.fieldKey, now()));
+      }
       if (action === "shift-exchanges") {
         if (request.method === "GET") return json(await readManagerExchanges(db, ctx, url, options));
         if (request.method === "POST") { if (url.search) throw new AuthError(400, "Choose request options in the body."); const body = await readAuthBody(request, 4096); return json(await decideManagerExchange(db, ctx, body, options), 200, body.action === "decide" ? { "X-Schedule-Dispatch": "1" } : {}); }

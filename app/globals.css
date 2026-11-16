@@ -11273,3 +11273,56 @@ body:has(dialog.time-exception-modal[open]) { overflow: hidden; }
 @media(max-width:480px) { .exchange-dialog fieldset { padding:.6rem; } .employee-schedule-day .open-shift-actions button { flex:1 1 8rem; } }
 .exchange-summary { display:grid; gap:.45rem; overflow-wrap:anywhere; }
 .exchange-summary small { color:#52647a; }
+
+.schedule-print-link { display:inline-flex; align-items:center; justify-content:center; min-height:44px; padding:10px 16px; border:1px solid var(--line); border-radius:8px; background:var(--panel); color:var(--ink); font-weight:600; text-decoration:none; text-align:center; }
+.schedule-print-link:focus-visible { outline:3px solid var(--blue-accent); outline-offset:2px; }
+.schedule-print-page { max-width:1200px; margin:0 auto; padding:24px; color:var(--ink); }
+.schedule-print-controls { margin-bottom:24px; }
+.schedule-print-controls p { line-height:1.6; }
+.schedule-print-controls > div { display:flex; flex-wrap:wrap; gap:12px; margin-block:16px; }
+.schedule-print-controls button { min-height:44px; padding:10px 16px; border:1px solid var(--line); border-radius:8px; background:var(--panel); color:var(--ink); font-weight:600; }
+.schedule-print-controls button:last-child { background:var(--blue-deep); color:white; }
+.schedule-print-controls button:focus-visible { outline:3px solid var(--blue-accent); outline-offset:2px; }
+.schedule-print-document { background:white; color:#111; padding:24px; border:1px solid var(--line); }
+.schedule-print-block { margin-bottom:16px; overflow-wrap:anywhere; }
+.schedule-print-block:not(:first-child) > header { display:none; }
+.schedule-print-block header { margin-bottom:12px; }
+.schedule-print-block h2 { margin:0 0 8px; font-size:1.25rem; }
+.schedule-print-block p { margin:6px 0; }
+.schedule-print-block small { display:block; line-height:1.4; }
+.schedule-print-document table { width:100%; table-layout:fixed; border-collapse:collapse; font-size:.8rem; }
+.schedule-print-document caption { text-align:left; font-weight:700; padding:8px 0; }
+.schedule-print-document :is(th,td) { padding:8px 6px; border:1px solid #b9c3cc; text-align:left; vertical-align:top; white-space:normal; overflow-wrap:anywhere; }
+.schedule-print-document thead { background:#f2f4f6; }
+.schedule-print-entry { line-height:1.4; }
+.schedule-print-entry + .schedule-print-entry { border-top:1px solid #b9c3cc; margin-top:8px; padding-top:8px; }
+.schedule-print-entry > :is(strong,span,b) { display:block; }
+.schedule-print-entry b { margin-top:4px; font-size:.75rem; }
+.schedule-print-empty { color:#525b64; }
+.schedule-print-footnote { font-size:.8rem; line-height:1.5; }
+@media(max-width:700px) {
+  .schedule-print-page { padding:16px 12px; }
+  .schedule-print-document { padding:12px; overflow-x:auto; }
+  .schedule-print-document table { min-width:900px; }
+  .schedule-print-controls .schedule-tool-check { align-items:flex-start; }
+}
+@media print {
+  body:has(.schedule-print-page) { margin:0; background:white; color:black; }
+  .schedule-print-page { max-width:none; margin:0; padding:0; }
+  .schedule-print-controls { display:none !important; }
+  .schedule-print-document { border:0; padding:0; overflow:visible; }
+  .schedule-print-document section { break-inside:auto; }
+  .schedule-print-block { break-inside:avoid; page-break-inside:avoid; margin-bottom:12pt; }
+  .schedule-print-block > header, .schedule-print-block:not(:first-child) > header { display:block; margin-bottom:6pt; }
+  .schedule-print-block h2 { font-size:12pt; margin-bottom:3pt; }
+  .schedule-print-block header > strong { font-size:9pt; }
+  .schedule-print-block header p, .schedule-print-block header small { font-size:7.5pt; margin:3pt 0; }
+  .schedule-print-document table { min-width:0; width:100%; font-size:8.5pt; }
+  .schedule-print-document thead { display:table-header-group; }
+  .schedule-print-document tr { break-inside:avoid; page-break-inside:avoid; }
+  .schedule-print-document caption { font-size:8pt; padding:3pt 0; }
+  .schedule-print-document :is(th,td) { position:static; padding:5pt 4pt; height:auto; }
+  .schedule-print-entry { line-height:1.3; }
+  .schedule-print-entry b { font-size:8pt; }
+  .schedule-print-footnote { font-size:7pt; margin-top:6pt; }
+}

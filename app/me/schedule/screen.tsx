@@ -59,6 +59,7 @@ export function EmployeeScheduleScreen() {
       <label>Week containing<input type="date" min="0001-01-01" max="9998-12-31" value={date || data?.today || ""} onChange={event => { if (event.target.value) setDate(event.target.value); }} /></label>
       <button type="button" disabled={!data || pending} onClick={() => { if (data) setDate(offsetScheduleDate(data.startDate, 7)); }}>Next week →</button>
       <button type="button" disabled={pending} onClick={() => { if (date) setDate(""); else void load(); }}>This week</button>
+      {data && !pending ? <a className="schedule-print-link" target="_blank" rel="noopener noreferrer" href={`/schedule/print?${new URLSearchParams({ date: data.startDate })}`}>Print my week</a> : null}
     </div>
     {error ? <p role="alert">{error} Use Reload schedule to try again.</p> : null}
     {pending ? <p role="status">Loading your schedule…</p> : null}
