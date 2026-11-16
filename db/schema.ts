@@ -449,6 +449,7 @@ export const authRateLimits = sqliteTable("auth_rate_limits", {
 
 export const schedulePublications = sqliteTable("schedule_publications", {
   id: id(),
+  shiftExchange: integer("shift_exchange", {mode:"boolean"}).notNull().default(false),
   noticeType: text("notice_type", { enum: ["schedule", "open_shift_request"] }).notNull().default("schedule"),
   departmentId: integer("department_id").references(() => departments.id),
   periodStart: text("period_start"),
@@ -918,3 +919,31 @@ export const scheduleOpenTemplateEntries = sqliteTable("schedule_open_template_e
  id:id(),templateId:integer("template_id").notNull().references(()=>scheduleTemplates.id),roleId:integer("role_id").notNull().references(()=>roles.id),dayOfWeek:integer("day_of_week").notNull(),
  startTime:text("start_time").notNull(),endTime:text("end_time").notNull(),station:text("station").notNull().default("Floor"),notes:text("notes").notNull().default(""),color:text("color",{enum:["blue","green","amber","red","violet","gray"]}).notNull().default("blue"),
 },table=>[index("schedule_open_template_idx").on(table.templateId),check("schedule_open_template_values_check",sql`${table.dayOfWeek} BETWEEN 0 AND 6 AND ${table.startTime}<${table.endTime} AND ${table.color} IN ('blue','green','amber','red','violet','gray')`)]);
+
+export const shiftExchangeRequests = sqliteTable("shift_exchange_requests", {
+  id: id(), kind: text("kind", {enum:["cover","trade"]}).notNull(),
+  status: text("status", {enum:["pending","accepted","approved","declined","cancelled"]}).notNull().default("pending"),
+  requesterId: integer("requester_id").notNull().references(()=>employees.id),
+  sourceShiftId: integer("source_shift_id").notNull().references(()=>shifts.id),
+  sourceFingerprint: text("source_fingerprint").notNull(), sourceSnapshot: text("source_snapshot",{mode:"json"}).$type<import("../app/shift-exchanges-model").ExchangeShift>().notNull(),
+  selectedEmployeeId: integer("selected_employee_id").references(()=>employees.id),
+  offeredShiftId: integer("offered_shift_id").references(()=>shifts.id), offeredFingerprint:text("offered_fingerprint"),
+  offeredSnapshot: text("offered_snapshot",{mode:"json"}).$type<import("../app/shift-exchanges-model").ExchangeShift>(),
+  version: integer("version").notNull().default(1), requestedAt:text("requested_at").notNull(), acceptedAt:text("accepted_at"),
+  decidedAt:text("decided_at"), decidedByAccountId:integer("decided_by_account_id").references(()=>accounts.id), reason:text("reason").notNull().default(""),
+},table=>[
+  uniqueIndex("exchange_active_source_idx").on(table.sourceShiftId).where(sql`${table.status} IN ('pending','accepted')`),
+  index("exchange_requester_idx").on(table.requesterId,table.id),
+  check("exchange_request_values_check",sql`${table.kind} IN ('cover','trade') AND ${table.status} IN ('pending','accepted','approved','declined','cancelled') AND ${table.version}>0 AND (${table.kind}='trade' OR ${table.offeredShiftId} IS NULL) AND (${table.status} NOT IN ('accepted','approved') OR (${table.selectedEmployeeId} IS NOT NULL AND (${table.kind}='cover' OR ${table.offeredShiftId} IS NOT NULL)))`),
+]);
+export const shiftExchangeInvitations = sqliteTable("shift_exchange_invitations", {
+  id:id(), requestId:integer("request_id").notNull().references(()=>shiftExchangeRequests.id),
+  employeeId:integer("employee_id").notNull().references(()=>employees.id),
+  status:text("status",{enum:["pending","accepted","declined","closed"]}).notNull().default("pending"),
+  version:integer("version").notNull().default(1), respondedAt:text("responded_at"),
+},table=>[
+  uniqueIndex("exchange_invitation_person_idx").on(table.requestId,table.employeeId),
+  uniqueIndex("exchange_one_acceptance_idx").on(table.requestId).where(sql`${table.status}='accepted'`),
+  index("exchange_invitation_employee_idx").on(table.employeeId,table.id),
+  check("exchange_invitation_values_check",sql`${table.status} IN ('pending','accepted','declined','closed') AND ${table.version}>0`),
+]);

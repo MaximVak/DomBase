@@ -178,7 +178,7 @@ export type OperationalAlert = {
 
 export type HeaderNotification = {
   id: string;
-  kind: "alert" | "request" | "schedule" | "open-request";
+  kind: "alert" | "request" | "schedule" | "open-request" | "shift-exchange";
   title: string;
   detail: string;
   at: string;

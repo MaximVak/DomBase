@@ -1,4 +1,6 @@
 "use client";
+import {EmployeeShiftExchanges, type ExchangeEditor} from "./shift-exchanges";
+import {openShiftIsFuture} from "../../open-shifts-model";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { EmployeeOpenShifts } from "./open-shifts";
 import { ScheduleAlerts } from "./alerts";
@@ -16,6 +18,7 @@ function timeLabel(value: string) {
 export function EmployeeScheduleScreen() {
   const [data, setData] = useState<EmployeeSchedule | null>(null);
   const [date, setDate] = useState("");
+  const [exchangeEditor,setExchangeEditor]=useState<ExchangeEditor|null>(null);
   const [showTeam, setShowTeam] = useState(false);
   const [error, setError] = useState("");
   const [pending, setPending] = useState(true);
@@ -60,6 +63,7 @@ export function EmployeeScheduleScreen() {
     {error ? <p role="alert">{error} Use Reload schedule to try again.</p> : null}
     {pending ? <p role="status">Loading your schedule…</p> : null}
     <EmployeeOpenShifts date={date} onAssignedChange={() => { void load(); }} />
+    <EmployeeShiftExchanges editor={exchangeEditor} onClose={()=>setExchangeEditor(null)} onScheduleChange={()=>void load()}/>
     {data ? <>
       <p className="employee-schedule-context">{data.locationName} · All times in {data.timeZone}</p>
       <h2>{dayLabel(data.startDate)} – {dayLabel(data.endDate)}</h2>
@@ -74,6 +78,7 @@ export function EmployeeScheduleScreen() {
             <strong>{shift.shiftType === "day_off" ? "Day off" : <><time dateTime={`${shift.date}T${shift.start}`}>{timeLabel(shift.start)}</time> – <time dateTime={`${shift.date}T${shift.end}`}>{timeLabel(shift.end)}</time>{shift.end <= shift.start ? " (ends next day)" : ""}</>}</strong>
             {showTeam ? <span>{shift.employeeId === data.employeeId ? `${shift.employeeName} (you)` : shift.employeeName}</span> : null}
             <span>{shift.role || "Shift"}{shift.station ? ` · ${shift.station}` : ""}</span>
+            {shift.employeeId===data.employeeId&&shift.shiftType==='work'&&shift.start<shift.end&&openShiftIsFuture(shift.date,shift.start,Date.now())?<div className="open-shift-actions"><button type="button" onClick={()=>setExchangeEditor({sourceShiftId:shift.id,kind:'cover'})}>Request cover</button><button type="button" onClick={()=>setExchangeEditor({sourceShiftId:shift.id,kind:'trade'})}>Request trade</button></div>:null}
           </li>)}</ul> : <p>No shifts</p>}
         </section>;
       })}</div>

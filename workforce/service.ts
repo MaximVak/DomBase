@@ -1,3 +1,4 @@
+import { readManagerExchanges, decideManagerExchange } from "./shift-exchanges";
 import { readOpenClaimRequests, decideOpenClaim } from "./open-shift-claims";
 import { openShiftDraftChange } from "./open-shift-drafts";
 import { eq, sql } from "drizzle-orm";
@@ -49,6 +50,11 @@ export function createWorkforceService(db: Database, access: ReturnType<typeof c
       const ctx = await access.workspaceContext(request);
       const url = new URL(request.url);
       const action = url.pathname.slice("/api/workspace/".length);
+      if (action === "shift-exchanges") {
+        if (request.method === "GET") return json(await readManagerExchanges(db, ctx, url, options));
+        if (request.method === "POST") { if (url.search) throw new AuthError(400, "Choose request options in the body."); const body = await readAuthBody(request, 4096); return json(await decideManagerExchange(db, ctx, body, options), 200, body.action === "decide" ? { "X-Schedule-Dispatch": "1" } : {}); }
+        return json({ error: "Method not allowed." }, 405, { Allow: "GET, POST" });
+      }
       if (action === "open-shifts") {
         if (request.method === "GET") return json(await readOpenClaimRequests(db, ctx, url));
         if (request.method === "POST") { if (url.search) throw new AuthError(400, "Choose request options in the body."); const body = await readAuthBody(request, 4096); return json(await decideOpenClaim(db, ctx, body, options), 200, body.action === "decide" ? { "X-Schedule-Dispatch": "1" } : {}); }

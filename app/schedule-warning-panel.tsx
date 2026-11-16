@@ -29,7 +29,7 @@ export function useScheduleWarnings(payload: WarningPayload | null) {
 export function ShiftWarningBadge({ codes }: { codes?: ConflictCode[] }) {
   return codes?.length ? <span className="schedule-warning-badge" title={codes.map(code => conflictLabels[code]).join("; ")}>⚠ {codes.length} {codes.length === 1 ? "warning" : "warnings"}</span> : null;
 }
-export function ScheduleWarningPanel({ result, shifts, employees, visibleIds, label = "Schedule warnings", placeholder }: { result: ReturnType<typeof useScheduleWarnings>; shifts: PlannedShift[]; employees: { id: number; name: string }[]; visibleIds?: Set<number>; label?: string; placeholder?: string }) {
+export function ScheduleWarningPanel({ result, shifts, employees, visibleIds, label = "Schedule warnings", placeholder, hint }: { result: ReturnType<typeof useScheduleWarnings>; shifts: PlannedShift[]; employees: { id: number; name: string }[]; visibleIds?: Set<number>; label?: string; placeholder?: string; hint?: string }) {
   const [limit, setLimit] = useState(20);
   const warnings = result.data?.warnings.filter(warning => (!visibleIds || visibleIds.has(warning.shiftId)) && shifts.some(shift => shift.id === warning.shiftId)) ?? [];
   const kinds = [...new Set(warnings.flatMap(warning => warning.codes))];
@@ -38,7 +38,7 @@ export function ScheduleWarningPanel({ result, shifts, employees, visibleIds, la
     {result.error ? <><p role="alert">{result.error}</p><button type="button" onClick={result.retry}>Retry warning check</button></> : !result.data ? <p role="status">{placeholder || "Checking schedule warnings…"}</p> : <>
       {!result.data.availability ? <p>Availability was not assessed because viewing permission is required.</p> : null}
       {!result.data.timeOff ? <p>Time-off conflicts were not assessed because viewing permission is required.</p> : null}
-      <p>Review these reminders before publishing. They do not hide shifts or automatically change pay.</p>
+      <p>{hint ?? "Review these reminders before publishing. They do not hide shifts or automatically change pay."}</p>
       {kinds.length ? <ul className="warning-kind-list">{kinds.map(code => <li key={code}>{conflictLabels[code]} ({warnings.filter(warning => warning.codes.includes(code)).length})</li>)}</ul> : null}
       {warnings.length ? <details><summary>View warnings</summary><ul>{warnings.slice(0, limit).map(warning => {
         const shift = shifts.find(shift => shift.id === warning.shiftId)!;

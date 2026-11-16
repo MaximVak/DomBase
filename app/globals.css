@@ -11260,3 +11260,16 @@ body:has(dialog.time-exception-modal[open]) { overflow: hidden; }
 .open-shift-request-list li p { margin:0; }
 .open-shift-request-list li button { white-space:normal; }
 @media (max-width:600px) { .open-shift-time-fields { grid-template-columns:1fr; } .open-shifts-manager,.employee-open-shifts { padding:12px; } .open-shifts-days { grid-template-columns:1fr; } }
+
+.exchange-recipient-list { display:grid; gap:.65rem; max-height:18rem; overflow:auto; padding:.5rem; }
+.exchange-dialog fieldset { border:1px solid var(--line,#d7dfe8); border-radius:8px; padding:1rem; min-width:0; }
+.exchange-dialog legend { padding:0 .35rem; font-weight:600; }
+.exchange-dialog input[type="date"] { max-width:100%; }
+.exchange-offer { display:flex; align-items:flex-start; gap:.65rem; margin:.8rem 0; padding:.65rem; border-bottom:1px solid var(--line,#d7dfe8); }
+.exchange-offer > span { display:grid; gap:.4rem; overflow-wrap:anywhere; }
+.exchange-offer input { flex:none; margin-top:.25rem; }
+.exchange-dialog .open-shift-actions, .employee-schedule-day .open-shift-actions { flex-wrap:wrap; }
+.employee-open-shifts .open-shift-request-list small { color:#52647a; }
+@media(max-width:480px) { .exchange-dialog fieldset { padding:.6rem; } .employee-schedule-day .open-shift-actions button { flex:1 1 8rem; } }
+.exchange-summary { display:grid; gap:.45rem; overflow-wrap:anywhere; }
+.exchange-summary small { color:#52647a; }

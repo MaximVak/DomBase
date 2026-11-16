@@ -5,6 +5,7 @@ export type { BasicInfo, StaffState };
 export type Entity = "employee" | "department" | "schedule-event" | "schedule-draft" | "schedule-publish" | "open-shift-draft" | "timecard" | "hours-adjustment" | "pto-request" | "pto-policy" | "availability" | "conversation" | "settings" | "business" | "notifications";
 export type Change = { entity: Entity; id: number; before: unknown; after: unknown };
 export type WorkspaceData = {
+  exchangeRequests?: {id:number;requester:string;kind:"cover"|"trade";at:string|null}[];
   openRequests?: { id: number; employee: string; requestedAt: string; role: string }[];
   openSchedule?: import("../app/open-shifts-model").OpenSchedule;
   scheduleDelivery?: { emailConfigured: boolean };

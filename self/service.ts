@@ -1,3 +1,4 @@
+import { readMyExchanges, saveMyExchange } from "./shift-exchanges";
 import { readOwnOpenShifts, saveOwnOpenClaim } from "./open-shifts";
 import { eq, sql } from "drizzle-orm";
 import { timingSafeEqual } from "node:crypto";
@@ -18,7 +19,7 @@ import { readSchedulePreferences, saveSchedulePreferences, readScheduleAlerts, s
 import { readMyAvailability, saveMyAvailability } from "./availability";
 
 type Auth = Pick<ReturnType<typeof createAuthService>, "getSession">;
-export function createSelfService(db: KioskOperatorDatabase, auth: Auth, secret: string, now = Date.now) {
+export function createSelfService(db: KioskOperatorDatabase, auth: Auth, secret: string, now = Date.now, emailEnabled = false) {
   if (secret.length < 32) throw new Error("Self-service configuration unavailable.");
   async function context(request: Request) {
     const url = new URL(request.url);
@@ -105,6 +106,11 @@ export function createSelfService(db: KioskOperatorDatabase, auth: Auth, secret:
   async function handle(request: Request) {
     try {
       const ctx = await context(request); const url = new URL(request.url);
+      if (url.pathname === "/api/self/shift-exchanges") {
+        if (request.method === "GET") return json(await readMyExchanges(db, ctx, url, secret, now()));
+        if (request.method === "POST") { if (url.search) throw new AuthError(400, "Choose shift request options in the body."); return json(await saveMyExchange(db, ctx, await readAuthBody(request, 131072), secret, now(), emailEnabled), 200, { "X-Schedule-Dispatch": "1" }); }
+        return json({ error: "Method not allowed." }, 405, { Allow: "GET, POST" });
+      }
       if (url.pathname === "/api/self/open-shifts") {
         if (request.method === "GET") return json(await readOwnOpenShifts(db, ctx, url, now()));
         if (request.method === "POST") { if (url.search) throw new AuthError(400, "Claims do not accept employee selectors."); return json(await saveOwnOpenClaim(db, ctx, await readAuthBody(request, 4096), secret, now())); }

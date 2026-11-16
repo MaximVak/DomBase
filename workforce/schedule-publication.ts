@@ -1,3 +1,4 @@
+import { exchangeInvalidations, writeExchangeInvalidations } from "./shift-exchanges-shared";
 import { openPublicationPlan, writeOpenPublication } from "./open-shift-drafts";
 import { writePublicationNotices } from "./publication-notices";
 import { and, desc, eq, getTableColumns, sql } from "drizzle-orm";
@@ -36,7 +37,8 @@ async function prepare(r: RecordContext, options: PublishOptions) {
   const deleted = selected.filter(row => row.operation === "delete").map(row => row.shiftId!); await validatePlan(r, upserts, deleted);
   const [last] = await r.db.select({ version: s.schedulePublications.version }).from(s.schedulePublications).orderBy(desc(s.schedulePublications.version)).limit(1);
   const open = await openPublicationPlan(r, options, last?.version ?? 0);
-  const changed = changedSchedulePeople(r.view.state.shifts, upserts, deleted); for (const id of open.employeeIds) changed.add(id);
+  const exchanges = await exchangeInvalidations(r.db, r.ctx.activeActor(), selected.map(row => row.shiftId).filter((id): id is number => !!id));
+  const changed = changedSchedulePeople(r.view.state.shifts, upserts, deleted); for (const id of [...open.employeeIds, ...exchanges.employeeIds]) changed.add(id);
   const candidates = options.notify === "none" || (!selected.length && !open.selected.length) ? [] : await r.db.select({ id: s.employees.id, name: s.employees.name, email: s.employees.email, alerts: s.employeeSettings.sendLocationAlerts, inApp: s.scheduleNotificationPreferences.inApp, emailPreference: s.scheduleNotificationPreferences.email }).from(s.employees)
     .leftJoin(s.employeeSettings, eq(s.employeeSettings.employeeId, s.employees.id)).leftJoin(s.scheduleNotificationPreferences, eq(s.scheduleNotificationPreferences.employeeId, s.employees.id))
     .where(and(eq(s.employees.active, true), eq(s.employees.terminated, false), r.ctx.employeeFilter(s.employees.id), r.ctx.activeActor(), options.notify === "changed" ? sql`${s.employees.id} IN (SELECT value FROM json_each(${JSON.stringify([...changed])}))` : options.departmentId === null ? sql`1=1` : sql`(${s.employees.id} IN (SELECT value FROM json_each(${JSON.stringify([...changed])})) OR EXISTS (SELECT 1 FROM employee_roles er JOIN roles role ON role.id=er.role_id JOIN departments dept ON dept.id=role.department_id WHERE er.employee_id=${s.employees.id} AND er.active=1 AND role.archived=0 AND dept.archived=0 AND dept.id=${options.departmentId}))`)).orderBy(s.employees.id).limit(2001);
@@ -45,7 +47,7 @@ async function prepare(r: RecordContext, options: PublishOptions) {
   if (master && options.notify !== "none" && options.email && !r.emailEnabled) throw new AuthError(400, "Email delivery is unavailable. Choose in-app notices or nobody, or ask an Owner to check email configuration.");
   const recipients = candidates.map(person => ({ employeeId: person.id, name: person.name, inApp: master && person.alerts !== false && options.inApp && person.inApp !== false, emailRequested: master && person.alerts !== false && options.email && person.emailPreference !== false, address: validEmail(person.email.trim()) ? person.email.trim().toLowerCase() : "" })).filter(person => person.inApp || person.emailRequested);
   const dates = [...selected.map(row => row.date ?? row.originalDate!), ...open.selected.map(row => row.date)].filter(Boolean).sort();
-  return { open, stored, all, selected, upserts, deleted, lastVersion: last?.version ?? 0, needsReview: open.needsReview || (!!stored && stored.basePublicationVersion !== (last?.version ?? 0)), recipients, optedOut: candidates.length - recipients.length, period: options.period ?? (dates.length ? { start: dates[0], end: dates.at(-1)! } : null) };
+  return { exchanges, open, stored, all, selected, upserts, deleted, lastVersion: last?.version ?? 0, needsReview: open.needsReview || (!!stored && stored.basePublicationVersion !== (last?.version ?? 0)), recipients, optedOut: candidates.length - recipients.length, period: options.period ?? (dates.length ? { start: dates[0], end: dates.at(-1)! } : null) };
 }
 const reviewToken = (r: RecordContext, options: PublishOptions, lastVersion: number) => rateKey(r.publicationSecret ?? "", canonical({ actor: r.ctx.account.id, revision: r.view.revision, options, lastVersion }));
 
@@ -101,6 +103,7 @@ export async function publishSchedule(r: RecordContext, change: Change) {
   if (plan.deleted.length) r.tx.update(s.shifts, { archivedAt: r.tx.stamp, publicationId }, sql`id IN (SELECT value FROM json_each(${JSON.stringify(plan.deleted)})) AND archived_at IS NULL`, plan.deleted.length);
   r.tx.insertRows(s.auditLog, auditRows); r.tx.updateRows(s.shifts, editedRows, "id", sql`archived_at IS NULL AND ${assignmentGuard}`); r.tx.insertRows(s.shifts, newRows, assignmentGuard);
   writeOpenPublication(r, plan.open, publicationId);
+  writeExchangeInvalidations(r.tx, plan.exchanges);
   writePublicationNotices(r.tx, publicationId, plan.recipients, plan.open.selected.length ? { title: "Schedule and open shifts updated", detail: "Published shifts or open shift opportunities changed. Open My schedule to review them." } : undefined);
   if (plan.stored) {
   const selectedIds = new Set(plan.selected.map(row => row.id)), remaining = plan.all.filter(row => !selectedIds.has(row.id));

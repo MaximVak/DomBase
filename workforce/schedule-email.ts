@@ -15,6 +15,7 @@ export function deliverableScheduleEmail(id: string) {
     AND target.email_requested=1 AND COALESCE(es.send_location_alerts,1)=1 AND COALESCE(prefs.email,1)=1 AND company.notify_schedule_changes=1)`;
 }
 export function scheduleEmailMessage(origin: string, publicationId: number, noticeType = "schedule") {
+  if (noticeType === "shift_exchange") return { subject: "Molding Mart: shift trade or cover request update", text: `A shift trade or cover request needs your attention or has a new decision in DomBase.\n\nSign in to review your requests and schedule:\n${origin}/me/schedule\n\nTo change future schedule alerts, open My schedule, then My schedule alert preferences.\n\nReference: ${publicationId}\n\nMolding Mart\nSacramento, California\n` };
   if (noticeType === "open_shift_request") return { subject: "Molding Mart: open shift request update", text: `Your open shift request has been updated in DomBase.\n\nSign in to review your request and schedule:\n${origin}/me/schedule\n\nTo change future schedule alerts, open My schedule, then My schedule alert preferences.\n\nReference: ${publicationId}\n\nMolding Mart\nSacramento, California\n` };
   return { subject: "Molding Mart: schedule update", text: `Your published schedule has been updated in DomBase.\n\nSign in to view your schedule:\n${origin}/me/schedule\n\nTo change future schedule alerts, open My schedule, then My schedule alert preferences.\n\nPublication reference: ${publicationId}\n\nMolding Mart\nSacramento, California\n` };
 }
@@ -31,10 +32,10 @@ export async function dispatchScheduleEmails(db: Database, env: InvitationEmailE
     if (!claimed.meta.changes) { await db.run(sql`UPDATE schedule_emails SET state='cancelled',updated_at=${stamp} WHERE id=${row.id} AND state='pending' AND NOT (${valid})`); return "cancelled"; }
     const [current] = await db.select().from(s.scheduleEmails).where(and(eq(s.scheduleEmails.id, row.id), eq(s.scheduleEmails.leaseToken, token), valid)).limit(1);
     if (!current || !validEmail(current.recipient)) { await db.run(sql`UPDATE schedule_emails SET state='cancelled',lease_token=NULL,lease_until=NULL,updated_at=${stamp} WHERE id=${row.id} AND lease_token=${token}`); return "cancelled"; }
-    const [publication] = await db.select({ noticeType: s.schedulePublications.noticeType }).from(s.schedulePublications).where(eq(s.schedulePublications.id, current.publicationId)).limit(1);
+    const [publication] = await db.select({ noticeType: s.schedulePublications.noticeType, shiftExchange: s.schedulePublications.shiftExchange }).from(s.schedulePublications).where(eq(s.schedulePublications.id, current.publicationId)).limit(1);
     let accepted = false, timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      const response = await Promise.race([env.INVITATION_EMAIL!.send({ to: current.recipient, from: { email: config.sender!, name: "Molding Mart" }, replyTo: config.replyTo!, ...scheduleEmailMessage(config.origin!, current.publicationId, publication?.noticeType) }), new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("Email response timed out.")), 10000); })]);
+      const response = await Promise.race([env.INVITATION_EMAIL!.send({ to: current.recipient, from: { email: config.sender!, name: "Molding Mart" }, replyTo: config.replyTo!, ...scheduleEmailMessage(config.origin!, current.publicationId, publication?.shiftExchange ? "shift_exchange" : publication?.noticeType) }), new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("Email response timed out.")), 10000); })]);
       accepted = typeof response?.messageId === "string" && !!response.messageId;
     } catch { /* Provider errors may contain private addresses; never log them. */ }
     finally { clearTimeout(timer); }

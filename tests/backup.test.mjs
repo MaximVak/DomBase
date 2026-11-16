@@ -73,12 +73,15 @@ test("encrypted local backups restore all D1 data, protected files and private-f
   await db.insert(s.openShiftDraftChanges).values({ ownerAccountId: owner.id, clientKey: String(savedOpen.id), openShiftId: savedOpen.id, operation: "upsert", roleId: 902001, date: "2026-11-30", startTime: "09:30", endTime: "12:30", baseVersion: 1, basePublicationVersion: publication.version });
   await db.insert(s.openShiftClaims).values({ openShiftId: savedOpen.id, employeeId: 900001, status: "pending", openVersion: 1 });
   await db.insert(s.scheduleOpenTemplateEntries).values({ templateId: scheduleTemplate.id, roleId: 902001, dayOfWeek: 1, startTime: "09:15", endTime: "12:30", color: "amber" });
+  const [exchangeShift] = await db.insert(s.shifts).values({ employeeId: 900001, roleId: 902001, date: "2026-12-01", startTime: "09:00", endTime: "12:00", publicationId: publication.id }).returning();
+  const [savedExchange] = await db.insert(s.shiftExchangeRequests).values({ kind: "cover", requesterId: 900001, sourceShiftId: exchangeShift.id, sourceFingerprint: "preserved-exchange-fingerprint", sourceSnapshot: {id:exchangeShift.id,employeeId:900001,roleId:902001,role:"Fictional preserved job",date:"2026-12-01",start:"09:00",end:"12:00",station:"Counter",color:"amber"}, requestedAt:"2026-11-15T17:00:00Z" }).returning();
+  await db.insert(s.shiftExchangeInvitations).values({requestId:savedExchange.id,employeeId:900002,status:"pending"});
   const directory = join(root, "archives"), keyPath = join(root, "keys/recovery.key"); const key = await recoveryKey(keyPath); let backup, payload;
   await t.test("private encrypted bundle includes the full schema, data, replaced files and recovery keys", async () => {
     backup = await createBackup({ database: source.env.DB, bucket: source.env.FILES, secrets, directory, key });
     const bytes = await readFile(backup.file); assert.equal(bytes.includes(Buffer.from(email)), false); assert.equal(bytes.includes(Buffer.from("scrypt$16384")), false); assert.equal(bytes.includes(certificate.bytes), false); assert.equal(bytes.includes(Buffer.from(secrets.AUTH_RATE_LIMIT_SECRET)), false);
     assert.equal((await stat(backup.file)).mode & 0o777, 0o600); assert.equal((await stat(keyPath)).mode & 0o777, 0o600); assert.equal((await stat(directory)).mode & 0o777, 0o700);
-    payload = await readBackup(backup.file, key); assert.equal(payload.snapshot.tables.length, 73); assert.equal(payload.objects.length, 4); assert.equal(payload.secrets.AUTH_PRIVATE_FIELD_KEY, secrets.AUTH_PRIVATE_FIELD_KEY);
+    payload = await readBackup(backup.file, key); assert.equal(payload.snapshot.tables.length, 75); assert.equal(payload.objects.length, 4); assert.equal(payload.secrets.AUTH_PRIVATE_FIELD_KEY, secrets.AUTH_PRIVATE_FIELD_KEY);
     assert.equal(await containedBackup(backup.file, directory), backup.file);
   });
   await t.test("wrong key, damaged ciphertext, loose permissions and external paths are rejected", async () => {
@@ -101,13 +104,15 @@ test("encrypted local backups restore all D1 data, protected files and private-f
   await t.test("fresh isolated D1/R2 restores all table contents, migrations, sequences, indexes and triggers", async () => {
     destination = await open(destinationPath);
     const result = await restoreIntoEmpty({ database: destination.env.DB, bucket: destination.env.FILES, payload });
-    assert.deepEqual(result, { tables: 72, migrations: 19, objects: 4, exactDatabase: true, exactFiles: true });
+    assert.deepEqual(result, { tables: 74, migrations: 20, objects: 4, exactDatabase: true, exactFiles: true });
     await assert.rejects(destination.env.DB.prepare("UPDATE clock_events SET event_type=event_type").run());
     await assert.rejects(destination.env.DB.prepare("UPDATE audit_log SET action=action").run());
     await assert.rejects(destination.env.DB.prepare("UPDATE wage_rates SET amount_cents=amount_cents").run());
     const recovered = drizzle(destination.env.DB, { schema: s }); assert.equal((await recovered.select().from(s.employeePhotos))[0].fileId, photo.id); assert.equal((await recovered.select().from(s.teamSettings))[0].payPeriod, "biweekly");
     assert.equal((await recovered.select().from(s.openShifts))[0].notes, "Preserved unassigned opening");
     assert.equal((await recovered.select().from(s.openShiftClaims))[0].status, "pending");
+    assert.equal((await recovered.select().from(s.shiftExchangeRequests))[0].sourceFingerprint, "preserved-exchange-fingerprint");
+    assert.equal((await recovered.select().from(s.shiftExchangeInvitations))[0].employeeId, 900002);
     assert.equal((await recovered.select().from(s.openShiftDraftChanges))[0].startTime, "09:30");
     assert.equal((await recovered.select().from(s.scheduleOpenTemplateEntries))[0].color, "amber");
     assert.equal((await recovered.select().from(s.scheduleTemplates))[0].version, 2);

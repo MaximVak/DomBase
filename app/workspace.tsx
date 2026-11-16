@@ -1,4 +1,5 @@
 "use client";
+import { ShiftExchangeRequests } from "./shift-exchange-requests";
 
 import { FormEvent, MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { DragEvent } from "react";
@@ -390,6 +391,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
   const [visibleEmployeeIds, setVisibleEmployeeIds] = useState<number[] | null>(null);
   const [editingShift, setEditingShift] = useState<Shift | null>(null);
   const [createShiftWeekdays, setCreateShiftWeekdays] = useState<number[]>([]);
+  const [showExchangeRequests,setShowExchangeRequests]=useState(false);
   const [showOpenRequests, setShowOpenRequests] = useState(false);
   const [isOpenShiftDialogOpen, setIsOpenShiftDialogOpen] = useState(false);
   const [isPublicationOpen, setIsPublicationOpen] = useState(false);
@@ -792,7 +794,9 @@ export default function Home({ account }: { account: DashboardAccount }) {
     at: notification.at,
   }));
   const openRequestNotifications: HeaderNotification[] = (shared.data.openRequests ?? []).map(request => ({ id: `request-open-${request.id}`, kind: "open-request", title: `${request.employee} · Open shift request`, detail: `${request.role} · Pending approval`, at: request.requestedAt }));
+  const exchangeNotifications: HeaderNotification[] = (shared.data.exchangeRequests ?? []).map(row=>({id:`request-exchange-${row.id}`,kind:"shift-exchange",title:`${row.requester} · ${row.kind==='trade'?'Trade':'Cover'} request`,detail:"Teammate accepted · Manager approval needed",at:row.at??""}));
   const allHeaderNotifications = [
+    ...exchangeNotifications,
     ...openRequestNotifications,
     ...requestNotifications,
     ...alertNotifications,
@@ -3513,7 +3517,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                       <div className="notification-list">
                         {headerNotifications.length > 0 ? headerNotifications.map((notification) => (
                           <div className="notification-item" key={notification.id}>
-                            {notification.kind === "open-request" ? <button type="button" className="notification-message-item notification-request-item" onClick={() => { setShowOpenRequests(true); setIsOpenShiftDialogOpen(true); setIsNotificationsOpen(false); }}><strong>{notification.title}</strong><span>{notification.detail}</span><small>{formatOperationalAlertTime(notification.at)}</small></button> : notification.kind === "request" && notification.requestId ? (
+                            {notification.kind === "shift-exchange" ? <button type="button" className="notification-message-item notification-request-item" onClick={() => { setShowExchangeRequests(true); setIsOpenShiftDialogOpen(true); setIsNotificationsOpen(false); }}><strong>{notification.title}</strong><span>{notification.detail}</span><small>{formatOperationalAlertTime(notification.at)}</small></button> : notification.kind === "open-request" ? <button type="button" className="notification-message-item notification-request-item" onClick={() => { setShowOpenRequests(true); setIsOpenShiftDialogOpen(true); setIsNotificationsOpen(false); }}><strong>{notification.title}</strong><span>{notification.detail}</span><small>{formatOperationalAlertTime(notification.at)}</small></button> : notification.kind === "request" && notification.requestId ? (
                               <button
                                 type="button"
                                 className="notification-message-item notification-request-item"
@@ -4971,6 +4975,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                     ) : null}
                   </div>
                   {mode === "manager" && shared.data.permissions["schedule.read"] && shared.data.permissions["schedule.manage"] ? <ScheduleTools weekStart={scheduleWeekDays[0].date} enabled={employeeScheduleTab === "week"} onOpenChange={setIsScheduleToolsOpen} onDraftReady={date => { setScheduleDate(date); setEmployeeScheduleTab("week"); }} /> : null}
+                  {mode === "manager" && shared.data.permissions["schedule.manage"] && shared.data.permissions["schedule.read"] ? <button type="button" onClick={() => { setShowExchangeRequests(true); setIsOpenShiftDialogOpen(true); }}>Trades & cover</button> : null}
                   {mode === "manager" && shared.data.permissions["schedule.manage"] && shared.data.permissions["schedule.read"] ? <SchedulePublishControl count={unpublishedShiftCount + (shared.data.openSchedule?.draft?.upserted.length ?? 0) + (shared.data.openSchedule?.draft?.deletedIds.length ?? 0)} weekStart={scheduleWeekDays[0].date} onOpenChange={setIsPublicationOpen} onPublished={() => { setCreatedShiftTimes({}); setEditedShiftTimes({}); setLastEditedShiftId(null); }} /> : null}
                 </div>
               </div>
@@ -6723,6 +6728,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
         </div>
       ) : null}
 
+      {showExchangeRequests ? <ShiftExchangeRequests onClose={() => { setShowExchangeRequests(false); setIsOpenShiftDialogOpen(false); }} /> : null}
       {showOpenRequests ? <OpenShiftRequests onClose={() => { setShowOpenRequests(false); setIsOpenShiftDialogOpen(false); }} /> : null}
       {mode === "manager" && editingShift ? (
         <div className="modal-backdrop" role="presentation">

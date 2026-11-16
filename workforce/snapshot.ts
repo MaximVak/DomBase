@@ -1,3 +1,4 @@
+import { exchangeHeaderQuery } from "./shift-exchanges";
 import { openScheduleQueries, projectOpenSchedule } from "./open-shift-drafts";
 import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import type { SQLWrapper } from "drizzle-orm";
@@ -56,7 +57,7 @@ export async function workspaceSnapshot(db: Database, ctx: Context, fieldKey: st
     terminationNote: p["team.read"] && p["team.private.read"] ? s.employees.terminationNote : sql<string | null>`NULL`.as("termination_note"), eligibleForRehire: p["team.read"] && p["team.private.read"] ? s.employees.eligibleForRehire : sql<boolean | null>`NULL`.as("eligible_for_rehire"), version: s.employees.version };
   // D1's read batch provides one transactionally consistent multi-table snapshot.
   const [revision, businesses, settingsRows, accounts, employees, departments, roles, assignments, managers, employeeSettings, profiles, wages, notes, history, certificates, labels,
-    shifts, publications, drafts, draftChanges, draftEmployees, events, rawClocks, cards, edits, adjustments, policies, policyAssignments, pto, availability, slots, conversations, members, messages, reads, notices, receipts, photos, teamConfig, openRows, openDraftRows, openRequestRows] = await db.batch([
+    shifts, publications, drafts, draftChanges, draftEmployees, events, rawClocks, cards, edits, adjustments, policies, policyAssignments, pto, availability, slots, conversations, members, messages, reads, notices, receipts, photos, teamConfig, openRows, openDraftRows, openRequestRows, exchangeRequestRows] = await db.batch([
     db.select().from(s.workforceState), db.select().from(s.business), db.select().from(s.locationSettings),
     db.select({ id: s.accounts.id, employeeId: s.accounts.employeeId, name: s.accounts.displayName, level: s.accounts.accessLevel, disabledAt: s.accounts.disabledAt, loginEnabled: s.accounts.loginEnabled }).from(s.accounts),
     db.select(employeeFields).from(s.employees).where(and(canEmployee(s.employees.id), or(allowed(hasTeam), eq(s.employees.id, ownEmployee)))).orderBy(s.employees.id),
@@ -95,6 +96,7 @@ export async function workspaceSnapshot(db: Database, ctx: Context, fieldKey: st
     db.select().from(s.employeePhotos).where(canEmployee(s.employeePhotos.employeeId)),
     db.select().from(s.teamSettings).limit(1),
     ...openScheduleQueries(db, ctx, period),
+    exchangeHeaderQuery(db, ctx),
   ]);
   const business = businesses[0]; const settings = normalizeScheduleEnforcement(settingsRows[0]);
   const owner = accounts.find(row => row.id === business?.primaryOwnerAccountId);
@@ -152,5 +154,5 @@ export async function workspaceSnapshot(db: Database, ctx: Context, fieldKey: st
     const account = accounts.find(a => a.id === link.accountId);
     return account?.level === "manager" ? [{ accountId: account.id, departmentId: link.departmentId, name: account.name, disabled: Boolean(account.disabledAt), setupPending: !account.loginEnabled }] : [];
   });
-  return { openRequests: openRequestRows, openSchedule: projectOpenSchedule(openRows, openDraftRows, p["schedule.read"] ? roles.filter(role => !role.archived).map(role => ({ id: role.id, name: role.name, departmentId: role.departmentId })) : [], p["schedule.manage"]), departmentManagers, period, scheduleEstimateScopeComplete: ctx.allDepartments, revision: revision[0]?.revision ?? 0, state, settings, basicInfo, teamPeriod: { payPeriod: teamConfig[0]?.payPeriod ?? "weekly", anchorDate: teamConfig[0]?.anchorDate ?? "2026-11-02" }, primaryOwnerEmployeeId: owner?.employeeId ?? null, permissions: p, employeeVersions: Object.fromEntries(employees.map(e => [e.id, e.version])), opened: { [draftKey]: receipts.filter(row => row.openedAt).map(row => row.sourceKey) }, dismissed: { [draftKey]: receipts.filter(row => row.dismissedAt).map(row => row.sourceKey) } };
+  return { exchangeRequests: exchangeRequestRows, openRequests: openRequestRows, openSchedule: projectOpenSchedule(openRows, openDraftRows, p["schedule.read"] ? roles.filter(role => !role.archived).map(role => ({ id: role.id, name: role.name, departmentId: role.departmentId })) : [], p["schedule.manage"]), departmentManagers, period, scheduleEstimateScopeComplete: ctx.allDepartments, revision: revision[0]?.revision ?? 0, state, settings, basicInfo, teamPeriod: { payPeriod: teamConfig[0]?.payPeriod ?? "weekly", anchorDate: teamConfig[0]?.anchorDate ?? "2026-11-02" }, primaryOwnerEmployeeId: owner?.employeeId ?? null, permissions: p, employeeVersions: Object.fromEntries(employees.map(e => [e.id, e.version])), opened: { [draftKey]: receipts.filter(row => row.openedAt).map(row => row.sourceKey) }, dismissed: { [draftKey]: receipts.filter(row => row.dismissedAt).map(row => row.sourceKey) } };
 }
