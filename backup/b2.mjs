@@ -56,7 +56,10 @@ export function createB2Client(config, { fetcher = fetch, clock = Date.now } = {
     const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), 20000);
     try {
       const headers = signedS3Headers({ method, host, path, query, bytes, ...config, now: clock(), extra: method === "PUT" ? { "content-type": "application/octet-stream", "x-amz-meta-sha256": sha256(bytes) } : {} });
-      const response = await fetcher(`https://${host}${path}${query ? `?${query}` : ""}`, { method, headers, body: method === "PUT" ? bytes : undefined, redirect: "error", signal: controller.signal });
+      // workerd supports manual/follow, but rejects redirect:"error" before
+      // sending a request. Manual keeps signed credentials on this origin;
+      // the non-OK check below rejects every redirect response.
+      const response = await fetcher(`https://${host}${path}${query ? `?${query}` : ""}`, { method, headers, body: method === "PUT" ? bytes : undefined, redirect: "manual", signal: controller.signal });
       if (response.status === 404) { await response.body?.cancel(); return null; }
       if (!response.ok) { await response.body?.cancel(); throw new Error("Off-site storage request failed."); }
       if (method === "HEAD") return { size: Number(response.headers.get("content-length")), sha256: response.headers.get("x-amz-meta-sha256") };

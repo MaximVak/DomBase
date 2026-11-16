@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createHash } from "node:crypto";
+import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 import { b2Config, createB2Client, signedS3Headers, offsitePrefix } from "../backup/b2.mjs";
 import { runOffsiteCopy, offsiteStatus, copyDays, monitorOffsite } from "../backup/offsite.mjs";
 import { deliverBackupEmail } from "../backup/email.mjs";
@@ -28,7 +30,7 @@ function provider() {
   return { objects, calls, async fetcher(url, init) {
     calls.push({ url, method: init.method });
     const path = new URL(url).pathname, saved = objects.get(path);
-    assert.equal(new URL(url).host, "s3.us-west-004.backblazeb2.com"); assert.equal(init.redirect, "error");
+    assert.equal(new URL(url).host, "s3.us-west-004.backblazeb2.com"); assert.equal(init.redirect, "manual");
     assert.match(init.headers.authorization, /^AWS4-HMAC-SHA256 Credential=testaccesskey123\//);
     if (init.method === "HEAD") return new Response(null, { status: saved ? 200 : 404, headers: saved ? { "content-length": String(saved.bytes.length), "x-amz-meta-sha256": saved.hash } : {} });
     if (init.method === "PUT") { objects.set(path, { bytes: new Uint8Array(init.body).slice(), hash: init.headers["x-amz-meta-sha256"] }); return new Response(null); }
@@ -139,4 +141,36 @@ test("activation rejects public buckets, short retention and account-wide/admin 
     const a = structuredClone(auth), b = structuredClone(listing); mutate(a, b);
     await assert.rejects(inspectOffsite(config, async url => url.endsWith("b2_authorize_account") ? a : b));
   }
+});
+test("native Workers runtime copies and reads back bytes without following signed-request redirects", { timeout: 30000 }, async t => {
+  const require = createRequire(import.meta.resolve("wrangler"));
+  const { build } = require("esbuild"), { Miniflare, Response: RuntimeResponse } = require("miniflare");
+  const source = `import {b2Config,createB2Client} from './backup/b2.mjs';
+    export default {async fetch(request,env) {
+      const client=createB2Client(b2Config(env.BACKUP_B2));
+      if(new URL(request.url).pathname==='/redirect') {
+        try { await client.get('dombase/staging/checks/redirect.bin'); return Response.json({redirectRejected:false}); }
+        catch { return Response.json({redirectRejected:true}); }
+      }
+      try { await client.copy('dombase/staging/checks/runtime.bin',new TextEncoder().encode('fictional ciphertext')); return Response.json({completed:true}); }
+      catch { return Response.json({completed:false},{status:503}); }
+    }};`;
+  const bundled = await build({ stdin: { contents: source, resolveDir: fileURLToPath(new URL("../", import.meta.url)) }, bundle: true, write: false, format: "esm", platform: "neutral", external: ["node:crypto"], target: "es2022" });
+  const objects = new Map(), calls = [];
+  const runtime = new Miniflare({ modules: true, script: bundled.outputFiles[0].text, compatibilityDate: "2026-05-15", compatibilityFlags: ["nodejs_compat"], bindings: { BACKUP_B2: JSON.stringify(configuration) },
+    outboundService: async request => {
+      calls.push({ method: request.method, url: request.url });
+      const url = new URL(request.url), saved = objects.get(url.pathname);
+      if (url.hostname !== "s3.us-west-004.backblazeb2.com") return new RuntimeResponse("Unexpected redirected destination");
+      assert.match(request.headers.get("authorization"), /^AWS4-HMAC-SHA256 /);
+      if (url.pathname.endsWith("redirect.bin")) return new RuntimeResponse(null, { status: 302, headers: { Location: "https://outside.example.test/credentials-must-not-follow" } });
+      if (request.method === "HEAD") return new RuntimeResponse(null, { status: saved ? 200 : 404, headers: saved ? { "content-length": String(saved.length), "x-amz-meta-sha256": hash(saved) } : {} });
+      if (request.method === "PUT") { const bytes = new Uint8Array(await request.arrayBuffer()); assert.equal(request.headers.get("x-amz-content-sha256"), hash(bytes)); objects.set(url.pathname, bytes); return new RuntimeResponse(null); }
+      return new RuntimeResponse(saved ?? null, { status: saved ? 200 : 404 });
+    } });
+  t.after(() => runtime.dispose());
+  for (let retry = 0; retry < 2; retry++) { const response = await runtime.dispatchFetch("https://local.internal/copy"); assert.equal(response.status, 200); assert.deepEqual(await response.json(), { completed: true }); }
+  assert.equal(calls.filter(call => call.method === "PUT").length, 1);
+  assert.deepEqual(await (await runtime.dispatchFetch("https://local.internal/redirect")).json(), { redirectRejected: true });
+  assert.ok(calls.every(call => new URL(call.url).hostname === "s3.us-west-004.backblazeb2.com"));
 });
