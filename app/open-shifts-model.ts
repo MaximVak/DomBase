@@ -19,5 +19,5 @@ export function occupiedScheduleIntervals(rows:{date:string;start:string;end:str
  const merged:{start:number;end:number}[]=[];for(const row of intervals){const prior=merged.at(-1);if(prior&&row.start<=prior.end)prior.end=Math.max(prior.end,row.end);else merged.push({...row});}return merged;
 }
 export function openShiftConflicts(shift:{date:string;start:string;end:string},occupied:{start:number;end:number}[]){
- const start=Date.parse(`${shift.date}T${shift.start}:00Z`),end=Date.parse(`${shift.date}T${shift.end}:00Z`);let low=0,high=occupied.length;while(low<high){const middle=(low+high)>>>1;if(occupied[middle].end<=start)low=middle+1;else high=middle;}return low<occupied.length&&occupied[low].start<end;
+ const start=Date.parse(`${shift.date}T${shift.start}:00Z`);let end=Date.parse(`${shift.date}T${shift.end}:00Z`);if(end<=start)end+=86400000;let low=0,high=occupied.length;while(low<high){const middle=(low+high)>>>1;if(occupied[middle].end<=start)low=middle+1;else high=middle;}return low<occupied.length&&occupied[low].start<end;
 }

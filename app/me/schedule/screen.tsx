@@ -78,7 +78,7 @@ export function EmployeeScheduleScreen() {
             <strong>{shift.shiftType === "day_off" ? "Day off" : <><time dateTime={`${shift.date}T${shift.start}`}>{timeLabel(shift.start)}</time> – <time dateTime={`${shift.date}T${shift.end}`}>{timeLabel(shift.end)}</time>{shift.end <= shift.start ? " (ends next day)" : ""}</>}</strong>
             {showTeam ? <span>{shift.employeeId === data.employeeId ? `${shift.employeeName} (you)` : shift.employeeName}</span> : null}
             <span>{shift.role || "Shift"}{shift.station ? ` · ${shift.station}` : ""}</span>
-            {shift.employeeId===data.employeeId&&shift.shiftType==='work'&&shift.start<shift.end&&openShiftIsFuture(shift.date,shift.start,Date.now())?<div className="open-shift-actions"><button type="button" onClick={()=>setExchangeEditor({sourceShiftId:shift.id,kind:'cover'})}>Request cover</button><button type="button" onClick={()=>setExchangeEditor({sourceShiftId:shift.id,kind:'trade'})}>Request trade</button></div>:null}
+            {shift.employeeId===data.employeeId&&shift.shiftType==='work'&&openShiftIsFuture(shift.date,shift.start,Date.now())?<div className="open-shift-actions"><button type="button" onClick={()=>setExchangeEditor({sourceShiftId:shift.id,kind:'cover'})}>Request cover</button><button type="button" onClick={()=>setExchangeEditor({sourceShiftId:shift.id,kind:'trade'})}>Request trade</button></div>:null}
           </li>)}</ul> : <p>No shifts</p>}
         </section>;
       })}</div>

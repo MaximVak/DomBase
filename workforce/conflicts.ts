@@ -10,14 +10,14 @@ import { scheduleConflicts, type ConflictAssessment } from "../app/schedule-conf
 import { offsetDate, workspacePeriod } from "./period";
 import { maxScheduleEntries } from "../app/schedule-tools-model";
 
-export async function readScheduleConflicts(db: Database, ctx: Context, body: Record<string, unknown>): Promise<ConflictAssessment> {
+export async function readScheduleConflicts(db: Database, ctx: Context, body: Record<string, unknown>, publishedAssignmentsOnly = false): Promise<ConflictAssessment> {
   ctx.requirePermission("schedule.read"); v.keys(body, ["period", "revision", "upserts", "deletedShiftIds"]);
   const period = workspacePeriod(body.period), revision = v.integer(body.revision, 0);
   if (Date.parse(period.end) - Date.parse(period.start) > 61 * 86400000) throw new AuthError(400, "Review at most 62 days of schedule warnings.");
   const upserts: PlannedShift[] = v.list(body.upserts, maxScheduleEntries).map(value => {
     const row = v.object(value); v.keys(row, ["id", "employeeId", "date", "start", "end", "role", "shiftType"]);
     const shiftType = v.oneOf(row.shiftType ?? "work", ["work", "day_off"]), start = v.time(row.start), end = v.time(row.end);
-    if (shiftType === "work" ? start >= end : start !== "00:00" || end !== "00:00") throw new AuthError(400, "Choose valid shift times before reviewing warnings.");
+    if (shiftType === "work" ? start >= end && !publishedAssignmentsOnly : start !== "00:00" || end !== "00:00") throw new AuthError(400, "Choose valid shift times before reviewing warnings.");
     return { id: v.integer(row.id, -maxScheduleEntries), employeeId: v.integer(row.employeeId), date: v.date(row.date), start, end, role: v.text(row.role, 100, true), shiftType };
   });
   const deleted = v.list(body.deletedShiftIds, maxScheduleEntries).map(id => v.integer(id));
@@ -50,6 +50,7 @@ export async function readScheduleConflicts(db: Database, ctx: Context, body: Re
   for (const shift of upserts) {
     if (!employeeIds.has(shift.employeeId) || !roles.some(role => role.name === shift.role)) throw new AuthError(404, "A proposed shift is outside your access.");
     const original = stored.find(row => row.id === shift.id);
+    if (shift.shiftType === "work" && shift.start >= shift.end && (!original || !publishedAssignmentsOnly || original.date !== shift.date || original.start !== shift.start || original.end !== shift.end || original.shiftType !== "work" || roles.find(role => role.id === original.roleId)?.name !== shift.role)) throw new AuthError(400, "Overnight review must preserve an existing published shift.");
     if (original && !allowedRole(original.roleId)) throw new AuthError(404, "A proposed shift is outside your access.");
   }
   for (const id of deleted) { const original = stored.find(row => row.id === id); if (original && !allowedRole(original.roleId)) throw new AuthError(404, "A proposed shift is outside your access."); }

@@ -65,3 +65,13 @@ test('warning review and setting changes do not mutate stored plans, preferences
  const before=structuredClone({shifts,...input});run(shifts,input);run(shifts,{...input,settings:{...settings,availabilityReviewDays:0,minRestHours:0}});assert.deepEqual({shifts,...input},before);
  assert.equal(normalizeScheduleEnforcement({minRestHours:25}).minRestHours,10);assert.equal(normalizeScheduleEnforcement({availabilityReviewDays:366}).availabilityReviewDays,90);assert.equal(normalizeScheduleEnforcement({minRestHours:0,availabilityReviewDays:0}).minRestHours,0);
 });
+test('overnight warnings inspect both dates and real rest while explicitly requiring overtime and meal allocation review',()=>{
+ const night=shift({date:'2026-11-13',start:'22:00',end:'06:00'}),next=shift({id:2,date:'2026-11-14',start:'15:59',end:'18:00'});
+ const request=availability({slots:[{day:'Saturday',preference:'unavailable',startHour:1,endHour:2}]});
+ const leave=[{employeeId:1,startDate:'2026-11-14',endDate:'2026-11-14',startTime:'03:00',endTime:'04:00'}];
+ const result=run([night,next],{availability:[request],leave});
+ for(const code of ['unavailable','time_off','short_rest','overnight_review'])assert.ok(codes(result).includes(code),code);
+ assert.ok(codes(result,2).includes('short_rest'));assert.ok(!run([night,{...next,start:'16:00'}]).some(row=>row.codes.includes('short_rest')));
+ assert.ok(!codes(run([night],{leave:[{...leave[0],startTime:'06:00',endTime:'07:00'}]})).includes('time_off'));
+ const spring=shift({date:'2026-03-07',start:'22:00',end:'06:00'});assert.ok(codes(run([spring])).includes('time_review'));
+});

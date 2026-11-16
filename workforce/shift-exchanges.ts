@@ -35,7 +35,7 @@ export async function decideManagerExchange(db:Database,ctx:Context,body:Record<
   if(offered&&shiftFingerprint(offered,options.secret)!==parent.offeredFingerprint)throw new AuthError(409,'The return shift changed. Create a new request.');
   const roles=await db.select().from(s.roles).where(ctx.activeActor());for(const row of proposals)row.role=roles.find(role=>role.id===(row.id===source.id?source.roleId:offered?.roleId))?.name??row.role;
   const dates=proposals.map(row=>row.date).sort();const periods=Date.parse(dates.at(-1)!)-Date.parse(dates[0])<=61*86400000?[{start:dates[0],end:dates.at(-1)!}]:dates.map(date=>({start:date,end:date}));
-  for(const period of periods)assessments.push(await readScheduleConflicts(db,ctx,{revision,period,upserts:proposals,deletedShiftIds:[]}));
+  for(const period of periods)assessments.push(await readScheduleConflicts(db,ctx,{revision,period,upserts:proposals,deletedShiftIds:[]},true));
  }
  const reviewToken=rateKey(options.secret,canonical({actor:ctx.account.id,revision,id:parent.id,version:parent.version,source:shiftFingerprint(source,options.secret),offered:offered?shiftFingerprint(offered,options.secret):null,decision,reason}));
  await sameExchangeRevision(db,ctx.activeActor(),revision);

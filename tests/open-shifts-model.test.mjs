@@ -16,3 +16,9 @@ test('open-shift conflicts include overnight work and whole days off while allow
  assert.equal(conflict('2026-11-18','00:00','01:00'),false);
  assert.equal(openShiftConflicts({date:'2026-11-16',start:'09:00',end:'10:00'},[]),false);
 });
+test('a proposed overnight interval includes next-day work and day off with exact adjacent boundaries',()=>{
+ const night={date:'2026-11-16',start:'22:00',end:'06:00'};
+ assert.equal(openShiftConflicts(night,occupiedScheduleIntervals([{date:'2026-11-17',start:'05:30',end:'08:00'}])),true);
+ assert.equal(openShiftConflicts(night,occupiedScheduleIntervals([{date:'2026-11-17',start:'06:00',end:'08:00'}])),false);
+ assert.equal(openShiftConflicts(night,occupiedScheduleIntervals([{date:'2026-11-17',start:'00:00',end:'00:00',shiftType:'day_off'}])),true);
+});

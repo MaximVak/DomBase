@@ -57,7 +57,7 @@ export async function readMyExchanges(db:Database,ctx:SchedulePreferenceContext,
   ]);
   if(calendar.length>10000||punches.length>10000||locks.length>4000)throw new AuthError(503,'Too much scheduled work to review safely.');
   const locked=new Set(locks.flatMap(row=>[row.source,row.offered])),recorded=new Set(punches.map(row=>row.shiftId));
-  const shifts=rows.filter(row=>openShiftIsFuture(row.date,row.startTime,now)&&row.startTime<row.endTime).map(row=>{
+  const shifts=rows.filter(row=>openShiftIsFuture(row.date,row.startTime,now)).map(row=>{
    const excluded=new Set([source.id,row.id]);const conflicts=(employeeId:number,shift:{date:string;start:string;end:string})=>openShiftConflicts(shift,occupiedScheduleIntervals(calendar.filter(other=>other.employeeId===employeeId&&!excluded.has(other.id))));
    const unavailable=locked.has(row.id)?'This shift already has an active request.':recorded.has(row.id)?'An actual clock record is linked to this shift. Ask a manager to review it.':conflicts(ctx.account.employeeId!,{date:source.date,start:source.startTime,end:source.endTime})||conflicts(parent.requesterId,{date:row.date,start:row.startTime,end:row.endTime})?'This would overlap published work or a day off.':'';
    return {...publicExchangeShift(row,roles.find(role=>role.id===row.roleId)?.name??''),canOffer:!unavailable,unavailable};
