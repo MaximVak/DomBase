@@ -8,6 +8,8 @@ import { deviceSeconds, kioskCookie, registeredDevice } from "./device";
 import { atomicBatch } from "./database";
 import type { KioskOperatorDatabase } from "./database";
 import { KioskRateLimitError, attemptBudget, exactKeys, hashPin, pinIsValid, pinLookup, positiveId } from "./security";
+import { clockReview } from "./review";
+import { clockOptions } from "./idle";
 
 type Access = ReturnType<typeof createAccessService>;
 type Actor = Awaited<ReturnType<Access["authorize"]>>;
@@ -28,8 +30,10 @@ export function createKioskAdmin(db: KioskOperatorDatabase, access: Access, secr
     try {
       const url = new URL(request.url);
       const action = url.pathname.slice("/api/kiosk-admin/".length);
-      if (!["devices", "register", "revoke", "employee-pin", "approval-pin"].includes(action)) throw new AuthError(404, "Not found.");
+      if (!["devices", "register", "revoke", "employee-pin", "approval-pin", "offline-review", "clock-options"].includes(action)) throw new AuthError(404, "Not found.");
       if (await registeredDevice(db, request.headers.get("cookie"), url)) throw new AuthError(403, "Use your dashboard on another browser to manage tablets.");
+      if (action === "offline-review") return await clockReview(request, db, access);
+      if (action === "clock-options") return await clockOptions(request, db, access);
       const actor = await access.authorize(request, action === "approval-pin" ? "kiosk.approve" : "kiosk.manage");
       if (action === "devices" && request.method === "GET") return json({
         devices: await db.select({ id: schema.kioskDevices.id, name: schema.kioskDevices.name, registeredAt: schema.kioskDevices.registeredAt, revokedAt: schema.kioskDevices.revokedAt }).from(schema.kioskDevices).orderBy(schema.kioskDevices.registeredAt).limit(200),

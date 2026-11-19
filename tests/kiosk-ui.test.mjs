@@ -23,3 +23,12 @@ test('device lockout disables the input, keypad and submit while retaining acces
  assert.match(html,/aria-describedby="kiosk-pin-hint kiosk-lockout"/);assert.match(html,/<input[^>]*disabled/);
  const buttons=html.match(/<button[^>]*>/g);assert.equal(buttons.length,13);assert.ok(buttons.every(tag=>tag.includes('disabled')));assert.match(html,/Temporarily locked/);assert.doesNotMatch(html,/Please wait/);
 });
+test('Spanish PIN and lockout controls use the in-page keypad', () => {
+  const html = renderToStaticMarkup(createElement(PinForm, { language: 'es', busy: false, onSubmit: async () => {} }));
+  assert.match(html, /PIN de empleado/);
+  assert.match(html, /inputMode="none"/i);
+  assert.match(html, /Eliminar el último dígito/);
+  assert.match(html, /Continuar/);
+  const locked = renderToStaticMarkup(createElement(PinLockout, { language: 'es', value: { until: Date.now() + 60000, scope: 'pin' }, onExpired: () => {} }));
+  assert.match(locked, /Demasiados intentos/);
+});

@@ -440,6 +440,22 @@ export const kioskClockRequests = sqliteTable("kiosk_clock_requests", {
   check("kiosk_clock_requests_type_check", sql`${table.eventType} IN ('in', 'out', 'break', 'break_end')`),
 ]);
 
+export const kioskClockReplays = sqliteTable("kiosk_clock_replays", {
+  interactionId: text("interaction_id").primaryKey().notNull().references(() => kioskInteractions.id),
+  roleId: integer("role_id").references(() => roles.id),
+  eventType: text("event_type", { enum: ["in", "out", "break", "break_end"] }).notNull(),
+  attemptedAt: text("attempted_at").notNull(),
+  explanation: text("explanation").notNull(),
+  payloadHash: text("payload_hash").notNull(),
+  eventId: integer("event_id").references(() => clockEvents.id),
+  receivedAt: text("received_at").notNull(),
+  reviewedAt: text("reviewed_at"),
+  reviewedByAccountId: integer("reviewed_by_account_id").references(() => accounts.id),
+}, table => [
+  index("kiosk_clock_replays_review_idx").on(table.eventId, table.reviewedAt, table.receivedAt),
+  check("kiosk_clock_replays_type_check", sql`${table.eventType} IN ('in', 'out', 'break', 'break_end')`),
+]);
+
 export const authRateLimits = sqliteTable("auth_rate_limits", {
   keyHash: text("key_hash").primaryKey().notNull(),
   failedAttempts: integer("failed_attempts").notNull().default(0),

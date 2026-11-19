@@ -7,14 +7,14 @@ import { kioskCookie, readKioskCookie, registeredDevice } from "./device";
 import type { RegisteredDevice } from "./device";
 import { atomicBatch } from "./database";
 import type { KioskOperatorDatabase } from "./database";
-import { KioskRateLimitError, devicePinLockouts, pinAttemptLimits, attemptBudget, exactKeys, pinIsValid, pinLookup, positiveId, releaseAttempt, verifyPin } from "./security";
+import { KioskRateLimitError, devicePinLockouts, pinAttemptLimits, attemptBudget, exactKeys, pinIsValid, pinLookup, releaseAttempt, verifyPin } from "./security";
+import { clockDraft, eventAllowed, makeReplayTicket, readReplayTicket, syncClock } from "./replay";
+import type { ClockDraft } from "./replay";
+import { clockIdleSeconds } from "./idle";
 
-type ClockType = "in" | "out" | "break" | "break_end";
 type Person = { interaction: typeof schema.kioskInteractions.$inferSelect; employee: typeof schema.employees.$inferSelect };
 type Approval = { accountId: number; sessionVersion: number; credentialRevision: string };
 const expired = () => new AuthError(401, "Enter your employee PIN again.");
-const eventAllowed = (last: string | null, next: ClockType) => last === null || last === "out" ? next === "in"
-  : last === "break" ? next === "break_end" : next === "out" || next === "break";
 
 export function createKioskService(db: KioskOperatorDatabase, options: { secret: string; now?: () => number }) {
   if (options.secret.length < 32) throw new Error("Kiosk configuration is unavailable.");
@@ -65,7 +65,7 @@ export function createKioskService(db: KioskOperatorDatabase, options: { secret:
       db.update(schema.kioskApprovalSessions).set({ usedAt: stamp() }).where(and(eq(schema.kioskApprovalSessions.deviceSessionId, device.session.id), isNull(schema.kioskApprovalSessions.usedAt))),
     ]);
   }
-  async function signIn(request: Request, device: RegisteredDevice, pin: unknown) {
+  async function signIn(request: Request, device: RegisteredDevice, pin: unknown, queue: boolean) {
     if (!pinIsValid(pin)) throw new AuthError(401, "Invalid employee PIN.");
     const lookup = pinLookup(options.secret, pin);
     const deviceAttempt = await attemptBudget(db, options.secret, `employee-device:${device.device.id}`, pinAttemptLimits.employeeDevice, now());
@@ -73,9 +73,8 @@ export function createKioskService(db: KioskOperatorDatabase, options: { secret:
     const [employee] = await db.select().from(schema.employees).where(eq(schema.employees.pinLookup, lookup)).limit(1);
     const valid = await verifyPin(options.secret, pin, employee?.pinHash ?? dummyHash);
     if (!valid || !employee?.active || employee.terminated) throw new AuthError(401, "Invalid employee PIN.");
-    const [settings] = await db.select({ seconds: schema.locationSettings.kioskIdleSeconds }).from(schema.locationSettings).limit(1);
     // Bounded person sessions never inherit the persistent device lifetime.
-    const seconds = Math.max(5, Math.min(120, settings?.seconds ?? 30));
+    const seconds = await clockIdleSeconds(db);
     const token = newToken(); const id = newToken(); const expiresAt = new Date(now() + seconds * 1000).toISOString();
     const results = await atomicBatch(db, [
       db.update(schema.kioskInteractions).set({ endedAt: stamp() }).where(and(eq(schema.kioskInteractions.deviceSessionId, device.session.id), isNull(schema.kioskInteractions.endedAt))),
@@ -86,9 +85,10 @@ export function createKioskService(db: KioskOperatorDatabase, options: { secret:
     ]);
     if (results[1].meta.changes !== 1) throw expired();
     await releaseAttempt(db, deviceAttempt); await releaseAttempt(db, pinAttempt);
-    const event = await lastEvent(employee.id);
-    return json({ employee: { id: employee.id, name: employee.name }, roles: await rolesFor(employee.id),
-      state: event?.eventType ?? "out", expiresAt }, 200, { "Set-Cookie": kioskCookie(new URL(request.url), "person", token, seconds) });
+    const [event, roles] = await Promise.all([lastEvent(employee.id), rolesFor(employee.id)]);
+    return json({ employee: { id: employee.id, name: employee.name }, roles, state: event?.eventType ?? "out", expiresAt,
+      ...(queue ? { replay: { ticket: makeReplayTicket(options.secret, device, id, event?.id ?? 0), serverTime: now() } } : {}),
+    }, 200, { "Set-Cookie": kioskCookie(new URL(request.url), "person", token, seconds) });
   }
   function approvalActor(approval: Approval, roleId: number | null): SQL {
     return sql`EXISTS (SELECT 1 FROM accounts a JOIN manager_approval_credentials mc ON mc.account_id = a.id
@@ -105,6 +105,7 @@ export function createKioskService(db: KioskOperatorDatabase, options: { secret:
     const guard = sql`${activePerson(device, person)} AND EXISTS (SELECT 1 FROM kiosk_clock_requests cr
       WHERE cr.id = ${pending.id} AND cr.interaction_id = ${person.interaction.id} AND cr.completed_at IS NULL
       AND cr.cancelled_at IS NULL AND cr.expires_at > ${time})
+      AND NOT EXISTS (SELECT 1 FROM kiosk_clock_replays WHERE interaction_id = ${person.interaction.id})
       AND COALESCE((SELECT MAX(id) FROM clock_events WHERE employee_id = ${person.employee.id}), 0) = ${pending.previousEventId ?? 0}
       AND (${pending.eventType !== "in" ? 1 : 0} = 1 OR EXISTS (SELECT 1 FROM employee_roles er JOIN roles r ON r.id = er.role_id
         JOIN departments d ON d.id = r.department_id WHERE er.employee_id = ${person.employee.id} AND er.role_id = ${pending.roleId}
@@ -127,26 +128,17 @@ export function createKioskService(db: KioskOperatorDatabase, options: { secret:
     if (result[0].meta.changes !== 1) throw new AuthError(409, "The clock or access changed. Enter your PIN and try again.");
     return { recorded: true, eventType: pending.eventType };
   }
-  async function prepareClock(device: RegisteredDevice, person: Person, body: Record<string, unknown>) {
-    exactKeys(body, ["eventType", "roleId", "explanation"]);
-    if (!["in", "out", "break", "break_end"].includes(String(body.eventType))) throw new AuthError(400, "Choose a clock action.");
-    const eventType = body.eventType as ClockType;
-    const previous = await lastEvent(person.employee.id);
-    if (!eventAllowed(previous?.eventType ?? null, eventType)) throw new AuthError(409, "Your clock status changed. Enter your PIN again.");
-    if (typeof body.explanation !== "string" || body.explanation.length > 1000) throw new AuthError(400, "Use an explanation of up to 1,000 characters.");
-    let roleId: number | null = null; let roleName = previous?.roleName ?? ""; let shiftId = previous?.shiftId ?? null;
-    let requiresApproval = false; let approvalReason = "";
-    if (eventType === "in") {
-      roleId = positiveId(body.roleId);
-      const role = (await rolesFor(person.employee.id)).find(role => role.id === roleId);
+  async function planClock(employeeId: number, previous: typeof schema.clockEvents.$inferSelect | null, draft: ClockDraft, clockTime: number) {
+      if (draft.eventType !== "in") return { roleId: null, roleName: previous?.roleName ?? "", shift: null };
+      const roleId = draft.roleId!;
+      const role = (await rolesFor(employeeId)).find(role => role.id === roleId);
       if (!role) throw new AuthError(403, "Choose one of your active job roles.");
-      roleName = role.name;
       const [business] = await db.select({ zone: schema.business.timeZone }).from(schema.business).limit(1);
-      const parts = new Intl.DateTimeFormat("en-CA", { timeZone: business?.zone ?? "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date(now()));
+      const parts = new Intl.DateTimeFormat("en-CA", { timeZone: business?.zone ?? "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date(clockTime));
       const part = (name: string) => parts.find(part => part.type === name)!.value;
       const localTime = `${part("year")}-${part("month")}-${part("day")}T${part("hour")}:${part("minute")}`;
       const [settings] = await db.select({ early: schema.locationSettings.earlyClockInMinutes }).from(schema.locationSettings).limit(1);
-      const shifts = await db.select().from(schema.shifts).where(and(eq(schema.shifts.shiftType, "work"), eq(schema.shifts.employeeId, person.employee.id), eq(schema.shifts.roleId, roleId), isNull(schema.shifts.archivedAt), sql`${schema.shifts.publicationId} IS NOT NULL`, sql`${schema.shifts.date} BETWEEN date(${localTime.slice(0, 10)}, '-1 day') AND ${localTime.slice(0, 10)}`));
+      const shifts = await db.select().from(schema.shifts).where(and(eq(schema.shifts.shiftType, "work"), eq(schema.shifts.employeeId, employeeId), eq(schema.shifts.roleId, roleId), isNull(schema.shifts.archivedAt), sql`${schema.shifts.publicationId} IS NOT NULL`, sql`${schema.shifts.date} BETWEEN date(${localTime.slice(0, 10)}, '-1 day') AND ${localTime.slice(0, 10)}`));
       const shift = shifts.find(shift => {
         const start = new Date(`${shift.date}T${shift.startTime}:00Z`);
         const end = new Date(`${shift.date}T${shift.endTime}:00Z`);
@@ -155,16 +147,26 @@ export function createKioskService(db: KioskOperatorDatabase, options: { secret:
         const clock = new Date(`${localTime}:00Z`);
         return clock >= start && clock < end;
       });
-      shiftId = shift?.id ?? null;
-      requiresApproval = !shift;
-      approvalReason = requiresApproval ? "Clock-in is outside a published shift. A manager must approve it." : "";
-    } else if (body.roleId !== undefined && body.roleId !== null) throw new AuthError(400, "A job role is chosen only when clocking in.");
-    const id = newToken();
+      return { roleId, roleName: role.name, shift: shift ?? null };
+  }
+  async function prepareClock(device: RegisteredDevice, person: Person, body: Record<string, unknown>) {
+    exactKeys(body, ["eventType", "roleId", "explanation", "ticket"]);
+    const draft = clockDraft(body);
+    const previous = await lastEvent(person.employee.id);
+    const ticket = body.ticket === undefined ? null : readReplayTicket(options.secret, device, body.ticket);
+    if (ticket && ticket.interactionId !== person.interaction.id) throw expired();
+    if (!eventAllowed(previous?.eventType ?? null, draft.eventType) || (ticket && ticket.previousId !== (previous?.id ?? 0))) throw new AuthError(409, "Your clock status changed. Enter your PIN again.");
+    const plan = await planClock(person.employee.id, previous, draft, now());
+    const shiftId = draft.eventType === "in" ? plan.shift?.id ?? null : previous?.shiftId ?? null;
+    const requiresApproval = draft.eventType === "in" && !plan.shift;
+    const approvalReason = requiresApproval ? "Clock-in is outside a published shift. A manager must approve it." : "";
+    const id = ticket?.interactionId ?? newToken();
     const result = await atomicBatch(db, [
-      db.update(schema.kioskClockRequests).set({ cancelledAt: stamp() }).where(and(eq(schema.kioskClockRequests.interactionId, person.interaction.id), isNull(schema.kioskClockRequests.completedAt), isNull(schema.kioskClockRequests.cancelledAt))),
+      db.update(schema.kioskClockRequests).set({ cancelledAt: stamp() }).where(and(eq(schema.kioskClockRequests.interactionId, person.interaction.id), isNull(schema.kioskClockRequests.completedAt), isNull(schema.kioskClockRequests.cancelledAt), sql`id <> ${id}`)),
       sql`INSERT INTO kiosk_clock_requests (id, interaction_id, event_type, role_id, shift_id, role_name, previous_event_id, explanation, requires_approval, approval_reason, expires_at, created_at)
-        SELECT ${id}, ${person.interaction.id}, ${eventType}, ${roleId}, ${shiftId}, ${roleName}, ${previous?.id ?? null}, ${body.explanation.trim()}, ${requiresApproval ? 1 : 0}, ${approvalReason}, ${person.interaction.expiresAt}, ${stamp()}
-        WHERE ${activePerson(device, person)}`,
+        SELECT ${id}, ${person.interaction.id}, ${draft.eventType}, ${plan.roleId}, ${shiftId}, ${plan.roleName}, ${previous?.id ?? null}, ${draft.explanation}, ${requiresApproval ? 1 : 0}, ${approvalReason}, ${person.interaction.expiresAt}, ${stamp()}
+        WHERE ${activePerson(device, person)} AND NOT EXISTS (SELECT 1 FROM kiosk_clock_replays WHERE interaction_id = ${person.interaction.id})
+        ON CONFLICT (id) DO NOTHING`,
     ]);
     if (result[1].meta.changes !== 1) throw expired();
     const [pending] = await db.select().from(schema.kioskClockRequests).where(eq(schema.kioskClockRequests.id, id));
@@ -193,13 +195,14 @@ export function createKioskService(db: KioskOperatorDatabase, options: { secret:
   async function handle(request: Request) {
     try {
       const url = new URL(request.url); const action = url.pathname.slice("/api/kiosk/".length);
-      if (!["status", "pin", "lock", "clock", "approve"].includes(action)) throw new AuthError(404, "Not found.");
+      if (!["status", "pin", "lock", "clock", "approve", "sync"].includes(action)) throw new AuthError(404, "Not found.");
       const device = await deviceFor(request);
       if (action === "status" && request.method === "GET") return json({ registered: true, deviceName: device.device.name, ...await devicePinLockouts(db, options.secret, device.device.id, now()) });
       if (request.method !== "POST") return json({ error: "Method not allowed." }, 405, { Allow: action === "status" ? "GET" : "POST" });
       const body = await readAuthBody(request);
       if (action === "lock") { exactKeys(body, []); await lock(device); return json({ locked: true }, 200, { "Set-Cookie": kioskCookie(url, "person", "", 0) }); }
-      if (action === "pin") { exactKeys(body, ["pin"]); return await signIn(request, device, body.pin); }
+      if (action === "pin") { exactKeys(body, ["pin", "queue"]); return await signIn(request, device, body.pin, body.queue === true); }
+      if (action === "sync") return json(await syncClock(db, device, activeDevice(device), options.secret, now(), body, lastEvent, planClock));
       const person = await personFor(request, device);
       let result;
       if (action === "approve") result = await approve(device, person, body);

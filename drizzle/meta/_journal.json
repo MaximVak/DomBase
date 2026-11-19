@@ -141,6 +141,13 @@
       "when": 1794787200000,
       "tag": "0019_shift_exchanges",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1795125000541,
+      "tag": "0020_kiosk_clock_replays",
+      "breakpoints": true
     }
   ]
 }

@@ -10856,6 +10856,8 @@ button[aria-label^="Remove"]:focus-visible,
 .kiosk-screen { min-height: 100dvh; background: var(--page-bg, #f4f7f9); display: grid; place-items: center; padding: 24px 16px; }
 .kiosk-shell { width: min(100%, 480px); background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 24px; display: grid; gap: 20px; }
 .kiosk-shell header { display: flex; align-items: center; gap: 16px; }
+.kiosk-title { flex: 1; min-width: 0; }
+.kiosk-shell .kiosk-language { flex-shrink: 0; padding-inline: .75rem; }
 .kiosk-shell h1 { font-size: 1.4rem; margin: 0; overflow-wrap: anywhere; }
 .kiosk-shell h2 { font-size: 1.2rem; margin: 0; }
 .kiosk-eyebrow { color: var(--muted); font-size: .85rem; margin: 0 0 4px; }
@@ -10874,6 +10876,7 @@ button[aria-label^="Remove"]:focus-visible,
 .kiosk-hint { color: var(--muted); font-size: .85rem; font-weight: 400; }
 .kiosk-error { color: #922d24; background: #fff1ef; padding: 12px; border-radius: 6px; overflow-wrap: anywhere; }
 .kiosk-notice { color: #174c38; background: #edf8f1; padding: 12px; border-radius: 6px; }
+.kiosk-status { color: var(--text); background: var(--page-bg, #f4f7f9); padding: .75rem; border-radius: 6px; }
 .kiosk-actions { display: grid; gap: 12px; }
 .kiosk-admin-screen { max-width: 760px; margin: 0 auto; padding: 32px 16px; display: grid; gap: 24px; }
 .kiosk-admin-screen header h1 { font-size: 1.75rem; margin: 20px 0 8px; }
@@ -10888,6 +10891,15 @@ button[aria-label^="Remove"]:focus-visible,
 .kiosk-screen :is(button, input, select, textarea, a):focus-visible, .kiosk-admin-screen :is(button, input, select, a):focus-visible { outline: 3px solid var(--blue); outline-offset: 3px; }
 .kiosk-screen button:disabled, .kiosk-admin-screen button:disabled { opacity: .6; cursor: not-allowed; }
 @media (max-width: 480px) { .kiosk-shell, .kiosk-admin-section { padding: 16px; } .kiosk-device-list li { flex-direction: column; } }
+@media (orientation: landscape) and (min-width: 650px) and (max-height: 650px) {
+  .kiosk-screen { padding: .75rem 1rem; }
+  .kiosk-shell { width: min(100%, 42rem); gap: .75rem; padding: 1rem; }
+  .kiosk-pin-form { grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); align-content: start; gap: .5rem 1rem; }
+  .kiosk-pin-form > :not(.kiosk-keypad) { grid-column: 1; }
+  .kiosk-keypad { grid-column: 2; grid-row: 1 / span 4; gap: .5rem; }
+  .kiosk-keypad button { min-height: 48px; padding-block: .25rem; }
+  .kiosk-actions { grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); }
+}
 
 .workspace-sync-bar { min-height: 40px; display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 8px 16px; padding: 8px 16px; color: #244c3b; background: #edf8f1; border-bottom: 1px solid var(--line); font-size: .85rem; }
 .workspace-sync-bar p { margin: 0; }

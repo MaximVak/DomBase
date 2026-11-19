@@ -84,6 +84,16 @@ test("registered tablets, PIN sessions and action-scoped approvals use isolated 
     const token = deviceCookie.split("=")[1]; const [stored] = await db.select().from(schema.deviceSessions).where(eq(schema.deviceSessions.deviceId, deviceId));
     assert.equal(stored.tokenHash, tokenHash(token)); assert.equal(JSON.stringify(stored).includes(token), false);
   });
+  await t.test("authorized admins can adjust the saved PIN timeout without changing other settings", async () => {
+    assert.deepEqual(await ok(await adm("clock-options", ownerCookie)), { idleSeconds: 30 });
+    assert.equal((await adm("clock-options", managerCookie, { idleSeconds: 10, expectedSeconds: 30 })).status, 403);
+    assert.equal((await adm("clock-options", deviceCookie)).status, 403);
+    assert.equal((await adm("clock-options", ownerCookie, { idleSeconds: 121, expectedSeconds: 30 })).status, 400);
+    assert.deepEqual(await ok(await adm("clock-options", ownerCookie, { idleSeconds: 10, expectedSeconds: 30 })), { idleSeconds: 10 });
+    assert.equal((await adm("clock-options", ownerCookie, { idleSeconds: 50, expectedSeconds: 30 })).status, 409);
+    const p = await person(); assert.equal(Date.parse(p.data.expiresAt), time + 10000);
+    await ok(await adm("clock-options", ownerCookie, { idleSeconds: 30, expectedSeconds: 10 }));
+  });
   await t.test("employee PINs expose only that person, bind to one tablet and expire server-side", async () => {
     for (const pin of ["0000", "000000", "not-a-pin", managerPin]) assert.equal((await clock("pin", deviceCookie, { pin })).status, 401);
     const p = await person();
@@ -155,6 +165,56 @@ test("registered tablets, PIN sessions and action-scoped approvals use isolated 
     const interactions = await db.select().from(schema.kioskInteractions).where(eq(schema.kioskInteractions.employeeId, f.a.id)); assert.ok(interactions.some(i => !i.endedAt));
     await db.run(sql`DROP TRIGGER reject_kiosk_audit`);
     await ok(await clock("clock", p.cookie, { eventType: "in", roleId: f.roleA.id, explanation: "" }));
+  });
+  await t.test("queued actions survive PIN expiry, deduplicate online replies and report conflicts to scoped review", async () => {
+    const issue = async () => {
+      const response = await clock("pin", deviceCookie, { pin: employeePin, queue: true });
+      const { replay } = await ok(response);
+      return { replay, cookie: `${deviceCookie}; ${cookiesOf(response)[0]}` };
+    };
+    const make = (replay, eventType, explanation, roleId) => ({ ticket: replay.ticket, attemptedAt: replay.serverTime, eventType, explanation, roleId });
+    const count = async () => (await db.select().from(schema.clockEvents)).length;
+
+    const offline = await issue();
+    const action = make(offline.replay, "out", "Recorded during a connection drop");
+    const before = await count();
+    assert.equal((await clock("sync", device2, action)).status, 403);
+    assert.equal((await clock("sync", deviceCookie, { ...action, ticket: `${action.ticket}0` })).status, 403);
+    assert.equal((await clock("sync", deviceCookie, { ...action, attemptedAt: time - 1 })).status, 422);
+    time += 10;
+    await ok(await clock("lock", deviceCookie, {}));
+    time += 31000;
+    for (const response of await Promise.all([clock("sync", deviceCookie, action), clock("sync", deviceCookie, action)])) {
+      assert.deepEqual(await ok(response), { outcome: "synced" });
+    }
+    assert.equal(await count(), before + 1);
+    const [saved] = await db.select().from(schema.clockEvents).where(eq(schema.clockEvents.idempotencyKey, action.ticket.split(".")[0]));
+    assert.equal(saved.occurredAt, new Date(action.attemptedAt).toISOString());
+    assert.equal(saved.receivedAt, new Date(time).toISOString());
+    assert.equal(saved.source, "offline");
+    assert.equal((await clock("sync", deviceCookie, { ...action, explanation: "Changed after sync" })).status, 409);
+
+    const online = await issue();
+    const ordinary = make(online.replay, "in", "Response lost", f.roleA.id);
+    await ok(await clock("clock", online.cookie, { ticket: ordinary.ticket, eventType: "in", roleId: f.roleA.id, explanation: ordinary.explanation }));
+    assert.deepEqual(await ok(await clock("sync", deviceCookie, ordinary)), { outcome: "synced" });
+    assert.equal(await count(), before + 2);
+
+    const stale = await issue();
+    time += 10;
+    const other = await person(employeePin, device2);
+    await ok(await clock("clock", other.cookie, { eventType: "out", explanation: "Newer attendance" }));
+    const conflict = make(stale.replay, "break", "Review against newer clock-out");
+    assert.deepEqual(await ok(await clock("sync", deviceCookie, conflict)), { outcome: "review" });
+    assert.deepEqual(await ok(await clock("sync", deviceCookie, conflict)), { outcome: "review" });
+    assert.equal(await count(), before + 3);
+    assert.equal((await adm("offline-review", managerCookie)).status, 403);
+    assert.equal((await adm("offline-review", deviceCookie)).status, 403);
+    const { entries } = await ok(await adm("offline-review", ownerCookie));
+    assert.deepEqual(entries, [{ id: conflict.ticket.split(".")[0], employee: f.a.name, role: f.roleA.name,
+      eventType: "break", attemptedAt: new Date(conflict.attemptedAt).toISOString(), explanation: conflict.explanation }]);
+    await ok(await adm("offline-review", ownerCookie, { id: entries[0].id }));
+    assert.deepEqual(await ok(await adm("offline-review", ownerCookie)), { entries: [] });
   });
   await t.test("PIN resets, inactive employees and device revocation invalidate access", async () => {
     ownerCookie = await login(f.owner.email);
