@@ -89,9 +89,14 @@ test("shared workforce operations persist, scope, audit and serialize actual D1 
     await db.run(sql`DROP TRIGGER reject_workforce_audit`);
   });
   await t.test("settings and notification receipts are server-backed and owner identities cannot be changed through contact fields", async () => {
-    const before = await snapshot(owner); const settings = { ...before.settings, noShowMinutes: 12, hoursRoundingMinutes: 10 };
+    const before = await snapshot(owner);
+    assert.deepEqual([before.settings.breakPremiums, before.settings.mealPremiumLimit, before.settings.restPremiumLimit], [true, 1, 1]);
+    const settings = { ...before.settings, noShowMinutes: 12, restPremiumLimit: 2, hoursRoundingMinutes: 10 };
     await ok(await call("commit", owner, saveBody(before, [{ entity: "settings", id: 1, before: { ...before.settings, hoursRoundingMinutes: before.state.hoursRoundingMinutes }, after: settings }], newToken())));
-    assert.equal((await snapshot(second)).settings.noShowMinutes, 12);
+    const savedSettings = (await snapshot(second)).settings;
+    assert.equal(savedSettings.noShowMinutes, 12);
+    assert.equal(savedSettings.restPremiumLimit, 2);
+    assert.equal(savedSettings.mealPremiumLimit, 1);
     const current = await snapshot(owner); const changed = { ...current.basicInfo, accountOwner: "Attacker" };
     assert.equal((await call("commit", owner, saveBody(current, [{ entity: "business", id: 1, before: current.basicInfo, after: changed }], newToken()))).status, 403);
     const receipts = { opened: current.opened[f.b.id] ?? [], dismissed: current.dismissed[f.b.id] ?? [] };
@@ -146,7 +151,7 @@ test("shared workforce operations persist, scope, audit and serialize actual D1 
     ]).returning();
     const before = await snapshot(owner); const ids = raw.map(event => event.id); const beforeEvents = before.state.clockEvents.filter(event => ids.includes(event.id));
     const events = [
-      { id: 77001, employeeId: createdId, type: "in", at: "2026-10-31T16:30:00.000Z", role: "Shared job" },
+      { id: 77001, employeeId: createdId, type: "in", at: "2026-10-31T16:30:00.000Z", role: "Shared job", clockDetails: { california: true } },
       { id: 77004, employeeId: createdId, type: "break", at: "2026-10-31T23:30:00.000Z", clockDetails: { breakKind: "meal" } },
       { id: 77005, employeeId: createdId, type: "break_end", at: "2026-11-01T00:00:00.000Z" },
       { id: 77006, employeeId: createdId, type: "out", at: "2026-11-01T00:00:00.000Z" },
@@ -156,6 +161,7 @@ test("shared workforce operations persist, scope, audit and serialize actual D1 
     } }], newToken())));
     const unchanged = await db.select().from(schema.clockEvents).where(eq(schema.clockEvents.employeeId, createdId)); assert.deepEqual(unchanged, raw);
     const view = await snapshot(second); assert.equal(view.state.clockEvents.some(event => ids.includes(event.id)), false); assert.equal(view.state.clockEvents.find(event => event.id === 77001).at, events[0].at);
+    assert.deepEqual(view.state.clockEvents.find(event => event.id === 77001).clockDetails, { california: true });
     const [edit] = await db.select().from(schema.timeCardEdits).where(eq(schema.timeCardEdits.id, 77003)); assert.equal(edit.actorAccountId, f.owner.id); assert.equal(edit.revision, 1); assert.deepEqual(edit.before.eventIds, ids);
     assert.notEqual(edit.cardId, collidingId);
     assert.deepEqual(await db.select().from(schema.timeCards).where(eq(schema.timeCards.id, collidingId)), [olderCard]);

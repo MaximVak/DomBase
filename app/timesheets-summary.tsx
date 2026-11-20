@@ -20,12 +20,15 @@ export const summaryColumns = [
   { id: "scheduled", label: "Scheduled hours" }, { id: "actual", label: "Actual hours" },
   { id: "variance", label: "Actual vs. scheduled" }, { id: "paid", label: "Total paid hours" },
   { id: "breaks", label: "Meal breaks" }, { id: "wages", label: "Estimated wages" },
+  { id: "mealPremium", label: "Meal premium hours" }, { id: "restPremium", label: "Rest premium hours" },
+  { id: "premiumPay", label: "Est. break premium pay" },
   { id: "cashTips", label: "Cash tips" }, { id: "creditTips", label: "Credit tips" },
   { id: "pto", label: "PTO" }, { id: "sick", label: "FFCRA – paid sick" },
   { id: "others", label: "FFCRA – others" }, { id: "child", label: "FFCRA – child" },
   { id: "blueLaw", label: "Blue law hours" }, { id: "holiday", label: "Holiday pay" },
 ];
 export const defaultSummaryColumns = ["first", "last", "payroll", "wage", "regular", "ot", "doubleOt", "qualifiedOt", "pto"];
+const premiumColumns = ["mealPremium", "restPremium", "premiumPay"];
 const textColumns = ["first", "last", "legalFirst", "legalMiddle", "legalLast", "payroll", "role", "wage"];
 function moveColumn(order: string[], from: string, to: string) {
   const next = [...order];
@@ -46,7 +49,7 @@ export function summaryRows(employees: TimesheetEmployee[], cards: TimeCard[]) {
       wage: own.some(card => card.wageLabel !== undefined) ? [...new Set(own.map(card => card.wageLabel ?? "—"))].join("; ") : rate !== null ? `${money(rate)}/hr` : employee.wage || "—", role: [...new Set(own.map(card => card.role))].join(", ") || employee.role,
       legalFirst: employee.legalFirstName?.trim() || "—", legalMiddle: employee.legalMiddleName?.trim() || "—", legalLast: employee.legalLastName?.trim() || "—",
     };
-    for (const [key, value] of Object.entries(totalMetrics(own))) values[key] = value === null ? "—" : key === "wages" ? money(value) : value.toFixed(2);
+    for (const [key, value] of Object.entries(totalMetrics(own))) values[key] = value === null ? "—" : key === "wages" || key === "premiumPay" ? money(value) : value.toFixed(2);
     return { employee, values };
   });
 }
@@ -54,7 +57,7 @@ export function summaryRows(employees: TimesheetEmployee[], cards: TimeCard[]) {
 type Props = {
   employees: TimesheetEmployee[]; cards: TimeCard[];
   dateControl: ReactNode; start: string; end: string; rounding: string | number; filtered: boolean;
-  canExport?: boolean; onEditingChange?: (editing: boolean) => void;
+  canExport?: boolean; showBreakPremiums?: boolean; onEditingChange?: (editing: boolean) => void;
   onBack: () => void; onPayrollId?: (employeeId: number, payrollId: string) => Promise<boolean>;
 };
 export function TimesheetsSummary(props: Props) {
@@ -87,7 +90,8 @@ export function TimesheetsSummary(props: Props) {
     window.addEventListener("resize", update);
     return () => { observer.disconnect(); window.removeEventListener("resize", update); };
   }, []);
-  const [columns, setColumns] = useState(defaultSummaryColumns);
+  const defaultColumns = props.showBreakPremiums ? [...defaultSummaryColumns, ...premiumColumns] : defaultSummaryColumns;
+  const [columns, setColumns] = useState(defaultColumns);
   const [sort, setSort] = useState({ id: "first", direction: 1 });
   const [printMode, setPrintMode] = useState<"current" | "all">("current");
   const [editing, setEditing] = useState<number | null>(null);
@@ -105,7 +109,7 @@ export function TimesheetsSummary(props: Props) {
     window.addEventListener("afterprint", resetPrint);
     return () => window.removeEventListener("afterprint", resetPrint);
   }, []);
-  const orderedColumns = columnOrder.map(id => summaryColumns.find(column => column.id === id)!);
+  const orderedColumns = columnOrder.filter(id => props.showBreakPremiums || !premiumColumns.includes(id)).map(id => summaryColumns.find(column => column.id === id)!);
   const activeColumns = orderedColumns.filter(column => columns.includes(column.id));
   const ledgerWidths = activeColumns.map(column => column.id === "payroll" ? 200 : column.id === "role" ? 190 : textColumns.includes(column.id) ? 140 : 130);
   const ledgerMinWidth = ledgerWidths.reduce((sum, width) => sum + width, 0);
@@ -124,14 +128,15 @@ export function TimesheetsSummary(props: Props) {
   const totals = totalMetrics(props.cards.filter(card => props.employees.some(employee => employee.id === card.employeeId)));
   function totalsRow(selected: typeof summaryColumns) {
     return <tr>{selected.map((column, index) => {
-      const value = textColumns.includes(column.id) ? "" : totals[column.id] == null ? "—" : column.id === "wages" ? money(totals[column.id]!) : totals[column.id]!.toFixed(2);
+      const value = textColumns.includes(column.id) ? "" : totals[column.id] == null ? "—" : column.id === "wages" || column.id === "premiumPay" ? money(totals[column.id]!) : totals[column.id]!.toFixed(2);
       const Cell = index === 0 ? "th" : "td";
       return <Cell key={column.id} scope={index === 0 ? "row" : undefined} className={index === 0 && !value ? "ts-summary-text" : "ts-summary-number"} data-total-column={column.id}>{index === 0 ? <span className={value ? "ts-summary-totals-label" : undefined}>{props.filtered ? "Filtered totals" : "Totals"}</span> : null}{value ? <strong>{value}</strong> : null}</Cell>;
     })}</tr>;
   }
   function download() {
     if (props.canExport === false) return;
-    const csv = timesheetCsv([activeColumns.map(column => column.label), ...rows.map(row => activeColumns.map(column => row.values[column.id]))]);
+    const exportColumns = orderedColumns.filter(column => columns.includes(column.id) || (props.showBreakPremiums && premiumColumns.includes(column.id)));
+    const csv = timesheetCsv([exportColumns.map(column => column.label), ...rows.map(row => exportColumns.map(column => row.values[column.id]))]);
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
     const link = document.createElement("a"); link.href = url; link.download = `timesheet-summary-${props.start}-${props.end}.csv`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
@@ -147,14 +152,14 @@ export function TimesheetsSummary(props: Props) {
       <button type="button" className="ts-summary-back" ref={backRef} onClick={props.onBack}><span aria-hidden="true">←</span>Timesheets</button>
       <div className="ts-summary-toolbar">{props.dateControl}<div className="ts-summary-actions"><details className="ts-summary-print ts-menu-anchor" ref={printRef}><summary><svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M6 8V3h12v5M6 17H3V8h18v9h-3M6 14h12v7H6Z" /><circle cx="17" cy="11" r=".7" /></svg>Print<span aria-hidden="true">▾</span></summary><div className="ts-popover"><button type="button" disabled={props.canExport === false} onClick={() => print("current")}>Print current columns shown</button><button type="button" disabled={props.canExport === false} onClick={() => print("all")}>Print all columns</button></div></details><button type="button" className="ts-primary" disabled={props.canExport === false} onClick={download}><svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v12m-5-5 5 5 5-5M4 15v6h16v-6" /></svg>Download</button></div></div>
       <div className="ts-summary-overview"><div className="ts-summary-cards"><div><span>Sales</span><strong>—</strong><small>Sales data not connected</small></div><div><span>Labor percentage</span><strong>—</strong><small>Requires sales data</small></div><div><span>Estimated wages</span><strong>{totals.wages === null ? "—" : money(totals.wages)}</strong>{totals.wages === null ? <small>Add hourly wage rates to estimate wages</small> : null}</div></div><div className="ts-summary-column-control"><span>Show/hide columns</span><details className="ts-nested-select ts-summary-columns" ref={columnsRef}>
-          <summary>{columns.length}/{summaryColumns.length} Columns<svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 9 7 7 7-7Z" fill="currentColor" /></svg></summary>
+          <summary>{activeColumns.length}/{orderedColumns.length} Columns<svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 9 7 7 7-7Z" fill="currentColor" /></svg></summary>
           <div className="ts-option-list ts-summary-column-list">{orderedColumns.map((column, index) => <div className="ts-summary-column-option" key={column.id} onDragOver={event => { if (dragColumn.current) event.preventDefault(); }} onDrop={event => { event.preventDefault(); if (dragColumn.current) reorder(dragColumn.current, column.id); dragColumn.current = null; }}>
             <label><input type="checkbox" checked={columns.includes(column.id)} disabled={columns.length === 1 && columns.includes(column.id)} onChange={() => setColumns(current => current.includes(column.id) ? current.filter(id => id !== column.id) : [...current, column.id])} /><span>{column.label}</span></label>
             <button type="button" className="ts-summary-column-handle" draggable aria-label={`Reorder ${column.label} column`} title="Drag to reorder, or use the arrow keys" onDragStart={event => { dragColumn.current = column.id; event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", column.id); }} onDragEnd={() => { dragColumn.current = null; }} onKeyDown={event => {
               const target = event.key === "ArrowUp" ? index - 1 : event.key === "ArrowDown" ? index + 1 : event.key === "Home" ? 0 : event.key === "End" ? columnOrder.length - 1 : -1;
               if (["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) { event.preventDefault(); if (columnOrder[target]) reorder(column.id, columnOrder[target]); }
             }}><svg width="18" height="28" viewBox="0 0 18 28" aria-hidden="true" fill="currentColor">{[5, 14, 23].map(y => <g key={y}><circle cx="4" cy={y} r="3" /><circle cx="14" cy={y} r="3" /></g>)}</svg></button>
-          </div>)}<button type="button" className="ts-text-button ts-summary-reset-columns" onClick={() => { setColumns(defaultSummaryColumns); setColumnOrder(summaryColumns.map(column => column.id)); setAnnouncement("Column visibility and order reset"); }}>Reset columns</button></div>
+          </div>)}<button type="button" className="ts-text-button ts-summary-reset-columns" onClick={() => { setColumns(defaultColumns); setColumnOrder(summaryColumns.map(column => column.id)); setAnnouncement("Column visibility and order reset"); }}>Reset columns</button></div>
         </details><span className="sr-only" role="status">{announcement}</span></div></div>
     </div>
     <div className="ts-summary-ledger-scroll" ref={ledgerScrollRef} tabIndex={0} role="region" aria-label="Employee summary ledger" onScroll={event => syncLedgerScroll(event.currentTarget, totalsScrollRef.current)}><table className="ts-summary-ledger" style={{ minWidth: ledgerMinWidth }}><caption className="sr-only">Employee totals from {props.start} to {props.end}</caption>{ledgerColumns}<thead><tr>{activeColumns.map(column => <th key={column.id} scope="col" aria-sort={sort.id === column.id ? sort.direction === 1 ? "ascending" : "descending" : "none"}><button type="button" onClick={() => setSort(current => ({ id: column.id, direction: current.id === column.id ? -current.direction : 1 }))}>{column.label}{sort.id === column.id ? <span aria-hidden="true">{sort.direction === 1 ? "▾" : "▴"}</span> : null}</button></th>)}</tr></thead><tbody>{rows.map(({ employee, values }) => <tr key={employee.id}>{activeColumns.map(column => <td className={textColumns.filter(id => id !== "wage").includes(column.id) ? "ts-summary-text" : "ts-summary-number"} key={column.id}>{column.id === "payroll" && props.onPayrollId ? editing === employee.id ? <form className="ts-payroll-editor" onSubmit={async event => { event.preventDefault(); if (await props.onPayrollId?.(employee.id, payrollId.trim()) !== false) setEditing(null); }}><input aria-label={`Payroll ID for ${employee.name}`} value={payrollId} maxLength={100} onChange={event => setPayrollId(event.target.value)} /><button type="submit">Save</button><button type="button" onClick={() => setEditing(null)}>Cancel</button></form> : <button type="button" className={values.payroll ? "ts-payroll-id" : "ts-payroll-missing"} aria-label={`Edit payroll ID for ${employee.name}`} onClick={() => { setEditing(employee.id); setPayrollId(values.payroll); }}>{values.payroll || "＋ Payroll ID"}</button> : values[column.id] || "—"}</td>)}</tr>)}</tbody></table>{!rows.length ? <div className="ts-empty-state"><h3>No hours recorded in this period</h3><p>Choose another date range or return to Timesheets to add a time card.</p></div> : null}</div>

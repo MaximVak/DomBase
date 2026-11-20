@@ -40,9 +40,14 @@ export async function timecardChange(r: RecordContext, change: Change) {
     let clockDetails: ClockDetails | undefined;
     if (event.clockDetails !== undefined) {
       const details = v.object(event.clockDetails);
-      v.keys(details, ["breakKind"]);
-      if (type !== "break") throw new AuthError(400, "A break type requires a break start.");
-      clockDetails = { breakKind: v.oneOf(details.breakKind, ["rest", "meal"] as const) };
+      if (type === "in" && details.california === true && r.view.settings.breakPremiums) {
+        v.keys(details, ["california"]);
+        clockDetails = { california: true };
+      } else {
+        v.keys(details, ["breakKind"]);
+        if (type !== "break") throw new AuthError(400, "A break type requires a break start.");
+        clockDetails = { breakKind: v.oneOf(details.breakKind, ["rest", "meal"] as const) };
+      }
     }
     return { id: v.integer(event.id), employeeId, type, at, ...(event.role ? { role: v.text(event.role, 100) } : {}), ...(event.explanation ? { explanation: v.text(event.explanation, 1000) } : {}), ...(clockDetails ? { clockDetails } : {}) };
   });
@@ -61,14 +66,13 @@ export async function timecardChange(r: RecordContext, change: Change) {
   const original = [...beforeEvents].sort((a, b) => a.at.localeCompare(b.at));
   const originalIn = original.find(event => event.type === "in");
   const originalOut = original.find(event => event.type === "out");
-  if (originalIn?.clockDetails) events[0].clockDetails = originalIn.clockDetails;
+  if (originalIn?.clockDetails) events[0].clockDetails = { ...events[0].clockDetails, ...originalIn.clockDetails };
   if (originalOut?.clockDetails) events[events.length - 1].clockDetails = originalOut.clockDetails;
-  const sameMinute = (a: string, b: string) => Math.floor(Date.parse(a) / 60000) === Math.floor(Date.parse(b) / 60000);
   for (let index = 1; index < events.length - 1; index += 2) {
     const start = events[index], end = events[index + 1];
-    const previousIndex = original.findIndex(event => event.type === "break" && sameMinute(event.at, start.at));
+    const previousIndex = original.findIndex(event => event.type === "break" && event.at === start.at);
     const previous = original[previousIndex], previousEnd = original[previousIndex + 1];
-    if (previousIndex < 0 || previousEnd?.type !== "break_end" || !sameMinute(previousEnd.at, end.at)) continue;
+    if (previousIndex < 0 || previousEnd?.type !== "break_end" || previousEnd.at !== end.at) continue;
     if ((previous.clockDetails?.breakKind ?? "meal") !== (start.clockDetails?.breakKind ?? previous.clockDetails?.breakKind ?? "meal")) continue;
     if (previous.clockDetails) start.clockDetails = previous.clockDetails;
     if (previousEnd.clockDetails) end.clockDetails = previousEnd.clockDetails;

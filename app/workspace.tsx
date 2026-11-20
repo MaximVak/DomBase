@@ -45,7 +45,7 @@ import { profileUpdate, profileValues } from "./account-profile";
 import { TimesheetsPanel } from "./timesheets-panel";
 import { MobileNavigation } from "./mobile-navigation";
 import { SidebarNavIcon } from "./sidebar-nav-icon";
-import { timeCardEvents, validateTimeCard } from "./timesheets-model";
+import { timeCardEvents, validateTimeCard, workDate } from "./timesheets-model";
 import type { TimeCardDraft, TimeCardEdit } from "./timesheets-model";
 import type { ProfileValues } from "./account-profile";
 import type { DashboardAccount } from "../auth/types";
@@ -5377,7 +5377,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
               pto={state.ptoRequests ?? []}
               departments={state.departments}
               history={state.timeCardEdits ?? []}
-              today={today}
+              today={workDate(currentTime, basicInfo.timeZone)}
               now={currentTime}
               manager={mode === "manager"}
               activeEmployeeId={activeEmployeeId}
@@ -5385,6 +5385,11 @@ export default function Home({ account }: { account: DashboardAccount }) {
               mandatoryMealBreak={scheduleEnforcement.mandatoryMealBreak}
               mealBreakAfterHours={scheduleEnforcement.mealBreakAfterHours}
               mealBreakMinutes={scheduleEnforcement.mealBreakMinutes}
+              timeZone={basicInfo.timeZone}
+              breakPremiumPolicy={scheduleEnforcement.breakPremiums ? {
+                mealLimit: scheduleEnforcement.mealPremiumLimit, restLimit: scheduleEnforcement.restPremiumLimit,
+                companyWide: shared.data.scheduleEstimateScopeComplete === true, dataPeriod: shared.data.period,
+              } : undefined}
               rounding={activeUserIsAdmin && mode === "manager" ? hoursRounding : hoursDisplay === "rounded" ? state.hoursRoundingMinutes : "actual"}
               roundingControl={activeUserIsAdmin && mode === "manager" ? (
                 <div className="hours-rounding-actions">

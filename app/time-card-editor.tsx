@@ -1,7 +1,7 @@
 "use client";
 
 import type { FormEvent } from "react";
-import { timeCardBounds, timeCardPreview, validateTimeCard } from "./timesheets-model";
+import { timeCardBounds, timeCardPreview, validateTimeCard, workDate, workTime } from "./timesheets-model";
 import type { TimeCardBreak, TimeCardDraft, TimeCardEdit, TimesheetEmployee } from "./timesheets-model";
 
 type Props = {
@@ -13,6 +13,7 @@ type Props = {
   today: string;
   now: number;
   error: string;
+  confirmBreakRecord?: boolean;
   onChange: (draft: TimeCardDraft) => void;
   onSubmit: (event: FormEvent) => void;
   onClose: () => void;
@@ -34,7 +35,8 @@ export function TimeCardEditor(props: Props) {
   const { draft, onChange } = props;
   const preview = timeCardPreview(draft);
   const breaks = draft.breaks ?? [];
-  const incomplete = !draft.employeeId || !draft.date || !draft.start || !draft.end || breaks.some(entry => !entry.start || !entry.end);
+  const incomplete = !draft.employeeId || !draft.date || !draft.start || !draft.end || breaks.some(entry => !entry.start || !entry.end)
+    || (props.confirmBreakRecord && !draft.confirmBreakRecord);
   const validation = incomplete ? "" : validateTimeCard(draft, [], props.now);
   const history = [...props.history].reverse();
 
@@ -45,12 +47,12 @@ export function TimeCardEditor(props: Props) {
     const bounds = timeCardBounds(draft);
     const valid = Number.isFinite(bounds.start) && Number.isFinite(bounds.end) && bounds.end - bounds.start > 30 * 60000;
     // Suggest an interval only for the first break; additional breaks need explicit times.
-    const midpoint = valid && !breaks.length ? new Date(bounds.start + (bounds.end - bounds.start - 30 * 60000) / 2) : null;
+    const midpoint = valid && !breaks.length && !props.confirmBreakRecord ? new Date(bounds.start + (bounds.end - bounds.start - 30 * 60000) / 2) : null;
     const end = midpoint ? new Date(midpoint.getTime() + 30 * 60000) : null;
-    const time = (value: Date | null) => value ? `${String(value.getHours()).padStart(2, "0")}:${String(value.getMinutes()).padStart(2, "0")}` : "";
+    const time = (value: Date | null) => value ? workTime(value, draft.timeZone) : "";
     onChange({ ...draft, breaks: [...breaks, {
       id: Math.max(0, ...breaks.map(entry => entry.id)) + 1,
-      start: time(midpoint), end: time(end), nextDay: midpoint ? midpoint.getDate() !== new Date(`${draft.date}T12:00:00`).getDate() : false,
+      start: time(midpoint), end: time(end), kind: "meal", nextDay: midpoint ? workDate(midpoint.getTime(), draft.timeZone) !== draft.date : false,
     }] });
   }
 
@@ -73,9 +75,9 @@ export function TimeCardEditor(props: Props) {
           <div className="ts-card-section-content">
             <h3 id="ts-card-worked-title">Worked ({duration(preview.workedMinutes)})</h3>
             <div className="ts-card-clock-fields">
-              <label>Clocked in<input type="time" required value={draft.start} onInput={event => onChange({ ...draft, start: event.currentTarget.value })} /></label>
+              <label>Clocked in<input type="time" step={0.001} required value={draft.start} onInput={event => onChange({ ...draft, start: event.currentTarget.value })} /></label>
               <span aria-hidden="true">–</span>
-              <label>Clocked out<input type="time" required value={draft.end} onInput={event => onChange({ ...draft, end: event.currentTarget.value })} /></label>
+              <label>Clocked out<input type="time" step={0.001} required value={draft.end} onInput={event => onChange({ ...draft, end: event.currentTarget.value })} /></label>
             </div>
             <label className="ts-card-overnight"><input type="checkbox" checked={draft.nextDay} onChange={event => onChange({ ...draft, nextDay: event.target.checked })} />Clock out the next day</label>
           </div>
@@ -90,10 +92,12 @@ export function TimeCardEditor(props: Props) {
             <h4>Meal breaks ({Math.round(preview.breakMinutes)} min)</h4>
             <div className="ts-card-break-list">{breaks.map((entry, index) => <div className="ts-card-break-entry" key={entry.id}>
               <label>Break type<select value={entry.kind ?? "meal"} onChange={event => updateBreak(entry.id, { kind: event.target.value === "rest" ? "rest" : "meal" })}><option value="meal">Unpaid meal</option><option value="rest">Paid rest</option></select></label>
-              <div className="ts-card-break-times"><label><span className="sr-only">Break {index + 1} start</span><input type="time" required value={entry.start} onInput={event => updateBreak(entry.id, { start: event.currentTarget.value })} /></label><span aria-hidden="true">–</span><label><span className="sr-only">Break {index + 1} end</span><input type="time" required value={entry.end} onInput={event => updateBreak(entry.id, { end: event.currentTarget.value })} /></label><button type="button" className="ts-card-remove-break" aria-label={`Remove break ${index + 1}`} onClick={() => onChange({ ...draft, breaks: breaks.filter(value => value.id !== entry.id) })}>×</button></div>
+              <div className="ts-card-break-times"><label><span className="sr-only">Break {index + 1} start</span><input type="time" step={0.001} required value={entry.start} onInput={event => updateBreak(entry.id, { start: event.currentTarget.value })} /></label><span aria-hidden="true">–</span><label><span className="sr-only">Break {index + 1} end</span><input type="time" step={0.001} required value={entry.end} onInput={event => updateBreak(entry.id, { end: event.currentTarget.value })} /></label><button type="button" className="ts-card-remove-break" aria-label={`Remove break ${index + 1}`} onClick={() => onChange({ ...draft, breaks: breaks.filter(value => value.id !== entry.id) })}>×</button></div>
               {draft.nextDay ? <label className="ts-card-overnight"><input type="checkbox" checked={entry.nextDay} onChange={event => updateBreak(entry.id, { nextDay: event.target.checked })} />Break starts the next day</label> : null}
             </div>)}</div>
             <button className="ts-card-add-break" type="button" onClick={addBreak}><span aria-hidden="true">＋</span>Add a break</button>
+            {props.confirmBreakRecord && <label className="ts-card-overnight"><input type="checkbox" checked={Boolean(draft.confirmBreakRecord)}
+              onChange={event => onChange({ ...draft, confirmBreakRecord: event.target.checked })} required />I’ve confirmed the worked time and breaks on this card</label>}
           </div>
         </section>
         <section className="ts-card-section ts-card-validation" aria-labelledby="ts-card-validation-title">

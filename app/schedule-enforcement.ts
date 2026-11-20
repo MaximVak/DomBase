@@ -28,6 +28,9 @@ export type ScheduleEnforcement = {
   missedBreakReports: boolean;
   unpaidRestOverage: boolean;
   paidRestMinutes: number;
+  breakPremiums: boolean;
+  mealPremiumLimit: number;
+  restPremiumLimit: number;
   lateAttendanceAlerts: boolean;
   assistedClockIn: boolean;
   assistedClockOut: boolean;
@@ -69,6 +72,9 @@ export const defaultScheduleEnforcement: ScheduleEnforcement = {
   missedBreakReports: true,
   unpaidRestOverage: false,
   paidRestMinutes: 10,
+  breakPremiums: true,
+  mealPremiumLimit: 1,
+  restPremiumLimit: 1,
   lateAttendanceAlerts: true,
   assistedClockIn: true,
   assistedClockOut: true,
@@ -84,8 +90,9 @@ export const alertsPermissionsFields = ["notifyScheduleChanges", "employeesOwnSc
 export const eventsTradesFields = ["enableScheduleEvents"] as const;
 export const overtimeFields = ["workWeekStart"] as const;
 export const breakPolicyFields = ["blockEarlyClockIn", "blockEarlyBreakReturn", "breakWaivers", "missedBreakReports", "unpaidRestOverage", "paidRestMinutes"] as const;
+export const breakPremiumFields = ["breakPremiums", "mealPremiumLimit", "restPremiumLimit"] as const;
 export const attendancePolicyFields = ["lateAttendanceAlerts", "assistedClockIn", "assistedClockOut", "clockOutReminders", "clockOutReminderEmail", "clockOutReminderFirst", "clockOutReminderSecond", "clockOutReminderThird"] as const;
-export const breaksComplianceFields = ["mealBreakAfterHours", "mealBreakMinutes", "mandatoryMealBreak", "blockEarlyBreakReturn", "breakWaivers", "missedBreakReports", "unpaidRestOverage", "paidRestMinutes"] as const;
+export const breaksComplianceFields = ["mealBreakAfterHours", "mealBreakMinutes", "mandatoryMealBreak", "blockEarlyBreakReturn", "breakWaivers", "missedBreakReports", "unpaidRestOverage", "paidRestMinutes", ...breakPremiumFields] as const;
 export const messagesSettingsFields = ["enableTeamMessaging"] as const;
 export const scheduleEnforcementFields = ["workWeekStart", "minRestHours", "availabilityReviewDays", "scheduleStartHour", "scheduleEndHour", "lateMinutes", "earlyClockInMinutes", "blockEarlyClockIn", "requireEarlyClockInExplanation", "requireLateClockInExplanation", "requireClockOutExplanation", "requireUnscheduledExplanation", "noShowAlerts", "noShowMinutes", "automaticClockOut", "automaticClockOutMinutes", ...attendancePolicyFields] as const;
 
@@ -129,6 +136,10 @@ export function normalizeScheduleEnforcement(value: unknown): ScheduleEnforcemen
   for (const key of Object.keys(result) as (keyof ScheduleEnforcement)[]) {
     if (typeof result[key] === "boolean") {
       if (typeof input[key] === "boolean") Object.assign(result, { [key]: input[key] });
+      continue;
+    }
+    if (key === "mealPremiumLimit" || key === "restPremiumLimit") {
+      if (input[key] === 1 || input[key] === 2) result[key] = input[key];
       continue;
     }
     const maximum = key === "workWeekStart" ? 6 : key === "minRestHours" ? 24 : key === "availabilityReviewDays" ? 365

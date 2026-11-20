@@ -162,6 +162,13 @@
       "when": 1795136637541,
       "tag": "0022_assisted_clock_and_attendance",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1795139699775,
+      "tag": "0023_break_premium_settings",
+      "breakpoints": true
     }
   ]
 }

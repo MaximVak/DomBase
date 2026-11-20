@@ -1,7 +1,7 @@
 import type { FormEvent, ReactNode } from "react";
-import type { ScheduleEnforcement } from "./schedule-enforcement";
+import type { breakPremiumFields, ScheduleEnforcement } from "./schedule-enforcement";
 
-type Controls = Pick<ScheduleEnforcement, "paidRestMinutes" | "unpaidRestOverage" | "missedBreakReports" | "breakWaivers" | "blockEarlyBreakReturn">;
+type Controls = Pick<ScheduleEnforcement, "paidRestMinutes" | "unpaidRestOverage" | "missedBreakReports" | "breakWaivers" | "blockEarlyBreakReturn" | typeof breakPremiumFields[number]>;
 
 const unavailable = "Not available yet";
 
@@ -76,6 +76,21 @@ export function BreaksCompliancePanel({ afterHours, minutes, mandatory, controls
           <BreakOption label="Prevent early return from breaks" checked={controls.blockEarlyBreakReturn} onToggle={blockEarlyBreakReturn => onChange({ blockEarlyBreakReturn })}
             description="Wait until the break is complete. Employees who already resumed work can record the actual return." />
 
+        </div>
+      </section>
+      <section className="breaks-section" aria-labelledby="break-premiums-title">
+        <h4 id="break-premiums-title">Missed-break premiums</h4>
+        <BreakOption label="Calculate missed-break premiums in Timesheets" checked={controls.breakPremiums} onToggle={breakPremiums => onChange({ breakPremiums })}
+          description="The California default adds one hour of pay per workday with a missed meal and one per workday with a missed rest break. Premium hours appear separately from time worked." />
+        <div className="enforcement-basics">
+          {([["mealPremiumLimit", "Meal premium per workday"], ["restPremiumLimit", "Rest premium per workday"]] as const).map(([field, label]) => (
+            <label key={field} className="enforcement-field-row"><span>{label}</span>
+              <select disabled={!controls.breakPremiums} value={controls[field]} onChange={event => onChange({ [field]: Number(event.target.value) })}>
+                <option value={1}>One hour per workday</option>
+                <option value={2}>One hour per missed break, up to two</option>
+              </select>
+            </label>
+          ))}
         </div>
       </section>
       {message ? <p className="enforcement-save-message" role="status">{message}</p> : null}

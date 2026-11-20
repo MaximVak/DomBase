@@ -152,7 +152,7 @@ test("summary aggregates employee totals, preserves payroll IDs, and distinguish
   const staff = [{ ...employees[0], name: "Alex Van Peshkov", payrollId: "007", legalFirstName: "Alexander", legalMiddleName: "V", legalLastName: "Peshkov" }, { id: 2, name: "Other Member", wage: "", role: "Sales", active: true }];
   const cards = buildTimeCards({ ...base, employees: staff, events: [...eventsFor("2026-08-03", "09:00", "17:00", 30), ...eventsFor("2026-08-04", "09:00", "17:00", 30, 10), ...eventsFor("2026-08-04", "09:00", "17:00", 30, 20).map(event => ({ ...event, employeeId: 2 }))] });
   const rows = summaryRows(staff, cards);
-  assert.equal(summaryColumns.length, 28);
+  assert.equal(summaryColumns.length, 31);
   assert.equal(defaultSummaryColumns.length, 9);
   assert.equal(rows[0].values.first, "Alex");
   assert.equal(rows[0].values.last, "Van Peshkov");
@@ -390,4 +390,79 @@ test("automatic clock-out leaves unfinished breaks for review without assuming u
   const [atLimit] = buildTimeCards({ ...base, events: [start, meal, shifted] });
   assert.ok(atLimit.issues.includes("Confirm unfinished break"));
   assert.ok(!atLimit.issues.includes("Missing or noncompliant meal"));
+});
+
+const statutoryPremiums = { mealLimit: 1, restLimit: 1, companyWide: true };
+const confirmedEvents = draft => timeCardEvents({
+  employeeId: 1, date: "2026-08-03", start: "09:00", end: "17:00", breakMinutes: 0, role: "Sales",
+  note: "", nextDay: false, eventIds: [], timeZone: "America/Los_Angeles", confirmBreakRecord: true, ...draft,
+}, draft?.id ?? 1);
+
+test("missed meals and rest breaks add separate paid hours once per workday and respect the optional company limits", () => {
+  const events = confirmedEvents({ end: "20:30" });
+  const input = { ...base, events, timeZone: "America/Los_Angeles", breakPremiumPolicy: statutoryPremiums };
+  const [card] = buildTimeCards(input);
+  assert.deepEqual([card.metrics.mealPremium, card.metrics.restPremium, card.metrics.premiumPay], [1, 1, 40]);
+  assert.deepEqual([card.metrics.actual, card.metrics.regular, card.metrics.ot, card.metrics.doubleOt, card.metrics.paid], [11.5, 8, 3.5, 0, 13.5]);
+  assert.equal(card.metrics.wages, 305);
+  const [company] = buildTimeCards({ ...input, breakPremiumPolicy: { ...statutoryPremiums, restLimit: 2 } });
+  assert.deepEqual([company.metrics.mealPremium, company.metrics.restPremium, company.metrics.premiumPay, company.metrics.paid], [1, 2, 60, 14.5]);
+  const [disabled] = buildTimeCards({ ...input, breakPremiumPolicy: undefined });
+  assert.equal(disabled.metrics.paid, 11.5);
+  assert.equal(disabled.metrics.premiumPay, 0);
+});
+
+test("break premiums recalculate from exact saved breaks and honor an eligible recorded waiver", () => {
+  const input = { ...base, breakPremiumPolicy: statutoryPremiums, timeZone: "America/Los_Angeles" };
+  const rests = [{ id: 1, start: "10:30", end: "10:40", kind: "rest", nextDay: false }];
+  const events = confirmedEvents({ end: "14:45", breaks: rests });
+  const [missing] = buildTimeCards({ ...input, events });
+  assert.deepEqual([missing.metrics.mealPremium, missing.metrics.restPremium, missing.metrics.restBreaks], [1, 0, 1 / 6]);
+  const waived = events.map(event => event.type === "out" ? { ...event, clockDetails: { reports: [{ kind: "meal", slot: 1, outcome: "waived" }] } } : event);
+  assert.equal(buildTimeCards({ ...input, events: waived })[0].metrics.mealPremium, 0);
+  const delayed = confirmedEvents({ end: "15:45", breaks: [...rests, { id: 2, start: "14:00:00.500", end: "14:30:00.500", nextDay: false, kind: "meal" }] });
+  const corrected = confirmedEvents({ end: "15:45", breaks: [...rests, { id: 2, start: "14:00", end: "14:30", nextDay: false, kind: "meal" }] });
+  assert.equal(delayed[3].at, "2026-08-03T21:00:00.500Z");
+  assert.equal(buildTimeCards({ ...input, events: delayed, rounding: 15 })[0].metrics.mealPremium, 1);
+  assert.equal(buildTimeCards({ ...input, events: corrected, rounding: 15 })[0].metrics.mealPremium, 0);
+  assert.equal(buildTimeCards({ ...input, events: [...waived.slice(0, -1), { ...waived.at(-1), at: "2026-08-03T22:01:00.000Z" }] })[0].metrics.mealPremium, 1);
+});
+
+test("premium estimates use recorded whole-workweek wages across roles and protect incomplete and salaried records", () => {
+  const wageRates = [
+    { id: 1, roleId: 1, role: "Sales", basis: "hourly", amountCents: 2000, effectiveDate: "2026-01-01" },
+    { id: 2, roleId: 2, role: "Stock", basis: "hourly", amountCents: 3000, effectiveDate: "2026-01-01" },
+  ];
+  const events = [...confirmedEvents({ end: "13:00" }), ...confirmedEvents({ id: 10, start: "14:00", end: "18:00", role: "Stock" }),
+    ...confirmedEvents({ id: 20, date: "2026-08-04", role: "Stock", end: "13:00" })];
+  const input = { ...base, events, employees: [{ ...employees[0], wageRates }], end: "2026-08-03",
+    breakPremiumPolicy: statutoryPremiums, timeZone: "America/Los_Angeles" };
+  const rows = buildTimeCards(input);
+  assert.deepEqual(rows.map(card => [card.metrics.mealPremium, card.metrics.restPremium, card.metrics.premiumPay]), [[0, 0, 0], [1, 1, 53.33]]);
+  assert.equal(totalMetrics(rows).actual, 8);
+  assert.equal(totalMetrics(rows).ot, 0);
+  const truncated = buildTimeCards({ ...input, breakPremiumPolicy: { ...statutoryPremiums, dataPeriod: { start: "2026-08-03", end: "2026-08-03" } } });
+  assert.equal(truncated[1].metrics.premiumPay, null);
+  const scoped = buildTimeCards({ ...input, breakPremiumPolicy: { ...statutoryPremiums, companyWide: false } });
+  assert.equal(totalMetrics(scoped).mealPremium, 0);
+  assert.ok(scoped[1].issues.includes("Review premiums in company-wide Timesheets"));
+  const salary = wageRates.map(rate => ({ ...rate, basis: "annual_salary", amountCents: 8800000, overtimeExempt: true }));
+  const exempt = buildTimeCards({ ...input, employees: [{ ...employees[0], wageRates: salary }] });
+  assert.equal(totalMetrics(exempt).mealPremium, 0);
+  assert.equal(totalMetrics(exempt).restPremium, 0);
+  const nonexempt = buildTimeCards({ ...input, employees: [{ ...employees[0], wageRates: salary.map(rate => ({ ...rate, overtimeExempt: false })) }] });
+  assert.ok(nonexempt[1].issues.includes("Review salaried break premium"));
+});
+
+test("unrecorded break claims and unresolved clock-outs are flagged before a premium estimate is added", () => {
+  const events = confirmedEvents({ end: "17:00" });
+  const input = { ...base, timeZone: "America/Los_Angeles", breakPremiumPolicy: statutoryPremiums };
+  for (const alternative of [
+    { automatic: true }, { assistedStatus: "pending" },
+    { clockDetails: { reports: [{ kind: "meal", slot: 1, outcome: "unrecorded", reason: "Took lunch without using the tablet." }] } },
+  ]) {
+    const [card] = buildTimeCards({ ...input, events: [events[0], { ...events[1], ...alternative }] });
+    assert.ok(card.issues.includes("Confirm time and breaks before calculating premiums"));
+    assert.equal(card.metrics.premiumPay, 0);
+  }
 });

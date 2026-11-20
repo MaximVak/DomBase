@@ -51,7 +51,7 @@ export function requiredBreaks(day: ReturnType<typeof inspectBreaks>, policy: { 
   const secondDeadline = 10 * 60 * minute;
   const fullMeals = meals.filter(meal => meal.duration >= Math.max(30, policy.mealBreakMinutes) * minute);
   const first = fullMeals.findIndex(meal => meal.before <= firstDeadline);
-  const second = fullMeals.some((meal, index) => index > first && first >= 0 && meal.before <= secondDeadline);
+  const second = fullMeals.some((meal, index) => index > 0 && meal.before <= secondDeadline);
   const result: BreakIssue[] = [];
   if (worked > firstDeadline && first < 0) result.push({ kind: "meal", slot: 1, canWaive: canWaive && worked > 5 * 60 * minute && worked <= 6 * 60 * minute && meals.length === 0 });
   if (worked > secondDeadline && !second) result.push({ kind: "meal", slot: 2, canWaive: canWaive && first >= 0 && worked <= 12 * 60 * minute && meals.length === 1 });
