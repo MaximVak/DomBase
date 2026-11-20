@@ -14,6 +14,7 @@ export type ReviewItem = {
   start: string;
   end?: string;
   firstEventId?: number;
+  lockable?: boolean;
   workedMinutes?: number;
   issues: string[];
   status: "needs-review" | "ready" | "approved" | "resolved-no-show";

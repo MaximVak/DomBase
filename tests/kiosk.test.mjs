@@ -230,6 +230,19 @@ test("registered tablets, PIN sessions and action-scoped approvals use isolated 
       eventType: "break", attemptedAt: new Date(conflict.attemptedAt).toISOString(), explanation: conflict.explanation, details: null }]);
     await ok(await adm("offline-review", ownerCookie, { id: entries[0].id }));
     assert.deepEqual(await ok(await adm("offline-review", ownerCookie)), { entries: [] });
+    const queuedIn = await issue();
+    const lockedRange = { targetKey: "period:offline-lock-test", startDate: "2026-01-01", endDate: "2026-12-31",
+      startsAt: new Date(time - 60000).toISOString(), endsAt: new Date(time + 60000).toISOString(), actorAccountId: f.owner.id };
+    await db.insert(schema.timesheetLockEvents).values({ ...lockedRange, action: "lock" });
+    try {
+      const queued = make(queuedIn.replay, "in", "Delayed punch for review", f.roleA.id);
+      assert.deepEqual(await ok(await clock("sync", deviceCookie, queued)), { outcome: "review" });
+      assert.equal(await count(), before + 3);
+      const { entries } = await ok(await adm("offline-review", ownerCookie));
+      assert.ok(entries.some(entry => entry.explanation === queued.explanation));
+    } finally {
+      await db.insert(schema.timesheetLockEvents).values({ ...lockedRange, action: "unlock" });
+    }
   });
   await t.test("California clock controls preserve paid rest and validate a voluntary waiver on the server", async () => {
     const { zonedTimestamp } = await loadServerModule("workforce/time.ts");

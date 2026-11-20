@@ -13,17 +13,23 @@ import { calendarPresetRange, TimesheetsCalendar } from "./timesheets-calendar";
 import type { TimesheetDateRange } from "./timesheets-calendar";
 import { TimesheetsSummary } from "./timesheets-summary";
 import { RecordedTimeCardNotes, TimeCardEditor } from "./time-card-editor";
-import { addDays, buildTimeCards, defaultTimesheetColumns, timesheetColumns, timesheetCsv, timeCardReviews, totalMetrics, validateTimeCard, weekStartFor, workDate, workTime, workTimestamp } from "./timesheets-model";
+import { addDays, buildTimeCards, defaultTimesheetColumns, timesheetColumns, timesheetCsv, timeCardBounds, timeCardReviews, totalMetrics, validateTimeCard, weekStartFor, workDate, workTime, workTimestamp } from "./timesheets-model";
 import type { BreakPremiumPolicy, ColumnId, Rounding, TimeCard, TimeCardDraft, TimeCardEdit, TimesheetAdjustment, TimesheetEmployee, TimesheetEvent, TimesheetPto, TimesheetShift } from "./timesheets-model";
 import type { OvertimePolicy } from "./schedule-enforcement";
 import type { WorkweekScope } from "./timesheets-overtime";
 import { timeCardNotes } from "../workforce/timecard-notes";
 import type { ReviewItem } from "../workforce/timesheet-review-types";
 import { TimesheetReviewPanel } from "./timesheet-review-panel";
+import { timesheetCardKey } from "../workforce/timesheet-lock-types";
+import { reviewBatchLimit } from "../workforce/timesheet-review-types";
+import { LockHistoryEntry, TimesheetLockIcon, useTimesheetLocks } from "./timesheet-locks";
 
 type Props = {
   onPeriodChange?: (period: { start: string; end: string }) => void;
   workspaceRevision?: number;
+  canLockCards?: boolean;
+  canLockOwnCard?: boolean;
+  onLocksSaved?: () => Promise<void>;
   payCalendar?: PayCalendar;
   employees: TimesheetEmployee[]; events: TimesheetEvent[]; shifts: TimesheetShift[]; adjustments: TimesheetAdjustment[]; pto: TimesheetPto[];
   departments: { id: number; name: string; roles: string[] }[]; history: TimeCardEdit[]; today: string; now: number;
@@ -95,6 +101,27 @@ export function TimesheetsPanel(props: Props) {
   const ledgerScrollRef = useRef<HTMLDivElement>(null);
   const totalsScrollRef = useRef<HTMLDivElement>(null);
   const start = period === "day" ? day : range.start, end = period === "day" ? day : range.end;
+  const locks = useTimesheetLocks(props.manager && props.workspaceRevision !== undefined, start, end, props.workspaceRevision, props.onLocksSaved);
+  const periodLocks = locks.data?.active.filter(lock => lock.employeeId === null) ?? [];
+  const lockedKeys = new Set(locks.data?.active.filter(lock => lock.employeeId !== null).map(lock => lock.targetKey));
+  const periodContainsDate = (date: string) => periodLocks.some(lock => lock.startDate <= date && lock.endDate >= date);
+  const periodContainsCard = (card: TimeCard) => periodLocks.some(lock => card.start && card.end
+    ? lock.startsAt < card.end && lock.endsAt > card.start : lock.startDate <= card.date && lock.endDate >= card.date);
+  const lockKeys = new Map(props.events.filter(event => event.type === "in")
+    .map(event => [event.id, timesheetCardKey(event.employeeId, event.id, event.cardId)]));
+  const preliminaryReports = new Set(props.events.filter(event => event.assistedStatus === "pending").map(event => event.id));
+  const lockKey = (card: TimeCard) => lockKeys.get(card.eventIds[0]);
+  const cardIsLocked = (card: TimeCard) => lockedKeys.has(lockKey(card) ?? "") || periodContainsCard(card);
+  const displayedPeriodLocks = periodLocks.filter(lock => lock.startDate <= end && lock.endDate >= start);
+  const lockButtonsDisabled = !locks.data || Boolean(locks.loadError) || locks.saving || end > addDays(start, 30);
+  let addDate = start > props.today ? props.today : start;
+  while (addDate < end && addDate < props.today && periodContainsDate(addDate)) addDate = addDays(addDate, 1);
+  const canAdd = canEdit && !periodContainsDate(addDate);
+  const draftKey = deleteStart ? lockKeys.get(deleteStart.id) : undefined;
+  const draftBounds = draft ? timeCardBounds(draft) : undefined;
+  const draftLocked = Boolean(draft && (lockedKeys.has(draftKey ?? "") || periodContainsDate(draft.date) || periodLocks.some(lock =>
+    draftBounds && Date.parse(lock.startsAt) < draftBounds.end && Date.parse(lock.endsAt) > draftBounds.start)));
+  const lockHistory = locks.data?.history ?? [];
   const onPeriodChange = props.onPeriodChange;
   const showBreakPremiums = Boolean(props.breakPremiumPolicy?.companyWide);
   const needFullWeek = Boolean(props.overtimeScope?.companyWide || showBreakPremiums);
@@ -158,11 +185,33 @@ export function TimesheetsPanel(props: Props) {
   }) : undefined;
   const dayIssues = dayRows.reduce((count, row) => count + row.issues.length, 0);
   function openDayCard(card: TimeCard, button: HTMLButtonElement) {
-    if (canEdit) editCard(card, button);
+    if (canEdit && !cardIsLocked(card)) editCard(card, button);
     else { setInspectingCard(card); openDialog("card", button); }
   }
+  function canToggleCard(card: TimeCard) {
+    return props.canLockCards && (props.canLockOwnCard || card.employeeId !== props.activeEmployeeId) && !!lockKey(card) && !periodContainsCard(card);
+  }
+  function canLockCard(card: TimeCard) {
+    return canToggleCard(card) && !!card.start && !!card.end && !cardIsLocked(card) && !card.eventIds.some(id => preliminaryReports.has(id));
+  }
+  function lockCardControl(card: TimeCard) {
+    const locked = cardIsLocked(card);
+    const key = lockKey(card);
+    const name = memberById.get(card.employeeId)?.name ?? "team member";
+    if (key && (canLockCard(card) || locked && canToggleCard(card))) {
+      const label = locked ? "Unlock" : "Lock";
+      return <button type="button" className="ts-lock-link" disabled={lockButtonsDisabled} aria-label={`${label} ${name} time card on ${dateLabel(card.date)}`}
+        onClick={() => void locks.save(locked ? "unlock" : "lock", [key])}><TimesheetLockIcon />{locked ? "Unlock" : "Lock"}</button>;
+    }
+    return locked ? <span className="ts-lock-label"><TimesheetLockIcon />Locked</span> : null;
+  }
+  function lockGroupControl(name: string, groupCards: TimeCard[]) {
+    const keys = [...new Set(groupCards.filter(canLockCard).flatMap(card => lockKey(card) ?? []))];
+    return keys.length ? <button type="button" className="ts-lock-link" disabled={lockButtonsDisabled || keys.length > reviewBatchLimit}
+      aria-label={`Lock all time cards for ${name}`} onClick={() => void locks.save("lock", keys)}>Lock All</button> : null;
+  }
   function openReviewItem(item: ReviewItem, button: HTMLButtonElement) {
-    if (item.kind === "no-show" && canEdit) {
+    if (item.kind === "no-show" && canAdd && !periodContainsDate(item.date)) {
       newCard(item.employeeId, button);
       setDraft(current => current ? { ...current, date: item.date, role: item.role || current.role } : current);
       return true;
@@ -211,12 +260,13 @@ export function TimesheetsPanel(props: Props) {
   function openDialog(value: typeof dialog, button: HTMLButtonElement) { triggerRef.current = button; setMenu(null); setDialog(value); }
   function closeDialog() { setDraft(null); setDialog(null); setConfirmDelete(false); triggerRef.current?.focus(); }
   function newCard(employeeId?: number, button?: HTMLButtonElement) {
-    if (!canEdit) return;
+    if (!canAdd) return;
     if (button) triggerRef.current = button;
-    setDraft({ employeeId: employeeId ?? 0, date: start > props.today ? props.today : start, start: "", end: "", nextDay: false, breakMinutes: 0, breaks: [], role: members.find(member => member.id === employeeId)?.role ?? "", note: "", eventIds: [], timeZone: props.timeZone }); setFormError("");
+    setDraft({ employeeId: employeeId ?? 0, date: addDate, start: "", end: "", nextDay: false, breakMinutes: 0, breaks: [], role: members.find(member => member.id === employeeId)?.role ?? "", note: "", eventIds: [], timeZone: props.timeZone }); setFormError("");
   }
   function editCard(card: TimeCard, button: HTMLButtonElement) {
     if (!canEdit) return;
+    if (cardIsLocked(card)) { setInspectingCard(card); openDialog("card", button); return; }
     triggerRef.current = button;
     const original = props.events.filter(event => card.eventIds.includes(event.id));
     const startEvent = original.find(event => event.type === "in"), endEvent = original.find(event => event.type === "out");
@@ -234,7 +284,7 @@ export function TimesheetsPanel(props: Props) {
     setFormError("");
   }
   async function saveCard(event: FormEvent) {
-    event.preventDefault(); if (!draft || !canEdit || cardSaving.current) return;
+    event.preventDefault(); if (!draft || !canEdit || draftLocked || cardSaving.current) return;
     if (props.breakPremiumPolicy && !draft.confirmBreakRecord) {
       setFormError("Confirm the worked time and breaks before saving.");
       return;
@@ -250,7 +300,7 @@ export function TimesheetsPanel(props: Props) {
     } finally { cardSaving.current = false; setCardPending(false); }
   }
   async function deleteCard() {
-    if (!draft || !deleteStart || !canDeleteCard || !props.onDeleteCard || cardSaving.current) return;
+    if (!draft || !deleteStart || !canDeleteCard || draftLocked || !props.onDeleteCard || cardSaving.current) return;
     cardSaving.current = true;
     setCardPending(true);
     try {
@@ -338,13 +388,24 @@ export function TimesheetsPanel(props: Props) {
       {period === "day" ? props.manager && !managedReview ? <button type="button" className="ts-day-resolve" disabled={!dayIssues} onClick={event => resolveDayIssue(event.currentTarget)}><svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M12 3 1 21h22Z" fill="currentColor" /><path d="M12 9v5m0 3v1" stroke="#fff" strokeWidth="2" /></svg>{dayIssues ? `Resolve ${dayIssues} ${dayIssues === 1 ? "issue" : "issues"}` : "No issues"}</button> : null : <>
       <div className="ts-toolbar-actions"><div className="ts-rounding">{props.roundingControl}</div><div className="ts-menu-anchor ts-tools-anchor"><button className="ts-menu-trigger" type="button" aria-expanded={menu === "tools"} onClick={event => toggleMenu("tools", event.currentTarget)}>Tools<Chevron /></button>
         {menu === "tools" ? <div className="ts-popover ts-tools-popover"><details className="ts-print-select"><summary>Print timesheets<Chevron /></summary><button type="button" disabled={!canExport} onClick={() => print("detail")}>Detailed time cards</button><button type="button" disabled={!canExport} onClick={() => print("summary")}>Summary by team member</button></details><button type="button" disabled={!canExport} onClick={exportCards}>Download time cards</button>{props.manager ? <button type="button" onClick={event => openDialog("history", event.currentTarget)}>Time card edit history</button> : null}{props.manager ? <button type="button" disabled title="Email delivery is not connected">Email time card edit history<small>Not available yet</small></button> : null}<div className="ts-menu-divider" /><button type="button" disabled title="Tip Manager is not available in this prototype">Enable Tip Manager<small>Not available yet</small></button><div className="ts-menu-divider" /><button type="button" onClick={event => openDialog("help", event.currentTarget)}>Get to know Timesheets</button>{props.manager ? <button type="button" onClick={() => { setMenu(null); props.onSettings(); }}>Settings</button> : null}</div> : null}
-      </div>{canEdit ? <button className="ts-add-button" type="button" onClick={event => newCard(undefined, event.currentTarget)}>Add time card</button> : null}<button type="button" className="ts-primary" onClick={event => { triggerRef.current = event.currentTarget; setMenu(null); setSummary(true); props.onSummaryChange?.(true); }}>View summary</button></div></>}
+      </div>{canAdd ? <button className="ts-add-button" type="button" onClick={event => newCard(undefined, event.currentTarget)}>Add time card</button> : null}<button type="button" className="ts-primary" onClick={event => { triggerRef.current = event.currentTarget; setMenu(null); setSummary(true); props.onSummaryChange?.(true); }}>View summary</button></div></>}
 
     </div>
+    {(displayedPeriodLocks.length || period === "period" && locks.data?.canLockPeriod || locks.loadError || locks.feedback) ? <div className="ts-lock-bar">
+      {displayedPeriodLocks.map(lock => <div key={lock.id} className="ts-lock-group">
+        <span className="ts-lock-label"><TimesheetLockIcon />Pay period locked · {dateLabel(lock.startDate, true)} – {dateLabel(lock.endDate, true)}</span>
+        {props.canLockCards && props.overtimeScope?.companyWide ? <button type="button" className="ts-lock-link" disabled={locks.saving || Boolean(locks.loadError)}
+          onClick={() => void locks.save("unlock", [], { start: lock.startDate, end: lock.endDate })}>Unlock pay period</button> : null}
+      </div>)}
+      {period === "period" && locks.data?.canLockPeriod && !displayedPeriodLocks.length ? <button type="button" className="secondary-action" disabled={lockButtonsDisabled}
+        onClick={() => { if (window.confirm("Lock this company pay period? Unlock it before adding, changing, or deleting time.")) void locks.save("lock", []); }}>Lock pay period</button> : null}
+      {locks.loadError ? <p role="alert">{locks.loadError} <button type="button" className="ts-lock-link" onClick={locks.retry}>Retry</button></p> : null}
+      {locks.feedback ? <p role={locks.feedback.error ? "alert" : "status"}>{locks.feedback.text}</p> : null}
+    </div> : null}
     {managedReview && props.workspaceRevision !== undefined ? <TimesheetReviewPanel key={`${start}:${end}`} start={start} end={end}
       timeZone={props.timeZone} daily={period === "day"} revision={props.workspaceRevision} canManage={canEdit} search={search}
       grouping={groupBy} roles={roles} onOpenCard={openReviewItem} /> : null}
-    {period === "day" ? <TimesheetsDay rows={dayRows} groups={dayGroups} date={day} now={props.now} manager={canEdit} timeZone={props.timeZone} onOpenCard={openDayCard} onAdd={newCard} /> : <>
+    {period === "day" ? <TimesheetsDay rows={dayRows} groups={dayGroups} date={day} now={props.now} manager={canAdd} timeZone={props.timeZone} onOpenCard={openDayCard} onAdd={newCard} lockControl={lockCardControl} groupLockControl={lockGroupControl} /> : <>
     {!managedReview ? <>
     <div className="ts-review-bar"><button type="button" aria-expanded={reviewExpanded} aria-controls={reviewId} onClick={() => setReviewExpanded(value => !value)}><Chevron up={reviewExpanded} />Needs review<span className={needsReview ? "ts-review-count" : "ts-review-count is-clear"}>{needsReview}</span></button>{roles.length || search ? <span className="ts-filter-caption">Filtered results</span> : null}{props.rounding !== "actual" ? <span className="ts-rounding-caption">{props.rounding}-minute clock preview</span> : null}</div>
     <div className="ts-review-cards" id={reviewId} hidden={!reviewExpanded} role="region" aria-label="Time cards needing review">{reviews.map(review => {
@@ -354,7 +415,7 @@ export function TimesheetsPanel(props: Props) {
     })}{!reviews.length ? <p className="ts-review-clear">No time cards need review{roles.length || search ? " for these filters" : ""}.</p> : null}</div></> : null}
     <div className="ts-table-scroll" tabIndex={0} role="region" aria-label="Time card ledger" ref={ledgerScrollRef} onScroll={event => syncLedgerScroll(event.currentTarget, totalsScrollRef.current)}><table className="ts-table ts-period-ledger" style={{ minWidth: ledgerMinWidth }}>{ledgerColumns}<thead><tr><th scope="col" aria-sort={headerSort?.column === "date" ? headerSort.direction === 1 ? "ascending" : "descending" : "none"}>{columnHeader("date", groupBy === "member" ? "Date" : "Team member / Date")}</th>{activeColumns.map(id => <th key={id} scope="col" aria-sort={headerSort?.column === id ? headerSort.direction === 1 ? "ascending" : "descending" : "none"}>{columnHeader(id, timesheetColumns.find(column => column.id === id)?.label ?? id)}</th>)}<th scope="col" className="ts-actions-column"><span className="sr-only">Actions</span></th></tr></thead>{orderedGroups.map(([key, group]) => {
       const groupTotals = totalMetrics(group.cards), isCollapsed = collapsed.includes(key);
-      return <tbody className="ts-member-group" key={key}><tr className="ts-group-row"><th scope="row"><button className="ts-group-toggle" type="button" aria-expanded={!isCollapsed} onClick={() => setCollapsed(current => current.includes(key) ? current.filter(value => value !== key) : [...current, key])}><Chevron up={!isCollapsed} />{group.employee ? <span className="ts-avatar">{initials(group.name)}</span> : null}<strong>{group.name}</strong></button></th>{activeColumns.map((id, index) => <td key={id} data-column={id}>{id === "card" ? <strong>{cardCount(group.cards)} {cardCount(group.cards) === 1 ? "Time Card" : "Time Cards"}</strong> : id === "issues" ? null : id === "role" || id === "wage" ? index === 0 && !columns.includes("card") ? `${group.cards.length} rows` : null : <strong className={["ot", "doubleOt"].includes(id) && (groupTotals[id] ?? 0) > 0 ? "ts-overtime" : undefined}>{metricLabel(id, groupTotals[id])}</strong>}</td>)}<td>{canEdit && group.employee ? <button type="button" className="ts-more-button" aria-label={`Add time card for ${group.name}`} title="Add time card" onClick={event => newCard(group.employee?.id, event.currentTarget)}>⋮</button> : null}</td></tr>{!isCollapsed ? <>{sortCards(group.cards).map(card => <tr className="ts-card-row" key={card.id}><td>{groupBy === "member" ? dateLabel(card.date) : <><strong className="ts-cell-member">{memberById.get(card.employeeId)?.name}</strong><span>{dateLabel(card.date)}</span></>}</td>{activeColumns.map(id => <td className={["role", "card", "issues"].includes(id) ? "ts-text-cell" : "ts-numeric-cell"} key={id}>{renderCell(card, id)}</td>)}<td>{canEdit ? <button className="ts-row-edit" type="button" onClick={event => editCard(card, event.currentTarget)} aria-label={`Edit ${memberById.get(card.employeeId)?.name} time card on ${dateLabel(card.date)}`}>Edit</button> : null}</td></tr>)}{!group.cards.length ? <tr className="ts-empty-member"><td colSpan={activeColumns.length + 2}>No hours recorded in this period.</td></tr> : null}{canEdit && group.employee ? <tr className="ts-add-row"><td colSpan={activeColumns.length + 2}><button type="button" onClick={event => newCard(group.employee?.id, event.currentTarget)}><span aria-hidden="true">＋</span>Add time card</button></td></tr> : null}</> : null}</tbody>;
+      return <tbody className="ts-member-group" key={key}><tr className="ts-group-row"><th scope="row"><button className="ts-group-toggle" type="button" aria-expanded={!isCollapsed} onClick={() => setCollapsed(current => current.includes(key) ? current.filter(value => value !== key) : [...current, key])}><Chevron up={!isCollapsed} />{group.employee ? <span className="ts-avatar">{initials(group.name)}</span> : null}<strong>{group.name}</strong></button>{lockGroupControl(group.name, group.cards)}</th>{activeColumns.map((id, index) => <td key={id} data-column={id}>{id === "card" ? <strong>{cardCount(group.cards)} {cardCount(group.cards) === 1 ? "Time Card" : "Time Cards"}</strong> : id === "issues" ? null : id === "role" || id === "wage" ? index === 0 && !columns.includes("card") ? `${group.cards.length} rows` : null : <strong className={["ot", "doubleOt"].includes(id) && (groupTotals[id] ?? 0) > 0 ? "ts-overtime" : undefined}>{metricLabel(id, groupTotals[id])}</strong>}</td>)}<td>{canAdd && group.employee ? <button type="button" className="ts-more-button" aria-label={`Add time card for ${group.name}`} title="Add time card" onClick={event => newCard(group.employee?.id, event.currentTarget)}>⋮</button> : null}</td></tr>{!isCollapsed ? <>{sortCards(group.cards).map(card => <tr className="ts-card-row" key={card.id}><td>{groupBy === "member" ? dateLabel(card.date) : <><strong className="ts-cell-member">{memberById.get(card.employeeId)?.name}</strong><span>{dateLabel(card.date)}</span></>}{lockCardControl(card)}</td>{activeColumns.map(id => <td className={["role", "card", "issues"].includes(id) ? "ts-text-cell" : "ts-numeric-cell"} key={id}>{renderCell(card, id)}</td>)}<td>{canEdit && !cardIsLocked(card) ? <button className="ts-row-edit" type="button" onClick={event => editCard(card, event.currentTarget)} aria-label={`Edit ${memberById.get(card.employeeId)?.name} time card on ${dateLabel(card.date)}`}>Edit</button> : null}</td></tr>)}{!group.cards.length ? <tr className="ts-empty-member"><td colSpan={activeColumns.length + 2}>No hours recorded in this period.</td></tr> : null}{canAdd && group.employee ? <tr className="ts-add-row"><td colSpan={activeColumns.length + 2}><button type="button" onClick={event => newCard(group.employee?.id, event.currentTarget)}><span aria-hidden="true">＋</span>Add time card</button></td></tr> : null}</> : null}</tbody>;
     })}{props.manager && props.onAddTeamMember ? <tbody className="ts-add-member-row"><tr><td colSpan={activeColumns.length + 2}><button type="button" onClick={props.onAddTeamMember}><span aria-hidden="true">＋</span>Add team member</button></td></tr></tbody> : null}</table>{!orderedGroups.length ? <div className="ts-empty-state"><CalendarIcon /><h3>No time cards in this period</h3><p>{roles.length || search ? "Try clearing the filters or choosing another date range." : "Choose another period, show team members without hours, or add a time card."}</p><button type="button" className="ts-text-button" onClick={() => { setShowEmpty(true); setReviewExpanded(false); setRoles([]); setSearch(""); }}>Show all team members</button></div> : null}</div></>}
 
     <table className="ts-print-summary"><caption>Timesheet summary · {dateLabel(start, true)} – {dateLabel(end, true)}</caption><thead><tr><th>Team member</th>{printMetrics.map(id => <th key={id}>{timesheetColumns.find(column => column.id === id)?.label}</th>)}</tr></thead><tbody>{members.filter(member => visibleCards.some(card => card.employeeId === member.id)).map(member => { const total = totalMetrics(visibleCards.filter(card => card.employeeId === member.id)); return <tr key={member.id}><th>{member.name}</th>{printMetrics.map(id => <td key={id}>{metricLabel(id, total[id])}</td>)}</tr>; })}</tbody></table>
@@ -377,22 +438,30 @@ export function TimesheetsPanel(props: Props) {
         locationName={props.locationName ?? "DomBase"}
         today={props.today}
         now={props.now}
-        error={formError}
+        error={draftLocked ? "This time card or pay period is locked. Unlock it before saving." : formError}
         pending={cardPending}
+        locked={draftLocked}
+        lockHistory={draftKey ? lockHistory.filter(entry => entry.targetKey === draftKey) : []}
         notes={timeCardNotes(draftEvents)}
         confirmBreakRecord={Boolean(props.breakPremiumPolicy)}
         history={draft.eventIds.length ? props.history.filter(edit => edit.employeeId === draft.employeeId && (edit.cardId !== undefined ? edit.cardId === draft.cardId : edit.date === draft.date)) : []}
         onChange={value => { setDraft(value); setFormError(""); }}
         onSubmit={saveCard}
         onClose={closeDialog}
-        onDelete={canDeleteCard ? () => { setFormError(""); setConfirmDelete(true); } : undefined}
+        onDelete={canDeleteCard && !draftLocked ? () => { setFormError(""); setConfirmDelete(true); } : undefined}
         onBreakSettings={() => { closeDialog(); (props.onBreakSettings ?? props.onSettings)(); }}
-        onAdjust={draft.eventIds.length ? () => {
+        onAdjust={draft.eventIds.length && !draftLocked ? () => {
           const hours = cards.filter(card => card.employeeId === draft.employeeId && card.date === draft.date).reduce((total, card) => total + (card.metrics.actual ?? 0), 0);
           props.onAdjust(draft.employeeId, draft.date, hours);
           closeDialog();
         } : undefined}
-      /> : dialog === "card" && inspectingCard ? <div className="ts-help"><h3>{dateLabel(inspectingCard.date)} · {inspectingCard.role}</h3><p>{plainCell(inspectingCard, "card")}</p><div className="ts-summary-metrics"><div><span>Actual hours</span><strong>{metricLabel("actual", inspectingCard.metrics.actual)}</strong></div><div><span>Meal breaks</span><strong>{metricLabel("breaks", inspectingCard.metrics.breaks)}</strong></div><div><span>Paid hours</span><strong>{metricLabel("paid", inspectingCard.metrics.paid)}</strong></div></div>{inspectingCard.issues.map(issue => <p key={issue}>{issue}</p>)}{inspectingCard.notes.map((note, index) => <p key={index}>{note}</p>)}<div className="ts-modal-actions"><button type="button" className="ts-primary" onClick={closeDialog}>Done</button></div></div> : dialog === "history" ? <><p className="ts-form-note">Saved additions and edits in this period. Email delivery is not connected; download the history to share it.</p><div className="ts-edit-history">{[...history].reverse().map(edit => <article key={edit.id}><strong>{memberById.get(edit.employeeId)?.name} · {dateLabel(edit.date)}</strong><small>{new Date(edit.at).toLocaleString()} · {edit.actor}</small><p>{edit.before || "New time card"} → {edit.after}</p>{edit.notes?.length ? <RecordedTimeCardNotes notes={edit.notes} /> : null}</article>)}{!history.length ? <p>No time card edits recorded in this period.</p> : null}</div><div className="ts-modal-actions"><button type="button" disabled={!canExport || !history.length} onClick={() => download(`time-card-history-${start}-${end}.csv`, [["Team member", "Date", "Edited at", "Edited by", "Before", "After"], ...history.map(edit => [memberById.get(edit.employeeId)?.name ?? "", edit.date, edit.at, edit.actor, edit.before, edit.after])])}>Download edit history</button><button type="button" className="ts-primary" onClick={closeDialog}>Done</button></div></> : <div className="ts-help"><p>Review hours by day or select your pay-period dates. Expand a team member to see clock times, breaks, issues, and paid time off. Filters select roles; View changes the team search, grouping, and columns.</p><p>Clock rounding previews clock-ins and clock-outs at the saved 5-, 10-, or 15-minute increment. Pay and break checks use the exact times.</p><p>Overtime estimates use the saved rules and the entire workweek. Multi-rate overtime uses a workweek weighted rate from recorded wages. Salaried estimates allocate wages to the recorded time cards. Scheduled hours show the full scheduled interval.</p><p>Qualified OT, tips, special pay, and FFCRA columns display a dash because these amounts are not recorded. Estimates do not include payroll deductions or special pay rules.</p><p>To fix a missing clock-out or break, open the card and update its times. Employee accounts can view only their own cards. Tools provides printing, CSV downloads, edit history, and time-clock settings.</p><div className="ts-modal-actions"><button type="button" className="ts-primary" onClick={closeDialog}>Got it</button></div></div>}
+      /> : dialog === "card" && inspectingCard ? <div className="ts-help"><h3>{dateLabel(inspectingCard.date)} · {inspectingCard.role}</h3><p>{plainCell(inspectingCard, "card")}</p><div className="ts-summary-metrics"><div><span>Actual hours</span><strong>{metricLabel("actual", inspectingCard.metrics.actual)}</strong></div><div><span>Meal breaks</span><strong>{metricLabel("breaks", inspectingCard.metrics.breaks)}</strong></div><div><span>Paid hours</span><strong>{metricLabel("paid", inspectingCard.metrics.paid)}</strong></div></div>{inspectingCard.issues.map(issue => <p key={issue}>{issue}</p>)}{inspectingCard.notes.map((note, index) => <p key={index}>{note}</p>)}
+        {cardIsLocked(inspectingCard) ? <p>{periodContainsCard(inspectingCard) ? "This pay period is locked. Unlock the pay period to edit this card." : "This time card is locked. Unlock it to edit."}</p> : null}
+        {lockHistory.some(entry => entry.targetKey === lockKey(inspectingCard)) ? <details><summary>Lock history</summary>{lockHistory.filter(entry => entry.targetKey === lockKey(inspectingCard)).map(entry => <article key={entry.id}><LockHistoryEntry entry={entry} /></article>)}</details> : null}
+        <div className="ts-modal-actions"><button type="button" className="ts-primary" onClick={closeDialog}>Done</button></div></div> : dialog === "history" ? <><p className="ts-form-note">Saved additions, edits, locks and unlocks in this period.</p><div className="ts-edit-history">{lockHistory.map(entry => <article key={`lock:${entry.id}`}>
+        <strong>{entry.employeeId === null ? "Company pay period" : memberById.get(entry.employeeId)?.name ?? "Team member"} · {dateLabel(entry.startDate)}</strong><LockHistoryEntry entry={entry} />
+      </article>)}{[...history].reverse().map(edit => <article key={edit.id}><strong>{memberById.get(edit.employeeId)?.name} · {dateLabel(edit.date)}</strong><small>{new Date(edit.at).toLocaleString()} · {edit.actor}</small><p>{edit.before || "New time card"} → {edit.after}</p>{edit.notes?.length ? <RecordedTimeCardNotes notes={edit.notes} /> : null}</article>)}{!history.length && !lockHistory.length ? <p>No time card edits recorded in this period.</p> : null}</div><div className="ts-modal-actions"><button type="button" disabled={!canExport || !history.length && !lockHistory.length} onClick={() => download(`time-card-history-${start}-${end}.csv`, [["Team member", "Date", "Edited at", "Edited by", "Before", "After"], ...history.map(edit => [memberById.get(edit.employeeId)?.name ?? "", edit.date, edit.at, edit.actor, edit.before, edit.after]),
+        ...lockHistory.map(entry => [entry.employeeId === null ? "Company pay period" : memberById.get(entry.employeeId)?.name ?? "", entry.startDate, entry.at, entry.actor, entry.action === "lock" ? "Unlocked" : "Locked", entry.action === "lock" ? "Locked" : "Unlocked"])])}>Download edit history</button><button type="button" className="ts-primary" onClick={closeDialog}>Done</button></div></> : <div className="ts-help"><p>Review hours by day or select your pay-period dates. Expand a team member to see clock times, breaks, issues, and paid time off. Filters select roles; View changes the team search, grouping, and columns.</p><p>Clock rounding previews clock-ins and clock-outs at the saved 5-, 10-, or 15-minute increment. Pay and break checks use the exact times.</p><p>Overtime estimates use the saved rules and the entire workweek. Multi-rate overtime uses a workweek weighted rate from recorded wages. Salaried estimates allocate wages to the recorded time cards. Scheduled hours show the full scheduled interval.</p><p>Qualified OT, tips, special pay, and FFCRA columns display a dash because these amounts are not recorded. Estimates do not include payroll deductions or special pay rules.</p><p>To fix a missing clock-out or break, open the card and update its times. Employee accounts can view only their own cards. Tools provides printing, CSV downloads, edit history, and time-clock settings.</p><div className="ts-modal-actions"><button type="button" className="ts-primary" onClick={closeDialog}>Got it</button></div></div>}
     </div></div> : null}
   </section>;
 }

@@ -308,6 +308,90 @@ test("shared workforce operations persist, scope, audit and serialize actual D1 
       await db.delete(schema.accountPermissions).where(sql`account_id = ${f.manager.id} AND permission = 'timesheets.manage'`);
     }
   });
+  await t.test("card locks, bulk locks and pay-period locks protect hours and retain scoped history", async () => {
+    const range = { start: "2026-10-26", end: "2026-11-01" };
+    const day = { start: "2026-10-28", end: "2026-10-28" };
+    const outside = { start: "2026-11-02", end: "2026-11-08" };
+    const partial = { start: range.start, end: day.end };
+    const sample = (employee, role, start, end) => [["in", start], ["out", end]].map(([eventType, occurredAt]) => ({
+      employeeId: employee.id, roleName: role.name, eventType, occurredAt, source: "system", clockDetails: { california: true },
+    }));
+    const raw = await db.insert(schema.clockEvents).values([
+      ...sample(f.a, f.roleA, "2026-10-26T06:30:00.000Z", "2026-10-26T08:30:00.000Z"),
+      ...sample(f.a, f.roleA, `${day.start}T16:00:00.000Z`, `${day.start}T17:00:00.000Z`),
+      ...sample(f.a, f.roleA, `${day.start}T18:00:00.000Z`, `${day.start}T19:00:00.000Z`),
+      ...sample(f.b, f.roleB, `${day.start}T16:00:00.000Z`, `${day.start}T17:00:00.000Z`),
+    ]).returning();
+    const key = event => `punch:${event.employeeId}:${event.id}`;
+    const read = (actor, dates = range) => call("timesheet-locks?" + new URLSearchParams(dates), actor).then(ok);
+    const body = async (actor, action, targets = [], dates = range) => ({ id: newToken(), revision: (await read(actor, dates)).revision, action, targets, range: dates });
+    const send = (actor, value) => call("timesheet-locks", actor, value);
+    const changeCard = async ({ date = day.start, originals = raw.slice(2, 4), operation, start = `${day.start}T16:05:00.000Z`, end = `${day.start}T17:00:00.000Z` } = {}) => {
+      const view = await snapshot(owner);
+      const before = view.state.clockEvents.filter(event => originals.some(original => original.id === event.id));
+      const events = operation ? [] : [
+        { id: 835010, employeeId: f.a.id, type: "in", at: start, role: f.roleA.name, clockDetails: { california: true } },
+        { id: 835011, employeeId: f.a.id, type: "out", at: end },
+      ];
+      return call("commit", owner, saveBody(view, [{ entity: "timecard", id: 835002, before: { events: before }, after: {
+        employeeId: f.a.id, date, eventIds: before.map(event => event.id), events, ...(operation ? { operation } : {}),
+      } }], newToken()));
+    };
+    assert.equal((await call("timesheet-locks?" + new URLSearchParams(range), "")).status, 401);
+    assert.equal((await read(owner)).canLockPeriod, true);
+    assert.equal((await send(owner, await body(owner, "lock", [], partial))).status, 409);
+    assert.equal((await send(owner, await body(owner, "lock", [], outside))).status, 409);
+    const firstLock = await body(owner, "lock", [key(raw[2])], day);
+    await ok(await send(owner, firstLock));
+    await ok(await send(owner, firstLock));
+    assert.equal((await read(owner)).history.length, 1);
+    assert.match((await (await changeCard()).json()).error, /time card is locked/i);
+    assert.match((await (await changeCard({ operation: "delete" })).json()).error, /time card is locked/i);
+    await db.insert(schema.accountPermissions).values({ accountId: f.manager.id, permission: "timesheets.manage", allowed: true });
+    try {
+      assert.equal((await send(manager, await body(manager, "unlock", [key(raw[2])]))).status, 403);
+      await db.insert(schema.accountPermissions).values({ accountId: f.manager.id, permission: "timesheets.lock", allowed: true });
+      assert.equal((await send(manager, await body(manager, "lock"))).status, 403);
+      assert.equal((await send(manager, await body(manager, "lock", [key(raw[4]), key(raw[6])]))).status, 403);
+      assert.equal((await read(owner)).active.length, 1);
+      await ok(await send(manager, await body(manager, "unlock", [key(raw[2])])));
+      await ok(await changeCard());
+      const edited = (await snapshot(owner)).state.clockEvents.find(event => event.id === 835010);
+      const anchored = `card:${f.a.id}:${edited.cardId}`;
+      const bulk = await body(manager, "lock", [anchored, key(raw[4])]);
+      assert.equal((await ok(await send(manager, bulk))).count, 2);
+      assert.equal((await read(manager)).active.length, 2);
+      assert.equal((await send(owner, { ...bulk, id: newToken(), action: "unlock" })).status, 409);
+      const protectedEdit = await changeCard({ originals: [{ id: 835010 }, { id: 835011 }], start: `${day.start}T16:10:00.000Z` });
+      assert.match((await protectedEdit.json()).error, /time card is locked/i);
+      await ok(await send(owner, await body(owner, "lock", [key(raw[6])])));
+      assert.ok(!(await read(manager)).history.some(entry => entry.employeeId === f.b.id));
+      await ok(await send(owner, await body(owner, "lock")));
+      const period = (await read(second)).active.find(entry => entry.employeeId === null);
+      assert.equal(period.endDate, range.end);
+      assert.match((await (await changeCard({ date: "2026-10-25", originals: raw.slice(0, 2), start: raw[0].occurredAt, end: raw[1].occurredAt })).json()).error, /pay period is locked/i);
+      assert.match((await (await changeCard({ originals: [], start: `${day.start}T20:00:00.000Z`, end: `${day.start}T21:00:00.000Z` })).json()).error, /pay period is locked/i);
+      const adjustment = await change(owner, state => state.hoursAdjustments.push({ id: 835012, employeeId: f.a.id, date: day.start, hours: 0.25 }));
+      assert.equal(adjustment.status, 409);
+      assert.match((await adjustment.json()).error, /pay period is locked/i);
+      const leave = await change(owner, state => state.ptoRequests.push({ id: 835013, employeeId: f.b.id, compensation: "paid",
+        startDate: day.start, endDate: day.end, reason: "vacation", explanation: "Fictional paid leave", status: "approved", requestedAt: `${day.start}T18:00:00.000Z` }));
+      assert.equal(leave.status, 409);
+      assert.match((await leave.json()).error, /pay period is locked/i);
+      assert.equal((await send(manager, await body(manager, "unlock"))).status, 403);
+      await ok(await send(second, await body(second, "unlock")));
+      assert.equal((await read(owner)).active.length, 3);
+      const history = (await read(owner)).history;
+      assert.equal(history[0].actor, f.secondOwner.displayName);
+      assert.equal(history[0].action, "unlock");
+      assert.ok(history.some(entry => entry.actor === f.manager.displayName && entry.action === "unlock"));
+      await assert.rejects(db.run(sql`UPDATE timesheet_lock_events SET action='unlock'`));
+      await assert.rejects(db.run(sql`DELETE FROM timesheet_lock_events`));
+      assert.deepEqual(await db.select().from(schema.clockEvents).where(sql`id BETWEEN ${raw[0].id} AND ${raw.at(-1).id}`).orderBy(schema.clockEvents.id), raw);
+    } finally {
+      await db.delete(schema.accountPermissions).where(sql`account_id = ${f.manager.id} AND permission IN ('timesheets.manage','timesheets.lock')`);
+    }
+  });
   await t.test("a scoped Manager can change a future shift without erasing notes they cannot read", async () => {
     const before = await snapshot(owner); const ownKey = f.b.id;
     const draft = { upsertedShifts: [{ id: 79001, employeeId: f.a.id, date: "2026-11-12", start: "09:00", end: "17:00", role: f.roleA.name, station: "Floor", notes: "Preserve this private shift note" }], deletedShiftIds: [], affectedEmployeeIds: [f.a.id] };

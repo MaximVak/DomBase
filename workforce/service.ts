@@ -30,6 +30,7 @@ import { runClockMaintenance } from "./maintenance";
 import { createAttendanceNotices, readAttendance } from "./attendance";
 import { readAssistedClocks, decideAssistedClock } from "./assisted-clock";
 import { handleTimesheetReview } from "./timesheet-review";
+import { handleTimesheetLocks } from "./timesheet-locks";
 
 const entities: Entity[] = ["employee", "department", "schedule-event", "schedule-draft", "schedule-publish", "open-shift-draft", "timecard", "hours-adjustment", "pto-request", "pto-policy", "availability", "conversation", "settings", "business", "notifications"];
 function currentRecord(view: WorkspaceData, change: Change, employeeKey: number): unknown {
@@ -55,6 +56,7 @@ export function createWorkforceService(db: Database, access: ReturnType<typeof c
       const url = new URL(request.url);
       const action = url.pathname.slice("/api/workspace/".length);
       if (action === "timesheet-review") return await handleTimesheetReview(db, ctx, request, { ...options, now: now() });
+      if (action === "timesheet-locks") return await handleTimesheetLocks(db, ctx, request, { ...options, now: now() });
       if (action === "attendance" || action === "assisted-clocks") {
         if (url.search) throw new AuthError(400, "Attendance does not accept employee selectors.");
         if (request.method === "GET") return json(action === "attendance" ? await readAttendance(db, ctx, now()) : await readAssistedClocks(db, ctx));

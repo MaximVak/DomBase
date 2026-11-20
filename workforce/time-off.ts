@@ -7,6 +7,7 @@ import type { RecordContext } from "./records";
 import { employeeInScope } from "./records";
 import * as v from "./validation";
 import { availabilitySlots, appendAvailability } from "./availability";
+import { periodLockByDate, requireTimesheetUnlocked } from "./timesheet-lock-guards";
 export async function timeOffChange(r: RecordContext, change: Change) {
   if (change.entity === "pto-policy") {
     r.ctx.requirePermission("settings.manage");
@@ -31,6 +32,7 @@ export async function timeOffChange(r: RecordContext, change: Change) {
     if (change.after === null) {
       r.ctx.requirePermission("time_off.approve"); if (!before) throw new AuthError(404, "Request unavailable.");
       await employeeInScope(r, v.integer(before.employeeId));
+      if (before.status === "approved" && before.compensation === "paid") await requireTimesheetUnlocked(r.db, periodLockByDate(v.date(before.startDate), v.date(before.endDate)));
       r.tx.update(s.ptoRequests, { archivedAt: r.tx.stamp }, sql`id = ${change.id} AND archived_at IS NULL AND status <> 'pending'`); return;
     }
     const data = v.object(change.after); v.keys(data, ["id", "employeeId", "compensation", "startDate", "endDate", "startTime", "endTime", "reason", "explanation", "status", "requestedAt", "decidedAt", "decidedByEmployeeId"]);
@@ -43,6 +45,7 @@ export async function timeOffChange(r: RecordContext, change: Change) {
       const startTime = data.startTime ? v.time(data.startTime) : null; const endTime = data.endTime ? v.time(data.endTime) : null;
       if ((startTime === null) !== (endTime === null) || startTime && endTime && (startDate !== endDate || endTime <= startTime)) throw new AuthError(400, "Choose a valid partial-day time range.");
       const status = r.ctx.account.accessLevel === "owner" ? "approved" : "pending";
+      if (status === "approved" && data.compensation === "paid") await requireTimesheetUnlocked(r.db, periodLockByDate(startDate, endDate));
       r.tx.insert(s.ptoRequests, { id: change.id, employeeId, compensation: v.oneOf(data.compensation, ["paid", "unpaid"]), startDate, endDate, startTime, endTime, reason: v.oneOf(data.reason, ["sick_emergency", "vacation"]), explanation: v.text(data.explanation, 1000), status, requestedAt: r.tx.stamp, decidedAt: status === "approved" ? r.tx.stamp : null, decidedByAccountId: status === "approved" ? r.ctx.account.id : null });
       if (status === "approved") r.tx.insert(s.ptoDecisions, { requestId: change.id, status, actorAccountId: r.ctx.account.id });
       return;
@@ -54,6 +57,7 @@ export async function timeOffChange(r: RecordContext, change: Change) {
     else { r.ctx.requirePermission("time_off.approve"); if (self) throw new AuthError(403, "Another manager must review your own request."); }
     const [stored] = await r.db.select().from(s.ptoRequests).where(eq(s.ptoRequests.id, change.id));
     if (!stored || (status !== "cancelled" && stored.status !== "pending") || stored.status === "cancelled" || stored.status === "denied") throw new AuthError(409, "This request has already been decided.");
+    if (stored.compensation === "paid" && (status === "approved" || stored.status === "approved")) await requireTimesheetUnlocked(r.db, periodLockByDate(stored.startDate, stored.endDate));
     r.tx.update(s.ptoRequests, { status, decidedAt: r.tx.stamp, decidedByAccountId: r.ctx.account.id, version: stored.version + 1 }, sql`id = ${change.id} AND version = ${stored.version} AND archived_at IS NULL`);
     r.tx.insert(s.ptoDecisions, { requestId: change.id, status, actorAccountId: r.ctx.account.id });
     return;

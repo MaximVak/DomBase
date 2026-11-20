@@ -15,6 +15,8 @@ import { noShowReasons, reviewBatchLimit } from "./timesheet-review-types";
 import type { ReviewItem, TimesheetReview } from "./timesheet-review-types";
 import { WorkspaceTransaction } from "./transaction";
 import * as v from "./validation";
+import { timesheetCardKey } from "./timesheet-lock-types";
+import { periodLockByDate, requireTimesheetUnlocked } from "./timesheet-lock-guards";
 
 type Options = { secret: string; fieldKey: string; now: number };
 type Shift = { id: number; employeeId: number; date: string; start: string; end: string; role: string; version: number };
@@ -98,12 +100,13 @@ function cardCandidates(view: WorkspaceData, shifts: Shift[], range: WorkspacePe
     if (unconfirmedBreakRecord && !issues.includes("Confirm time and breaks before calculating premiums")) issues.push("Confirm time and breaks before calculating premiums");
     const blocked = !first.end || elapsed <= 0 || elapsed > 24 * 3600000 || unconfirmedBreakRecord ||
       issues.some(issue => blockedIssues.has(issue)) || events.some(event => event.automatic && !event.assistedStatus);
-    const key = `${events[0]?.cardId ? "card" : "punch"}:${employee.id}:${events[0]?.cardId ?? firstEventId}`;
+    const key = timesheetCardKey(employee.id, firstEventId, events[0]?.cardId);
     const facts = events.map(event => [event.id, event.type, event.at, event.automatic, event.assistedStatus, event.clockDetails]);
     const version = rateKey(options.secret, canonical([key, first.role, facts, [...issues].sort(), blocked]));
     result.push({ key, version, kind: "card", employeeId: employee.id, employee: employee.name, role: first.role,
       department: departments.get(first.role) ?? "Unassigned", date: visible[0].date, start: first.start, end: first.end,
-      firstEventId, workedMinutes: Math.round(visible.reduce((sum, card) => sum + (card.metrics.actual ?? 0), 0) * 60), issues, blocked });
+      firstEventId, lockable: elapsed > 0 && elapsed <= 24 * 3600000 && !events.some(event => event.assistedStatus === "pending"),
+      workedMinutes: Math.round(visible.reduce((sum, card) => sum + (card.metrics.actual ?? 0), 0) * 60), issues, blocked });
   }
   return { cards: result, work };
 }
@@ -144,12 +147,16 @@ async function noShowCandidates(db: Database, ctx: Context, view: WorkspaceData,
   return result;
 }
 
-async function reviewState(db: Database, ctx: Context, range: WorkspacePeriod, options: Options) {
+export function clockReviewGuard(stamp: { clock: number; reports: number }) {
+  return sql`${punchStamp} = ${stamp.clock} AND ${reportStamp} = ${stamp.reports}`;
+}
+
+export async function readTimesheetReviewState(db: Database, ctx: Context, range: WorkspacePeriod, options: Options, includeNoShows = true) {
   const expanded = { start: addDays(range.start, -8), end: addDays(range.end, 8) };
   const initial = await readStamp(db);
   const [view, shifts] = await Promise.all([workspaceSnapshot(db, ctx, options.fieldKey, expanded), readShifts(db, ctx, expanded)]);
   const { cards, work } = cardCandidates(view, shifts, range, options);
-  const absences = await noShowCandidates(db, ctx, view, shifts, range, options, work);
+  const absences = includeNoShows ? await noShowCandidates(db, ctx, view, shifts, range, options, work) : [];
   const candidates = [...cards, ...absences];
   const targetKeys = JSON.stringify(candidates.map(item => item.key));
   const recorded = candidates.length ? await db.select({ review: s.timesheetReviews, actor: s.accounts.displayName }).from(s.timesheetReviews)
@@ -176,7 +183,7 @@ async function reviewState(db: Database, ctx: Context, range: WorkspacePeriod, o
     return { ...item, status, allowedAction, ...(decided ? { decision: { actor: decided.actor, at: decided.review.createdAt,
       reason: decided.review.reason, note: decided.review.note } } : {}) };
   }).sort((a, b) => a.date.localeCompare(b.date) || a.start.localeCompare(b.start) || a.key.localeCompare(b.key));
-  return { items, stamp };
+  return { items, stamp, timeZone: view.basicInfo.timeZone };
 }
 
 export async function handleTimesheetReview(db: Database, ctx: Context, request: Request, options: Options): Promise<Response> {
@@ -185,7 +192,7 @@ export async function handleTimesheetReview(db: Database, ctx: Context, request:
   if (request.method === "GET") {
     if (url.searchParams.size !== 2) throw new AuthError(400, "Choose a start and end date for review.");
     const range = reviewPeriod({ start: url.searchParams.get("start"), end: url.searchParams.get("end") }, options.now);
-    const state: TimesheetReview = { items: (await reviewState(db, ctx, range, options)).items };
+    const state: TimesheetReview = { items: (await readTimesheetReviewState(db, ctx, range, options)).items };
     return json(state);
   }
   if (request.method !== "POST") return json({ error: "Method not allowed." }, 405, { Allow: "GET, POST" });
@@ -212,7 +219,11 @@ export async function handleTimesheetReview(db: Database, ctx: Context, request:
     if (receipt.accountId !== ctx.account.id || receipt.bodyHash !== hash) throw new AuthError(409, "This identifier is already in use.");
     return json({ saved: true, count: targets.length });
   }
-  const { items, stamp } = await reviewState(db, ctx, period, options);
+  const { items, stamp } = await readTimesheetReviewState(db, ctx, period, options);
+  if (action === "no_show") {
+    const item = items.find(candidate => candidate.key === targets[0].key);
+    if (item) await requireTimesheetUnlocked(db, periodLockByDate(item.date));
+  }
   const byKey = new Map(items.map(item => [item.key, item]));
   const tx = new WorkspaceTransaction(db, ctx, id, new Date(options.now).toISOString());
   const rows = targets.map(target => {
@@ -223,7 +234,7 @@ export async function handleTimesheetReview(db: Database, ctx: Context, request:
     return { id: newRecordId(), targetKey: item.key, targetVersion: item.version, employeeId: item.employeeId,
       workDate: item.date, actorAccountId: ctx.account.id, action, reason, note, createdAt: tx.stamp };
   });
-  const guard = sql`${punchStamp} = ${stamp.clock} AND ${reportStamp} = ${stamp.reports}`;
+  const guard = clockReviewGuard(stamp);
   for (let index = 0; index < rows.length; index += 100) tx.insertRows(s.timesheetReviews, rows.slice(index, index + 100), guard);
   try {
     if (await tx.commit(stamp.revision, hash, ["timesheet-review"])) return json({ saved: true, count: rows.length });

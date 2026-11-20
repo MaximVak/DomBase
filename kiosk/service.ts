@@ -13,6 +13,7 @@ import type { ClockDraft } from "./replay";
 import { clockIdleSeconds } from "./idle";
 import { clockPolicy, kioskBreakView, resolveBreakDetails, workplaceDate } from "./break-actions";
 import { nextDate, zonedTimestamp } from "../workforce/time";
+import { clockEntryUnlocked } from "../workforce/timesheet-lock-guards";
 import { assistedOutPolicyGuard, insertAssistance, isAutomaticRecovery, planAssistance, shiftBounds } from "./assistance";
 import type { ClockDetails } from "./break-rules";
 
@@ -130,6 +131,7 @@ export function createKioskService(db: KioskOperatorDatabase, options: { secret:
   async function commitClock(device: RegisteredDevice, person: Person, pending: typeof schema.kioskClockRequests.$inferSelect, approval?: Approval) {
     const time = stamp();
     const assistance = pending.clockDetails?.assistance;
+    const unlocked = clockEntryUnlocked(person.employee.id, pending.eventType === "in" ? 0 : pending.previousEventId ?? 0, pending.createdAt, assistance?.requestedAt);
     const guard = sql`${activePerson(device, person)} AND EXISTS (SELECT 1 FROM kiosk_clock_requests cr
       WHERE cr.id = ${pending.id} AND cr.interaction_id = ${person.interaction.id} AND cr.completed_at IS NULL
       AND cr.cancelled_at IS NULL AND cr.expires_at > ${time})
@@ -141,6 +143,7 @@ export function createKioskService(db: KioskOperatorDatabase, options: { secret:
       AND (${pending.eventType !== "in" || pending.requiresApproval ? 1 : 0} = 1 OR EXISTS (SELECT 1 FROM shifts s
         WHERE s.shift_type = 'work' AND s.id = ${pending.shiftId} AND s.employee_id = ${person.employee.id} AND s.role_id = ${pending.roleId}
         AND s.publication_id IS NOT NULL AND s.archived_at IS NULL))
+      AND ${unlocked}
       AND ${pending.requiresApproval ? (approval ? approvalActor(approval, pending.roleId) : sql`0 = 1`) : sql`1 = 1`}
       AND ${assistance && pending.eventType === "out" ? assistedOutPolicyGuard : sql`1 = 1`}`;
     if (assistance?.targetEventId) {
@@ -152,7 +155,10 @@ export function createKioskService(db: KioskOperatorDatabase, options: { secret:
         sql`UPDATE kiosk_clock_requests SET completed_at=${time} WHERE id=${pending.id} AND changes()=1`,
         sql`UPDATE kiosk_interactions SET ended_at=${time} WHERE id=${person.interaction.id} AND changes()=1`,
       ]);
-      if (saved.meta.changes !== 1) throw new AuthError(422, "This automatic clock-out already has a report or is unavailable.");
+      if (saved.meta.changes !== 1) {
+        if (!await db.get(sql`SELECT 1 WHERE ${unlocked}`)) throw new AuthError(409, "This time is locked. Ask a manager to review your clock report.");
+        throw new AuthError(422, "This automatic clock-out already has a report or is unavailable.");
+      }
       return { recorded: true, eventType: pending.eventType, assistance: assistance.status };
     }
     const result = await atomicBatch(db, [
@@ -168,7 +174,10 @@ export function createKioskService(db: KioskOperatorDatabase, options: { secret:
       ...(assistance ? [insertAssistance(assistance, pending.id, pending.createdAt, pending.explanation,
         sql`idempotency_key=${pending.id}`, sql`changes()=1`)] : []),
     ]);
-    if (result[0].meta.changes !== 1) throw new AuthError(409, "The clock or access changed. Enter your PIN and try again.");
+    if (result[0].meta.changes !== 1) {
+      if (!await db.get(sql`SELECT 1 WHERE ${unlocked}`)) throw new AuthError(409, "This time is locked. Ask a manager to review your clock report.");
+      throw new AuthError(409, "The clock or access changed. Enter your PIN and try again.");
+    }
     return { recorded: true, eventType: pending.eventType, ...(assistance ? { assistance: assistance.status } : {}) };
   }
   async function planClock(employeeId: number, previous: typeof schema.clockEvents.$inferSelect | null, draft: ClockDraft, clockTime: number) {

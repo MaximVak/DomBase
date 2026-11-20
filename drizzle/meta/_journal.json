@@ -190,6 +190,13 @@
       "when": 1795204127965,
       "tag": "0026_timesheet_reviews",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "6",
+      "when": 1795209825206,
+      "tag": "0027_timesheet_locks",
+      "breakpoints": true
     }
   ]
 }

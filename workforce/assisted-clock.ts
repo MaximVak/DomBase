@@ -5,6 +5,7 @@ import { parseReportedTime } from "../kiosk/assistance";
 import { atomicBatch } from "../kiosk/database";
 import type { Context, Database } from "./context";
 import * as v from "./validation";
+import { clockEntryUnlocked } from "./timesheet-lock-guards";
 
 const reportScope = (ctx: Context) => sql`${ctx.employeeFilter(sql`e.employee_id`)}
   AND ${ctx.roleFilter(sql`COALESCE(sh.role_id, (SELECT CASE WHEN COUNT(*)=1 THEN MIN(r.id) END FROM roles r WHERE r.name=e.role_name))`)}
@@ -49,6 +50,7 @@ export async function decideAssistedClock(db: Database, ctx: Context, body: Reco
   const time = new Date(chosen).toISOString();
   const stamp = new Date(now).toISOString();
   const effective = sql`COALESCE(CASE WHEN other.status!='pending' OR adjacent.event_type='in' THEN COALESCE(other.decided_time,other.requested_at) END,adjacent.occurred_at)`;
+  const unlocked = clockEntryUnlocked(sql`e.employee_id`, sql`e.id`, sql`MIN(e.occurred_at, ${row.requestedAt})`, sql`MAX(e.occurred_at, ${row.requestedAt}, ${time})`);
   const neighbor = (before: boolean) => sql`(SELECT julianday(${effective}) FROM clock_events adjacent LEFT JOIN assisted_clock_reports other ON other.event_id=adjacent.id
     WHERE adjacent.employee_id=e.employee_id AND adjacent.id ${before ? sql.raw("<") : sql.raw(">")} e.id
     ORDER BY adjacent.id ${before ? sql.raw("DESC") : sql.raw("ASC")} LIMIT 1)`;
@@ -56,6 +58,7 @@ export async function decideAssistedClock(db: Database, ctx: Context, body: Reco
     sql`UPDATE assisted_clock_reports SET status=${action === "edit" ? "edited" : "approved"},decided_time=${time},decided_at=${stamp},decided_by_account_id=${ctx.account.id}
       WHERE event_id=${id} AND status='pending' AND EXISTS (
         SELECT 1 FROM clock_events e LEFT JOIN shifts sh ON sh.id=e.shift_id WHERE e.id=${id} AND ${reportScope(ctx)} AND ${notReplaced}
+        AND ${unlocked}
         AND julianday(${time}) > COALESCE(${neighbor(true)},julianday(e.occurred_at)-1.5)
         AND julianday(${time}) < COALESCE(${neighbor(false)},julianday(${stamp})+0.001))`,
     sql`INSERT INTO audit_log (actor_account_id,employee_id,action,entity_type,entity_id,created_at)
@@ -63,6 +66,6 @@ export async function decideAssistedClock(db: Database, ctx: Context, body: Reco
       FROM clock_events WHERE id=${id} AND changes()=1`,
     sql`UPDATE workforce_state SET revision=revision+1 WHERE id=1 AND changes()=1`,
   ]);
-  if (!updated.meta.changes) throw new AuthError(409, "The report changed or the selected time overlaps another clock entry. Refresh and review the time card.");
+  if (!updated.meta.changes) throw new AuthError(409, "Check whether the time card or pay period is locked, or the reported time overlaps another entry. Refresh before trying again.");
   return { saved: true };
 }

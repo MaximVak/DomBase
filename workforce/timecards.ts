@@ -9,6 +9,8 @@ import * as v from "./validation";
 import { requireOtherEmployee } from "./self-edit";
 import { timeCardNotes } from "./timecard-notes";
 import type { ClockDetails } from "../kiosk/break-rules";
+import { periodLockByDate, periodLockByTime, requireTimesheetUnlocked } from "./timesheet-lock-guards";
+import { timesheetCardKey } from "./timesheet-lock-types";
 
 type Event = StaffState["clockEvents"][number];
 type Card = typeof s.timeCards.$inferSelect;
@@ -33,6 +35,10 @@ function describe(events: Event[]) {
 
 async function appendRevision(r: RecordContext, id: number, employeeId: number, date: string, existing: Card | undefined,
   before: Event[], events: Event[], role: { id: number | null; name: string }, reason: string, deleted = false) {
+  const key = before[0] ? timesheetCardKey(employeeId, before[0].id, existing?.id) : "";
+  const bounds = [before, events].filter(sequence => sequence.length).map(sequence => periodLockByTime(
+    sequence[0].at, sequence.at(-1)?.type === "out" ? sequence.at(-1)!.at : r.tx.stamp));
+  await requireTimesheetUnlocked(r.db, sql.join([sql`l.target_key = ${key}`, periodLockByDate(date), ...bounds.map(bound => sql`(${bound})`)], sql` OR `));
   const cardId = existing?.id ?? newRecordId();
   const revision = (existing?.version ?? 0) + 1;
   const lastPunch = await r.db.get<{ id: number }>(sql`SELECT COALESCE(MAX(id),0) AS id FROM clock_events WHERE employee_id = ${employeeId}`);
@@ -59,6 +65,7 @@ export async function timecardChange(r: RecordContext, change: Change) {
     if (!r.ctx.allDepartments) throw new AuthError(403, "A General Manager or Owner must make a department-independent hours adjustment.");
     v.keys(data, ["id", "employeeId", "date", "hours"]); const employeeId = v.integer(data.employeeId); await employeeInScope(r, employeeId);
     const date = v.date(data.date); const seconds = Math.round(v.number(data.hours, -744, 744) * 3600); if (!seconds) throw new AuthError(400, "Enter a non-zero adjustment.");
+    await requireTimesheetUnlocked(r.db, sql`(${periodLockByDate(date)}) OR (l.employee_id = ${employeeId} AND ${date} BETWEEN l.start_date AND l.end_date)`);
     const employee = r.view.state.employees.find(e => e.id === employeeId); const role = employee?.role ? roleFor(r, employee.role) : null; const cardId = newRecordId();
     r.tx.insert(s.timeCards, { id: cardId, employeeId, workDate: date, roleId: role?.id ?? null, roleName: role?.name ?? "", source: "manual" });
     r.tx.insert(s.hoursAdjustments, { id: change.id, employeeId, date, adjustmentSeconds: seconds, actorAccountId: r.ctx.account.id, reason: "Manual hours adjustment" });

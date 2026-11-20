@@ -617,6 +617,24 @@ export const timesheetReviews = sqliteTable("timesheet_reviews", {
   check("timesheet_reviews_action_check", sql`${table.action} IN ('approve', 'resolve', 'no_show') AND (${table.action} != 'no_show' OR length(trim(${table.reason})) > 0)`),
 ]);
 
+export const timesheetLockEvents = sqliteTable("timesheet_lock_events", {
+  id: id(),
+  targetKey: text("target_key").notNull(),
+  employeeId: integer("employee_id").references(() => employees.id),
+  roleId: integer("role_id").references(() => roles.id),
+  startDate: text("start_date").notNull(),
+  endDate: text("end_date").notNull(),
+  startsAt: text("starts_at").notNull(),
+  endsAt: text("ends_at").notNull(),
+  actorAccountId: integer("actor_account_id").notNull().references(() => accounts.id),
+  action: text("action", { enum: ["lock", "unlock"] }).notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, table => [
+  index("timesheet_lock_events_target_idx").on(table.targetKey, table.id),
+  index("timesheet_lock_events_dates_idx").on(table.startDate, table.endDate),
+  check("timesheet_lock_events_valid_check", sql`${table.action} IN ('lock', 'unlock') AND ${table.startDate} <= ${table.endDate} AND ${table.startsAt} < ${table.endsAt} AND (${table.employeeId} IS NOT NULL OR ${table.roleId} IS NULL)`),
+]);
+
 export const hoursAdjustments = sqliteTable("hours_adjustments", {
   id: id(),
   employeeId: integer("employee_id").notNull().references(() => employees.id),

@@ -5370,6 +5370,9 @@ export default function Home({ account }: { account: DashboardAccount }) {
               workspaceRevision={shared.data.revision}
               payCalendar={shared.data.teamPeriod}
               canEdit={shared.data.permissions["timesheets.manage"]}
+              canLockCards={shared.data.permissions["timesheets.manage"] && shared.data.permissions["timesheets.lock"]}
+              canLockOwnCard={account.accessLevel === "owner"}
+              onLocksSaved={shared.refresh}
               canExport={shared.data.permissions["exports.timesheets"]}
               canManagePayrollIds={shared.data.permissions["team.manage"] && shared.data.permissions["team.private.read"]}
               onEditingChange={setIsSharedTimeCardEditing}

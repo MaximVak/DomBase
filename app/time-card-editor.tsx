@@ -4,6 +4,8 @@ import type { FormEvent } from "react";
 import { timeCardBounds, timeCardPreview, validateTimeCard, workDate, workTime } from "./timesheets-model";
 import type { TimeCardBreak, TimeCardDraft, TimeCardEdit, TimesheetEmployee } from "./timesheets-model";
 import type { TimeCardNote } from "../workforce/model";
+import type { LockEvent } from "../workforce/timesheet-lock-types";
+import { LockHistoryEntry } from "./timesheet-locks";
 
 export function RecordedTimeCardNotes({ notes }: { notes: TimeCardNote[] }) {
   return <ul>{notes.map(note => <li key={`${note.author}:${note.text}`}><strong>{note.author === "employee" ? "Employee note" : note.author === "manager" ? "Manager note" : "Recorded note"}</strong><p>{note.text}</p></li>)}</ul>;
@@ -15,6 +17,8 @@ type Props = {
   roles: string[];
   locationName: string;
   history: TimeCardEdit[];
+  lockHistory?: LockEvent[];
+  locked?: boolean;
   notes?: TimeCardNote[];
   today: string;
   now: number;
@@ -47,6 +51,7 @@ export function TimeCardEditor(props: Props) {
     || (props.confirmBreakRecord && !draft.confirmBreakRecord);
   const validation = incomplete ? "" : validateTimeCard(draft, [], props.now);
   const history = [...props.history].reverse();
+  const lockHistory = props.lockHistory ?? [];
 
   function updateBreak(id: number, change: Partial<TimeCardBreak>) {
     onChange({ ...draft, breaks: breaks.map(entry => entry.id === id ? { ...entry, ...change } : entry) });
@@ -112,7 +117,7 @@ export function TimeCardEditor(props: Props) {
           <SectionIcon name="pin" /><div className="ts-card-section-content"><h3 id="ts-card-validation-title">Photo &amp; GPS validation (0)</h3><span className="sr-only">No photo or GPS records are available for this card.</span></div>
         </section>
         <section className="ts-card-section ts-card-history-section" aria-label="Time card edit history">
-          <SectionIcon name="history" /><details className="ts-card-history ts-card-section-content"><summary><h3>Edit history ({history.length})</h3><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 9 7 7 7-7" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg></summary><div className="ts-card-history-entries">{history.length ? history.map(edit => <article key={edit.id}><strong>{edit.actor}</strong><time dateTime={edit.at}>{new Date(edit.at).toLocaleString()}</time><p>{edit.before || "New time card"} → {edit.after}</p></article>) : <p>No changes saved yet.</p>}</div></details>
+          <SectionIcon name="history" /><details className="ts-card-history ts-card-section-content"><summary><h3>Edit history ({history.length + lockHistory.length})</h3><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 9 7 7 7-7" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg></summary><div className="ts-card-history-entries">{lockHistory.map(entry => <article key={`lock:${entry.id}`}><LockHistoryEntry entry={entry} /></article>)}{history.map(edit => <article key={edit.id}><strong>{edit.actor}</strong><time dateTime={edit.at}>{new Date(edit.at).toLocaleString()}</time><p>{edit.before || "New time card"} → {edit.after}</p></article>)}{history.length || lockHistory.length ? null : <p>No changes saved yet.</p>}</div></details>
         </section>
         <div className="ts-card-note">
           {props.notes?.length ? <section aria-labelledby="ts-card-notes-title">
@@ -124,6 +129,6 @@ export function TimeCardEditor(props: Props) {
         {props.error || validation ? <p className="ts-form-error" role="alert">{props.error || validation}</p> : null}
       </div>
     </div>
-    <div className="ts-card-footer"><button className="ts-card-cancel" type="button" disabled={props.pending} onClick={props.onClose}>Cancel</button>{props.onDelete ? <button className="ts-card-delete" type="button" disabled={props.pending} onClick={props.onDelete}>Delete time card</button> : null}{props.onAdjust ? <button className="ts-text-button" type="button" disabled={props.pending} onClick={props.onAdjust}>Adjust daily hours</button> : null}<button type="submit" className="ts-primary" disabled={props.pending || incomplete || Boolean(validation)}>Save changes</button></div>
+    <div className="ts-card-footer"><button className="ts-card-cancel" type="button" disabled={props.pending} onClick={props.onClose}>Cancel</button>{props.onDelete ? <button className="ts-card-delete" type="button" disabled={props.pending} onClick={props.onDelete}>Delete time card</button> : null}{props.onAdjust ? <button className="ts-text-button" type="button" disabled={props.pending} onClick={props.onAdjust}>Adjust daily hours</button> : null}<button type="submit" className="ts-primary" disabled={props.pending || props.locked || incomplete || Boolean(validation)}>Save changes</button></div>
   </form>;
 }

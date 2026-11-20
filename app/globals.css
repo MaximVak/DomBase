@@ -10412,6 +10412,18 @@ button[aria-label^="Remove"]:focus-visible,
 .ts-issues > span { color: #b22a38; background: #fff0f1; padding: 5px 9px; border-radius: 20px; font-weight: 650; font-size: .69rem; }
 .ts-overtime { color: #d34328; }
 .ts-row-edit { border: 0; background: none; color: var(--ts-accent); padding: 3px; font-size: .76rem !important; }
+.ts-lock-group, .ts-lock-bar, .ts-lock-label, .ts-lock-link { display: flex; align-items: center; gap: 8px; }
+.ts-lock-bar { flex-wrap: wrap; padding: 8px 24px 12px; color: var(--ts-ink); background: var(--ts-tint); }
+.ts-lock-bar p { margin: 0; font-size: .85rem; }
+.ts-lock-link, .ts-lock-label { display: inline-flex; gap: 4px; font-size: .78rem !important; }
+.ts-lock-label { color: var(--ts-ink); }
+.ts-lock-link { padding: 4px 6px; border: 0; background: transparent; color: var(--ts-accent); }
+.ts-lock-link:disabled { opacity: .55; }
+.ts-lock-link:hover:not(:disabled) { text-decoration: underline; }
+.ts-lock-link:focus-visible { outline: 2px solid var(--ts-accent); outline-offset: 2px; }
+.ts-group-row th > .ts-lock-link, .ts-card-row td:first-child > .ts-lock-link, .ts-card-row td:first-child > .ts-lock-label { margin-left: 4px; }
+.ts-day-lock-row:has(td:empty) { display: none; }
+@media print { .ts-lock-bar, .ts-lock-link, .ts-day-lock-row { display: none; } }
 .ts-more-button { border: 0; background: none; color: var(--ts-ink); font-size: 1.4rem !important; line-height: 1; padding: 3px 7px; }
 .ts-actions-column { min-width: 55px !important; }
 .ts-cell-member { display: block; font-size: .8rem; margin-bottom: 5px; }
