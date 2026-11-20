@@ -5367,6 +5367,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
               )}
               <TimesheetsPanel
               onPeriodChange={setWorkspacePeriod}
+              workspaceRevision={shared.data.revision}
               payCalendar={shared.data.teamPeriod}
               canEdit={shared.data.permissions["timesheets.manage"]}
               canExport={shared.data.permissions["exports.timesheets"]}

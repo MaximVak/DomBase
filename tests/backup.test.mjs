@@ -77,12 +77,14 @@ test("encrypted local backups restore all D1 data, protected files and private-f
   const [exchangeShift] = await db.insert(s.shifts).values({ employeeId: 900001, roleId: 902001, date: "2026-12-01", startTime: "09:00", endTime: "12:00", publicationId: publication.id }).returning();
   const [savedExchange] = await db.insert(s.shiftExchangeRequests).values({ kind: "cover", requesterId: 900001, sourceShiftId: exchangeShift.id, sourceFingerprint: "preserved-exchange-fingerprint", sourceSnapshot: {id:exchangeShift.id,employeeId:900001,roleId:902001,role:"Fictional preserved job",date:"2026-12-01",start:"09:00",end:"12:00",station:"Counter",color:"amber"}, requestedAt:"2026-11-15T17:00:00Z" }).returning();
   await db.insert(s.shiftExchangeInvitations).values({requestId:savedExchange.id,employeeId:900002,status:"pending"});
+  const [recordedReview] = await db.insert(s.timesheetReviews).values({ targetKey: `shift:${exchangeShift.id}`, targetVersion: randomBytes(32).toString("hex"),
+    employeeId: 900001, workDate: "2026-12-01", actorAccountId: owner.id, action: "no_show", reason: "Called out", note: "Fictional absence note" }).returning();
   const directory = join(root, "archives"), keyPath = join(root, "keys/recovery.key"); const key = await recoveryKey(keyPath); let backup, payload;
   await t.test("private encrypted bundle includes the full schema, data, replaced files and recovery keys", async () => {
     backup = await createBackup({ database: source.env.DB, bucket: source.env.FILES, secrets, directory, key });
     const bytes = await readFile(backup.file); assert.equal(bytes.includes(Buffer.from(email)), false); assert.equal(bytes.includes(Buffer.from("scrypt$16384")), false); assert.equal(bytes.includes(certificate.bytes), false); assert.equal(bytes.includes(Buffer.from(secrets.AUTH_RATE_LIMIT_SECRET)), false);
     assert.equal((await stat(backup.file)).mode & 0o777, 0o600); assert.equal((await stat(keyPath)).mode & 0o777, 0o600); assert.equal((await stat(directory)).mode & 0o777, 0o700);
-    payload = await readBackup(backup.file, key); assert.equal(payload.snapshot.tables.length, 77); assert.equal(payload.objects.length, 4); assert.equal(payload.secrets.AUTH_PRIVATE_FIELD_KEY, secrets.AUTH_PRIVATE_FIELD_KEY);
+    payload = await readBackup(backup.file, key); assert.equal(payload.snapshot.tables.length, 78); assert.equal(payload.objects.length, 4); assert.equal(payload.secrets.AUTH_PRIVATE_FIELD_KEY, secrets.AUTH_PRIVATE_FIELD_KEY);
     assert.equal(await containedBackup(backup.file, directory), backup.file);
   });
   await t.test("wrong key, damaged ciphertext, loose permissions and external paths are rejected", async () => {
@@ -105,11 +107,13 @@ test("encrypted local backups restore all D1 data, protected files and private-f
   await t.test("fresh isolated D1/R2 restores all table contents, migrations, sequences, indexes and triggers", async () => {
     destination = await open(destinationPath);
     const result = await restoreIntoEmpty({ database: destination.env.DB, bucket: destination.env.FILES, payload });
-    assert.deepEqual(result, { tables: 76, migrations: 26, objects: 4, exactDatabase: true, exactFiles: true });
+    assert.deepEqual(result, { tables: 77, migrations: 27, objects: 4, exactDatabase: true, exactFiles: true });
     await assert.rejects(destination.env.DB.prepare("UPDATE clock_events SET event_type=event_type").run());
     await assert.rejects(destination.env.DB.prepare("UPDATE audit_log SET action=action").run());
     await assert.rejects(destination.env.DB.prepare("UPDATE wage_rates SET amount_cents=amount_cents").run());
     const recovered = drizzle(destination.env.DB, { schema: s }); assert.equal((await recovered.select().from(s.employeePhotos))[0].fileId, photo.id); assert.equal((await recovered.select().from(s.teamSettings))[0].payPeriod, "biweekly");
+    assert.deepEqual(await recovered.select().from(s.timesheetReviews), [recordedReview]);
+    await assert.rejects(destination.env.DB.prepare("UPDATE timesheet_reviews SET note=note").run());
     assert.equal((await recovered.select().from(s.openShifts))[0].notes, "Preserved unassigned opening");
     assert.equal((await recovered.select().from(s.openShiftClaims))[0].status, "pending");
     assert.equal((await recovered.select().from(s.shiftExchangeRequests))[0].sourceFingerprint, "preserved-exchange-fingerprint");

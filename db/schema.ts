@@ -601,6 +601,22 @@ export const timeCardEdits = sqliteTable("time_card_edits", {
   check("time_card_edits_revision_check", sql`${table.revision} > 0 AND length(trim(${table.reason})) > 0 AND json_valid(${table.before}) AND json_valid(${table.after})`),
 ]);
 
+export const timesheetReviews = sqliteTable("timesheet_reviews", {
+  id: id(),
+  targetKey: text("target_key").notNull(),
+  targetVersion: text("target_version").notNull(),
+  employeeId: integer("employee_id").notNull().references(() => employees.id),
+  workDate: text("work_date").notNull(),
+  actorAccountId: integer("actor_account_id").notNull().references(() => accounts.id),
+  action: text("action", { enum: ["approve", "resolve", "no_show"] }).notNull(),
+  reason: text("reason").notNull().default(""),
+  note: text("note").notNull().default(""),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, table => [
+  uniqueIndex("timesheet_reviews_target_version_action_idx").on(table.targetKey, table.targetVersion, table.action),
+  check("timesheet_reviews_action_check", sql`${table.action} IN ('approve', 'resolve', 'no_show') AND (${table.action} != 'no_show' OR length(trim(${table.reason})) > 0)`),
+]);
+
 export const hoursAdjustments = sqliteTable("hours_adjustments", {
   id: id(),
   employeeId: integer("employee_id").notNull().references(() => employees.id),

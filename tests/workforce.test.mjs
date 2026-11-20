@@ -234,6 +234,80 @@ test("shared workforce operations persist, scope, audit and serialize actual D1 
     assert.equal((await change(owner, state => { state.employees.find(e => e.id === createdId).certificates.push({ id: 78001, name: "QA certificate", fileName: "unsafe-placeholder.pdf", fileId: "fake" }); })).status, 409);
     assert.equal((await snapshot(owner)).revision, revision);
   });
+
+  await t.test("daily and period review approve current scoped cards, resolve issues in bulk and record no-shows", async () => {
+    const date = "2026-11-07";
+    const period = { start: date, end: "2026-11-08" };
+    const day = { start: date, end: date };
+    const [publication] = await db.insert(schema.schedulePublications).values({ version: 190, publishedByAccountId: f.owner.id }).returning();
+    await db.insert(schema.shifts).values([
+      { employeeId: f.a.id, roleId: f.roleA.id, date, startTime: "09:00", endTime: "10:00", publicationId: publication.id },
+      { employeeId: f.b.id, roleId: f.roleB.id, date: period.end, startTime: "09:00", endTime: "12:00", publicationId: publication.id },
+    ]);
+    const raw = await db.insert(schema.clockEvents).values([
+      ...[[17, 18], [19, 20], [21, 22]].flatMap(([start, end]) => [["in", start], ["out", end]].map(([eventType, hour]) => ({
+        employeeId: f.a.id, roleName: f.roleA.name, eventType, occurredAt: `${date}T${hour}:00:00.000Z`, source: "system", clockDetails: { california: true },
+      }))),
+      { employeeId: f.multi.id, roleName: f.roleB.name, eventType: "in", occurredAt: `${date}T23:00:00.000Z`, source: "system", clockDetails: { california: true } },
+    ]).returning();
+    const read = (actor, range = period) => call("timesheet-review?" + new URLSearchParams(range), actor).then(ok);
+    const make = (action, targets, range = period, details = {}) => ({ id: newToken(), period: range, action, targets: targets.map(({ key, version }) => ({ key, version })), ...details });
+    const submit = (actor, body) => call("timesheet-review", actor, body);
+    const before = (await read(owner)).items;
+    const clean = before.find(item => item.firstEventId === raw[0].id);
+    const missing = before.find(item => item.firstEventId === raw.at(-1).id);
+    const issues = before.filter(item => item.allowedAction === "resolve");
+    const noShow = before.find(item => item.kind === "no-show");
+    assert.equal(clean.status, "ready");
+    assert.equal(clean.department, f.deptA.name);
+    assert.equal(missing.status, "needs-review");
+    assert.equal(missing.allowedAction, undefined);
+    assert.equal(issues.length, 2);
+    assert.ok(issues.every(item => item.issues.includes("Unscheduled time")));
+    assert.equal(noShow.employeeId, f.b.id);
+    assert.equal((await submit(owner, make("approve", [clean, missing]))).status, 409);
+    assert.equal((await db.select().from(schema.timesheetReviews)).length, 0);
+    const scoped = (await read(manager)).items;
+    assert.ok(scoped.some(item => item.key === clean.key));
+    assert.ok(scoped.every(item => item.department === f.deptA.name && !item.allowedAction));
+    assert.equal((await submit(manager, make("approve", [clean], day))).status, 403);
+    await db.insert(schema.accountPermissions).values({ accountId: f.manager.id, permission: "timesheets.manage", allowed: true });
+    try {
+      const daily = (await read(owner, day)).items.find(item => item.key === clean.key);
+      assert.equal(daily.version, clean.version);
+      const approval = make("approve", [daily], day);
+      assert.equal((await submit(manager, make("no_show", [noShow], period, { reason: "Called out" }))).status, 409);
+      await ok(await submit(manager, approval)); await ok(await submit(manager, approval));
+      assert.equal((await read(owner)).items.find(item => item.key === clean.key).status, "approved");
+      assert.equal((await read(manager)).items.find(item => item.key === clean.key).status, "approved");
+      await ok(await submit(manager, make("resolve", issues)));
+      let after = (await read(owner)).items;
+      assert.ok(after.filter(item => issues.some(issue => issue.key === item.key)).every(item => item.status === "ready" && item.decision.actor === f.manager.displayName));
+      assert.equal(after.find(item => item.key === missing.key).status, "needs-review");
+      await ok(await submit(owner, make("approve", after.filter(item => item.allowedAction === "approve"))));
+      assert.equal((await submit(owner, make("no_show", [noShow], period, { reason: "" }))).status, 400);
+      await ok(await submit(owner, make("no_show", [noShow], period, { reason: "Called out", note: "Fictional absence note" })));
+      after = (await read(owner)).items;
+      assert.deepEqual(after.find(item => item.key === noShow.key).decision.reason, "Called out");
+      assert.equal(after.find(item => item.key === noShow.key).status, "resolved-no-show");
+      assert.ok(!(await read(manager)).items.some(item => item.key === noShow.key));
+      const snapshotBefore = await snapshot(owner);
+      const original = snapshotBefore.state.clockEvents.filter(event => [raw[0].id, raw[1].id].includes(event.id));
+      await ok(await call("commit", owner, saveBody(snapshotBefore, [{ entity: "timecard", id: 834002, before: { events: original }, after: {
+        employeeId: f.a.id, date, eventIds: original.map(event => event.id), events: [
+          { id: 834010, employeeId: f.a.id, type: "in", role: f.roleA.name, at: `${date}T17:10:00.000Z`, clockDetails: { california: true } },
+          { id: 834011, employeeId: f.a.id, type: "out", at: `${date}T18:00:00.000Z` },
+        ],
+      } }], newToken())));
+      assert.equal((await submit(owner, make("approve", [clean]))).status, 409);
+      assert.equal((await read(owner)).items.find(item => item.firstEventId === 834010).status, "ready");
+      assert.equal((await db.select().from(schema.timesheetReviews)).length, 6);
+      await assert.rejects(db.run(sql`DELETE FROM timesheet_reviews WHERE action='approve'`), /append-only|Failed query/);
+      assert.deepEqual(await db.select().from(schema.clockEvents).where(sql`id IN (${sql.join(raw.map(event => sql`${event.id}`), sql`, `)})`).orderBy(schema.clockEvents.id), raw);
+    } finally {
+      await db.delete(schema.accountPermissions).where(sql`account_id = ${f.manager.id} AND permission = 'timesheets.manage'`);
+    }
+  });
   await t.test("a scoped Manager can change a future shift without erasing notes they cannot read", async () => {
     const before = await snapshot(owner); const ownKey = f.b.id;
     const draft = { upsertedShifts: [{ id: 79001, employeeId: f.a.id, date: "2026-11-12", start: "09:00", end: "17:00", role: f.roleA.name, station: "Floor", notes: "Preserve this private shift note" }], deletedShiftIds: [], affectedEmployeeIds: [f.a.id] };

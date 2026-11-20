@@ -10478,6 +10478,30 @@ button[aria-label^="Remove"]:focus-visible,
   .ts-print-summary th:first-child { text-align: left; }
 }
 .ts-review-count.is-clear { background: #dae7f2; color: #4e6d87; }
+.ts-assistant { padding: 0 24px 16px; color: var(--ts-ink); background: var(--ts-tint); }
+.ts-assistant-bar, .ts-assistant-views, .ts-assistant-item-actions, .ts-assistant-reason > div { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.ts-assistant-bar { justify-content: space-between; }
+.ts-assistant-views > button { border: 1px solid var(--ts-line, #d6e1ed); border-radius: 8px; padding: 8px 11px; background: #fff; color: var(--ts-ink); }
+.ts-assistant-views > button[aria-expanded="true"] { border-color: var(--ts-accent); color: var(--ts-accent); }
+.ts-assistant > p, .ts-assistant-results > p, .ts-assistant-item p { margin: 6px 0 0; font-size: .85rem; }
+.ts-assistant-alert { color: #8e311c; }
+.ts-assistant-results { padding-top: 12px; }
+.ts-assistant-group h3 { margin: 12px 0 2px; font-size: .9rem; }
+.ts-assistant-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 8px 16px; padding: 10px 0; border-bottom: 1px solid #d6e1ed; }
+.ts-assistant-item-actions { justify-content: flex-end; }
+.ts-assistant-item-actions label { display: flex; align-items: center; align-self: center; gap: 6px; font-size: .83rem; }
+.ts-assistant-reason { grid-column: 1 / -1; display: grid; gap: 10px; max-width: 32rem; }
+.ts-assistant-reason label { display: grid; gap: 4px; }
+.ts-assistant-reason :is(select, textarea) { font: inherit; border: 1px solid #afc3d8; padding: 8px; border-radius: 6px; width: 100%; }
+.ts-assistant-reason textarea { min-height: 64px; resize: vertical; }
+.ts-assistant-note { white-space: pre-wrap; overflow-wrap: anywhere; }
+.ts-day-ledger .ts-day-group th { background: #edf2f8; padding-block: 10px; }
+@media (max-width: 680px) {
+  .ts-assistant { padding-inline: 16px; }
+  .ts-assistant-item { grid-template-columns: minmax(0, 1fr); }
+  .ts-assistant-item-actions { justify-content: flex-start; }
+}
+@media print { .timesheets-panel .ts-assistant { display: none !important; } }
 .timesheets-panel .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
 /* Time-card entry follows the worked-time, breaks, and validation sections. */
