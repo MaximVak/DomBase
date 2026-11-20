@@ -21,7 +21,7 @@ export type WorkspaceData = {
   opened: Record<number, string[]>;
   dismissed: Record<number, string[]>;
   employeeVersions: Record<number, number>;
-  teamPeriod?: { payPeriod: import("../team/rules").PayPeriod; anchorDate: string };
+  teamPeriod?: import("../team/rules").PayCalendar;
 };
 export const defaultInfo: BasicInfo = { companyName: "Molding Mart", locationName: "Molding Mart", locationPhone: "", companyPhone: "", accountOwner: "", address1: "", address2: "", city: "Sacramento", stateProvince: "California", postalCode: "", country: "United States", timeZone: "America/Los_Angeles", businessType: "", businessCategory: "", website: "" };
 export const emptyState = (): StaffState => ({ employees: [], departments: [], shifts: [], scheduleEvents: [], clockEvents: [], hoursAdjustments: [], timeCardEdits: [], ptoRequests: [], ptoPolicies: [], conversations: [], scheduleUpdates: [], scheduleHasBeenPublished: false, pendingScheduleUpdateEmployeeIds: [], scheduleDraftsByManager: {}, availabilityRequests: [], hoursRoundingMinutes: 15 });

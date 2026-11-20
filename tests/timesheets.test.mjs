@@ -288,14 +288,28 @@ test("calendar month grids handle leap years, year boundaries, and the one-month
   assert.equal(calendarMonthDays("2026-08-01")[6], "2026-08-01");
   assert.equal(shiftCalendarMonth("2026-12-31", 1), "2027-01-01");
   assert.equal(shiftCalendarMonth("2026-01-31", -1), "2025-12-01");
-  assert.deepEqual(calendarPresetRange("current", "2026-10-09", 1), { start: "2026-10-05", end: "2026-10-11" });
-  assert.deepEqual(calendarPresetRange("previous", "2026-10-09", 0), { start: "2026-09-27", end: "2026-10-03" });
-  assert.deepEqual(calendarPresetRange("yesterday", "2026-01-01", 1), { start: "2025-12-31", end: "2025-12-31" });
+  const calendar = { payPeriod: "weekly", anchorDate: "2026-10-01" };
+  assert.deepEqual(calendarPresetRange("yesterday", "2026-01-01", calendar), { start: "2025-12-31", end: "2025-12-31" });
   assert.ok(validCalendarRange("2026-03-01", "2026-03-31"));
   assert.ok(validCalendarRange("2026-10-31", "2026-11-01"));
   assert.equal(validCalendarRange("2026-03-01", "2026-04-01"), false);
   assert.equal(validCalendarRange("2026-03-02", "2026-03-01"), false);
   assert.equal(validCalendarRange("2026-03-02", ""), false);
+});
+
+test("pay-period shortcuts follow each saved cadence across calendar boundaries", async () => {
+  const { calendarPresetRange } = await calendarModule();
+  const cases = [
+    ["weekly", "2027-01-01", "2027-01-02", ["2026-12-26", "2027-01-01"], ["2026-12-19", "2026-12-25"]],
+    ["biweekly", "2027-01-08", "2026-12-30", ["2026-12-30", "2027-01-12"], ["2026-12-16", "2026-12-29"]],
+    ["semimonthly", "2028-03-01", "2026-11-02", ["2028-03-01", "2028-03-15"], ["2028-02-16", "2028-02-29"]],
+    ["semimonthly", "2028-02-16", "2026-11-02", ["2028-02-16", "2028-02-29"], ["2028-02-01", "2028-02-15"]],
+    ["monthly", "2027-01-10", "2026-11-02", ["2027-01-01", "2027-01-31"], ["2026-12-01", "2026-12-31"]],
+  ];
+  for (const [payPeriod, today, anchorDate, current, previous] of cases) {
+    assert.deepEqual(calendarPresetRange("current", today, { payPeriod, anchorDate }), { start: current[0], end: current[1] });
+    assert.deepEqual(calendarPresetRange("previous", today, { payPeriod, anchorDate }), { start: previous[0], end: previous[1] });
+  }
 });
 
 
@@ -366,6 +380,26 @@ test("pay-period totals combine visible employee cards and respect employee acce
   assert.match(own, /1 Time Card/);
   assert.match(own, /data-column="regular"[^>]*>7\.50</);
   assert.match(own, /data-column="wages"[^>]*>\$150\.00</);
+});
+
+test("monthly Timesheets shows only the pay period and includes its full overtime workweeks", async () => {
+  const { createElement } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const Panel = await panelComponent();
+  const dates = ["2026-10-26", "2026-10-27", "2026-10-28", "2026-10-29", "2026-10-30", "2026-11-01"];
+  const events = dates.flatMap((date, index) => eventsFor(date, "09:00", "17:00", 0, index * 10 + 1));
+  const html = renderToStaticMarkup(createElement(Panel, {
+    ...base, employees, events, weekStart: 1, today: "2026-11-02", now: Date.parse(at("2026-11-02", "12:00")),
+    payCalendar: { payPeriod: "monthly", anchorDate: "2026-11-02" },
+    overtimeScope: { companyWide: true, dataPeriod: { start: "2026-10-26", end: "2026-12-06" } },
+    departments: [], history: [], manager: true, activeEmployeeId: 1, roundingControl: null,
+    onSaveCard() {}, onAdjust() {}, onSettings() {},
+  }));
+  assert.match(html, /Nov 1, 2026 – Nov 30, 2026/);
+  assert.doesNotMatch(html, /Oct 26, 2026/);
+  const totals = html.match(/<table[^>]*aria-label="Combined timesheet totals"[\s\S]*?<\/table>/)[0];
+  assert.match(totals, /1 Time Card/);
+  assert.match(totals, /data-column="ot"[^>]*>8\.00</);
 });
 
 test("summary printing defaults to visible columns and prints saved values without edit controls", async () => {

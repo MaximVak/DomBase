@@ -1,7 +1,9 @@
 export type PayPeriod = "weekly" | "biweekly" | "semimonthly" | "monthly";
+export type PayCalendar = { payPeriod: PayPeriod; anchorDate: string };
+export const defaultPayCalendar: PayCalendar = { payPeriod: "weekly", anchorDate: "2026-11-02" };
 const day = (value: string) => new Date(`${value}T12:00:00Z`);
 export function plusDays(value: string, count: number) { const d = day(value); d.setUTCDate(d.getUTCDate() + count); return d.toISOString().slice(0, 10); }
-export function periodFor(date: string, period: PayPeriod = "weekly", anchor = "2026-11-02"): { start: string; end: string } {
+export function periodFor(date: string, period: PayPeriod = defaultPayCalendar.payPeriod, anchor = defaultPayCalendar.anchorDate): { start: string; end: string } {
   if (period === "monthly") return { start: date.slice(0, 7) + "-01", end: new Date(Date.UTC(Number(date.slice(0, 4)), Number(date.slice(5, 7)), 0, 12)).toISOString().slice(0, 10) };
   if (period === "semimonthly") return Number(date.slice(8)) <= 15 ? { start: date.slice(0, 7) + "-01", end: date.slice(0, 7) + "-15" } : { start: date.slice(0, 7) + "-16", end: periodFor(date, "monthly").end };
   const length = period === "biweekly" ? 14 : 7; const offset = Math.floor((day(date).getTime() - day(anchor).getTime()) / 86400000 / length) * length;

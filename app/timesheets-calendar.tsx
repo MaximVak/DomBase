@@ -2,7 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
-import { addDays, localDate, weekStartFor } from "./timesheets-model";
+import { periodFor } from "../team/rules";
+import type { PayCalendar } from "../team/rules";
+import { addDays, localDate } from "./timesheets-model";
 
 export type TimesheetDateRange = { start: string; end: string };
 type Preset = "current" | "previous" | "today" | "yesterday" | "custom";
@@ -22,10 +24,11 @@ export function calendarMonthDays(month: string): (string | null)[] {
   const days = new Date(new Date(`${first}T12:00:00`).getFullYear(), new Date(`${first}T12:00:00`).getMonth() + 1, 0).getDate();
   return Array.from({ length: 42 }, (_, index) => index >= leading && index < leading + days ? addDays(first, index - leading) : null);
 }
-export function calendarPresetRange(preset: Exclude<Preset, "custom">, today: string, weekStart: number): TimesheetDateRange {
-  const current = weekStartFor(today, weekStart);
-  if (preset === "current") return { start: current, end: addDays(current, 6) };
-  if (preset === "previous") return { start: addDays(current, -7), end: addDays(current, -1) };
+export function calendarPresetRange(preset: Exclude<Preset, "custom">, today: string, { payPeriod, anchorDate }: PayCalendar): TimesheetDateRange {
+  if (preset === "current" || preset === "previous") {
+    const current = periodFor(today, payPeriod, anchorDate);
+    return preset === "current" ? current : periodFor(addDays(current.start, -1), payPeriod, anchorDate);
+  }
   const day = preset === "today" ? today : addDays(today, -1);
   return { start: day, end: day };
 }
@@ -35,12 +38,12 @@ export function validCalendarRange(start: string, end: string) {
 const dateName = (date: string) => new Date(`${date}T12:00:00`).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
 
 type Props = {
-  start: string; end: string; today: string; weekStart: number; singleDay: boolean;
-  onApply: (range: TimesheetDateRange) => void; onCancel: () => void;
+  start: string; end: string; today: string; payCalendar: PayCalendar; singleDay: boolean;
+  onApply: (range: TimesheetDateRange, preset: Preset) => void; onCancel: () => void;
 };
 export function TimesheetsCalendar(props: Props) {
   const [selection, setSelection] = useState<TimesheetDateRange>({ start: props.start, end: props.end });
-  const [preset, setPreset] = useState<Preset>(() => presets.find(option => { if (option.id === "custom") return false; const range = calendarPresetRange(option.id, props.today, props.weekStart); return range.start === props.start && range.end === props.end; })?.id ?? "custom");
+  const [preset, setPreset] = useState<Preset>(() => presets.find(option => { if (option.id === "custom") return false; const range = calendarPresetRange(option.id, props.today, props.payCalendar); return range.start === props.start && range.end === props.end; })?.id ?? "custom");
   const [month, setMonth] = useState(`${props.start.slice(0, 7)}-01`);
   const [focusedDate, setFocusedDate] = useState(props.start);
   const [message, setMessage] = useState("");
@@ -55,7 +58,7 @@ export function TimesheetsCalendar(props: Props) {
   function choosePreset(value: Preset) {
     setPreset(value); setMessage("");
     if (value === "custom") return;
-    const range = calendarPresetRange(value, props.today, props.weekStart);
+    const range = calendarPresetRange(value, props.today, props.payCalendar);
     setSelection(range); setMonth(`${range.start.slice(0, 7)}-01`); setFocusedDate(range.start);
   }
   function chooseDate(date: string) {
@@ -90,7 +93,7 @@ export function TimesheetsCalendar(props: Props) {
     setMonth(next); setFocusedDate(next);
   }
   return <div className="ts-popover ts-calendar-popover" role="dialog" aria-label="Choose timesheet dates" ref={calendarRef}>
-    <div className="ts-calendar-content"><nav className="ts-calendar-presets" aria-label="Date shortcuts">{presets.map(option => <button type="button" key={option.id} className={preset === option.id ? "active" : ""} aria-pressed={preset === option.id} title={option.id === "current" || option.id === "previous" ? "Based on your saved work week" : undefined} onClick={() => choosePreset(option.id)}><span>{option.label}{option.id === "custom" ? <small>{props.singleDay ? "Select a day" : "1-month max range"}</small> : null}</span>{preset === option.id ? <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="m4 12 5 5L20 6" stroke="currentColor" strokeWidth="3" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg> : null}</button>)}</nav>
+    <div className="ts-calendar-content"><nav className="ts-calendar-presets" aria-label="Date shortcuts">{presets.map(option => <button type="button" key={option.id} className={preset === option.id ? "active" : ""} aria-pressed={preset === option.id} title={option.id === "current" || option.id === "previous" ? "Based on the saved company pay schedule" : undefined} onClick={() => choosePreset(option.id)}><span>{option.label}{option.id === "custom" ? <small>{props.singleDay ? "Select a day" : "1-month max range"}</small> : null}</span>{preset === option.id ? <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="m4 12 5 5L20 6" stroke="currentColor" strokeWidth="3" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg> : null}</button>)}</nav>
       <div className="ts-calendar-months">{[month, shiftCalendarMonth(month, 1)].map((value, index) => {
         const days = calendarMonthDays(value);
         const name = new Date(`${value}T12:00:00`).toLocaleDateString("en-US", { month: "long", year: "numeric" });
@@ -108,6 +111,6 @@ export function TimesheetsCalendar(props: Props) {
         </section>;
       })}</div>
     </div>
-    <div className="ts-calendar-footer"><p role="status">{message || (!selection.end ? "Select the end date." : "")}</p><button type="button" className="ts-calendar-cancel" onClick={props.onCancel}>Cancel</button><button type="button" className="ts-primary" disabled={!changed || !valid} onClick={() => props.onApply(selection)}>Apply</button></div>
+    <div className="ts-calendar-footer"><p role="status">{message || (!selection.end ? "Select the end date." : "")}</p><button type="button" className="ts-calendar-cancel" onClick={props.onCancel}>Cancel</button><button type="button" className="ts-primary" disabled={!changed || !valid} onClick={() => props.onApply(selection, preset)}>Apply</button></div>
   </div>;
 }

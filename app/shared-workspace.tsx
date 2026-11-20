@@ -10,9 +10,11 @@ import type { UploadDetails } from "../documents/types";
 import { maxFileBytes } from "../documents/types";
 
 import type { ScheduleToolResult } from "./schedule-tools-model";
+import type { PayCalendar } from "../team/rules";
+import { teamRequest } from "./team/client";
 
 type Period = { start: string; end: string };
-type Shared = { refresh: () => Promise<void>; scheduleTool: (body: Record<string, unknown>) => Promise<ScheduleToolResult | null>; setPeriod: (period: Period) => void; uploadDocument: (details: Omit<UploadDetails, "id">, file: File) => Promise<boolean>; data: WorkspaceData; pending: boolean; setEditing: (editing: boolean) => void; setState: (update: SetStateAction<StaffState>) => Promise<boolean>; save: (changes: Change[]) => Promise<boolean>; setError: (message: string) => void };
+type Shared = { refresh: () => Promise<void>; scheduleTool: (body: Record<string, unknown>) => Promise<ScheduleToolResult | null>; setPeriod: (period: Period) => void; uploadDocument: (details: Omit<UploadDetails, "id">, file: File) => Promise<boolean>; data: WorkspaceData; pending: boolean; setEditing: (editing: boolean) => void; setState: (update: SetStateAction<StaffState>) => Promise<boolean>; save: (changes: Change[]) => Promise<boolean>; savePayCalendar: (calendar: PayCalendar) => Promise<boolean>; setError: (message: string) => void };
 const SharedContext = createContext<Shared | null>(null);
 export function useSharedWorkspace() { const value = useContext(SharedContext); if (!value) throw new Error("Shared workspace provider missing."); return value; }
 function requestId() { return btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); }
@@ -63,17 +65,15 @@ export function SharedWorkspace({ account }: { account: DashboardAccount }) {
       .catch(error => { if (mounted.current && selected === generation.current) setError(error instanceof Error ? error.message : "Could not load this period."); })
       .finally(() => { if (mounted.current && selected === generation.current) setPeriodLoading(false); });
   }, [load]);
-  async function save(changes: Change[], preview?: StaffState) {
+  async function commit(write: (base: WorkspaceData, id: string) => Promise<{ saved: boolean }>, preview?: StaffState) {
     const base = current.current;
     if (needsReload.current) { setError("Reload the latest data before making another change."); return false; }
     if (!base || saving.current) { setError("Wait for the current save to finish."); return false; }
-    if (!changes.length) return true;
     saving.current = true; generation.current++; setPending(true); setError(""); setNotice("");
     if (preview) apply({ ...base, state: preview });
     let committed = false;
     try {
-      const response = await fetch("/api/workspace/commit", { method: "POST", headers: { "Content-Type": "application/json", Prefer: "return=minimal" }, body: JSON.stringify(saveBody(base, changes, requestId())), cache: "no-store" });
-      const result = await response.json(); if (!response.ok) throw new Error(result.error || "Could not confirm this save.");
+      const result = await write(base, requestId());
       if (result.saved !== true) throw new Error("Could not confirm this save. Reload the latest data.");
       committed = true;
       needsReload.current = true;
@@ -89,6 +89,18 @@ export function SharedWorkspace({ account }: { account: DashboardAccount }) {
       // A confirmed write must not invite duplicate submission if only its reload failed.
       return committed;
     } finally { saving.current = false; if (mounted.current) setPending(false); }
+  }
+  async function save(changes: Change[], preview?: StaffState) {
+    if (!changes.length) return true;
+    return commit(async (base, id) => {
+      const response = await fetch("/api/workspace/commit", { method: "POST", headers: { "Content-Type": "application/json", Prefer: "return=minimal" }, body: JSON.stringify(saveBody(base, changes, id)), cache: "no-store" });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Could not confirm this save.");
+      return result;
+    }, preview);
+  }
+  function savePayCalendar(calendar: PayCalendar) {
+    return commit((base, id) => teamRequest("commit", { id, revision: base.revision, operation: "settings", data: calendar }));
   }
   async function scheduleTool(body: Record<string, unknown>): Promise<ScheduleToolResult | null> {
     const base = current.current;
@@ -156,7 +168,7 @@ export function SharedWorkspace({ account }: { account: DashboardAccount }) {
     catch { setError("Could not reload shared data. Check your connection and try again."); }
   }
   if (!data) return <main className="login-screen"><section className="login-card auth-card"><h1>DomBase</h1>{error ? <><p role="alert">{error}</p><button onClick={() => void reload()}>Try again</button></> : <p role="status">Loading shared workspace…</p>}</section></main>;
-  return <SharedContext.Provider value={{ data, refresh: async () => { await load(true); }, scheduleTool, pending: pending || periodLoading, setPeriod, uploadDocument, setState: updateState, save, setEditing: value => { editing.current = value; if (!value && requestedPeriod.current) setPeriod(requestedPeriod.current); }, setError }}>
+  return <SharedContext.Provider value={{ data, refresh: async () => { await load(true); }, scheduleTool, pending: pending || periodLoading, setPeriod, uploadDocument, setState: updateState, save, savePayCalendar, setEditing: value => { editing.current = value; if (!value && requestedPeriod.current) setPeriod(requestedPeriod.current); }, setError }}>
     <div className={`workspace-sync-bar ${error ? "has-error" : ""}`}>
       <p role={error ? "alert" : "status"}>{error || (periodLoading ? "Loading selected period…" : pending ? "Saving to the shared database…" : notice || "Connected to the shared database")}</p>
       {error ? <button disabled={pending} onClick={() => void reload()}>Reload latest data</button> : null}

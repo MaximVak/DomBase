@@ -35,7 +35,8 @@ import { OvertimeOptionsPanel } from "./overtime-options";
 import { BreaksCompliancePanel } from "./breaks-compliance";
 import { MessagesSettingsPanel } from "./messages-settings";
 import { EmployeeReliabilityPanel } from "./team/employee-reliability";
-import { retainedThrough } from "../team/rules";
+import { defaultPayCalendar, retainedThrough } from "../team/rules";
+import { PayrollSettingsPanel } from "./pay-period-settings";
 import { TeamPermissionsPanel } from "./team-permissions";
 import { AccountProfilePanel } from "./account-profile-panel";
 import { LocationsPinsPanel } from "./locations-pins";
@@ -3812,41 +3813,13 @@ export default function Home({ account }: { account: DashboardAccount }) {
                   </div>
                 </section>
               ) : activeSettingsTab === "Payroll settings" ? (
-                <section className="panel settings-enforcement-panel settings-payroll-panel">
-                  <div className="settings-panel-heading">
-                    <h3>Payroll settings</h3>
-                    <button type="button" disabled>Save</button>
-                  </div>
-                  <div className="payroll-schedule-settings">
-                    <h4>Pay schedule</h4>
-                    <p>Get all your systems working together to save money and time.</p>
-                    <button type="button" className="payroll-settings-link" disabled title="Not available yet">Learn more</button>
-                    <div className="payroll-schedule-fields">
-                      <label title="Not available yet">
-                        <span>Our team gets paid</span>
-                        <select disabled defaultValue="monthly">
-                          <option value="monthly">once a month</option>
-                        </select>
-                      </label>
-                      <label title="Not available yet">
-                        <span>Our payroll periods begin on the</span>
-                        <select disabled defaultValue="1">
-                          <option value="1">1st</option>
-                        </select>
-                      </label>
-                    </div>
-                  </div>
-                  <div className="payroll-running-settings">
-                    <h4>Running payroll</h4>
-                    <div className="enforcement-rule">
-                      <label className="enforcement-rule-line" title="Not available yet">
-                        <input type="checkbox" disabled />
-                        <span>Lock timesheets after approval</span>
-                      </label>
-                      <p>With this enabled, timesheets cannot be edited after approval</p>
-                    </div>
-                  </div>
-                </section>
+                <PayrollSettingsPanel
+                  key={`${shared.data.teamPeriod?.payPeriod}:${shared.data.teamPeriod?.anchorDate}`}
+                  saved={shared.data.teamPeriod ?? defaultPayCalendar}
+                  canManage={shared.data.permissions["settings.manage"] && shared.data.permissions["team.read"] && shared.data.scheduleEstimateScopeComplete === true}
+                  pending={shared.pending}
+                  onSave={shared.savePayCalendar}
+                />
               ) : activeSettingsTab === "Time off" ? (
                 <section className="panel settings-enforcement-panel settings-time-off-panel">
                   <div className="settings-panel-heading">
@@ -5384,8 +5357,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
               )}
               <TimesheetsPanel
               onPeriodChange={setWorkspacePeriod}
-              payPeriod={shared.data.teamPeriod?.payPeriod}
-              payPeriodAnchor={shared.data.teamPeriod?.anchorDate}
+              payCalendar={shared.data.teamPeriod}
               canEdit={shared.data.permissions["timesheets.manage"]}
               canExport={shared.data.permissions["exports.timesheets"]}
               canManagePayrollIds={shared.data.permissions["team.manage"] && shared.data.permissions["team.private.read"]}

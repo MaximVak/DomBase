@@ -6,6 +6,7 @@ import { hourlyRate, rateFor } from "../../team/rules";
 import { TeamP2Summary } from "./p2-summary";
 import { BulkTeamForm } from "./bulk-form";
 import { TeamPersonEditor } from "./person-editor";
+import { payCalendarForSave, PayPeriodFields } from "../pay-period-settings";
 import { saveId, teamRequest } from "./client";
 type Message = { id: string; employeeId: number; channel: string; recipient: string; status: string; url: string; expiresAt: string };
 export function TeamScreen() {
@@ -39,9 +40,14 @@ export function TeamScreen() {
     </> : !error ? <p role="status">Loading team…</p> : null}</main>;
 }
 function TeamPeriodSettings({ data, save }: { data: TeamData; save: (op: string, value: unknown) => Promise<boolean> }) {
-  const [period, setPeriod] = useState(data.settings.payPeriod); const [anchor, setAnchor] = useState(data.settings.anchorDate);
+  const [calendar, setCalendar] = useState({ payPeriod: data.settings.payPeriod, anchorDate: data.settings.anchorDate });
   if (!data.allDepartments || !data.permissions["settings.manage"]) return null;
-  return <form className="team-form" onSubmit={e => { e.preventDefault(); void save("settings", { payPeriod: period, anchorDate: anchor }); }}><h2>Pay-period calendar</h2><p>Used for effective-date shortcuts and termination visibility. This does not run payroll.</p><div className="team-fields"><label>Period<select value={period} onChange={e => setPeriod(e.target.value as typeof period)}><option value="weekly">Weekly</option><option value="biweekly">Every two weeks</option><option value="semimonthly">Twice a month (1–15, 16–end)</option><option value="monthly">Monthly</option></select></label><label>Weekly / biweekly anchor<input type="date" required value={anchor} onChange={e => setAnchor(e.target.value)} /></label></div><button type="submit">Save pay-period calendar</button></form>;
+  return <form className="team-form" onSubmit={e => { e.preventDefault(); void save("settings", payCalendarForSave(calendar, data.settings.anchorDate)); }}>
+    <h2>Pay-period calendar</h2>
+    <p>Used by Timesheets, effective-date shortcuts and termination visibility.</p>
+    <div className="team-fields"><PayPeriodFields calendar={calendar} onChange={setCalendar} /></div>
+    <button type="submit">Save pay-period calendar</button>
+  </form>;
 }
 function DepartmentPublishing({ data, save }: { data: TeamData; save: (op: string, value: unknown) => Promise<boolean> }) {
   const [id, setId] = useState(data.departments[0]?.id ?? 0);

@@ -5,11 +5,12 @@
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
-import { retainedThrough } from "../team/rules";
-import type { PayPeriod } from "../team/rules";
+import { defaultPayCalendar, retainedThrough } from "../team/rules";
+import type { PayCalendar } from "../team/rules";
 import { buildDayRows, roundedClockLabel, sortDayRows, TimesheetsDay } from "./timesheets-day";
 import type { DaySort } from "./timesheets-day";
-import { TimesheetsCalendar } from "./timesheets-calendar";
+import { calendarPresetRange, TimesheetsCalendar } from "./timesheets-calendar";
+import type { TimesheetDateRange } from "./timesheets-calendar";
 import { TimesheetsSummary } from "./timesheets-summary";
 import { TimeCardEditor } from "./time-card-editor";
 import { addDays, buildTimeCards, defaultTimesheetColumns, timesheetColumns, timesheetCsv, timeCardReviews, totalMetrics, validateTimeCard, weekStartFor, workDate, workTime, workTimestamp } from "./timesheets-model";
@@ -19,7 +20,7 @@ import type { WorkweekScope } from "./timesheets-overtime";
 
 type Props = {
   onPeriodChange?: (period: { start: string; end: string }) => void;
-  payPeriod?: PayPeriod; payPeriodAnchor?: string;
+  payCalendar?: PayCalendar;
   employees: TimesheetEmployee[]; events: TimesheetEvent[]; shifts: TimesheetShift[]; adjustments: TimesheetAdjustment[]; pto: TimesheetPto[];
   departments: { id: number; name: string; roles: string[] }[]; history: TimeCardEdit[]; today: string; now: number;
   manager: boolean; canEdit?: boolean; canExport?: boolean; canManagePayrollIds?: boolean; onEditingChange?: (editing: boolean) => void; activeEmployeeId: number; weekStart: number; rounding: Rounding; roundingControl: ReactNode;
@@ -53,7 +54,9 @@ export function TimesheetsPanel(props: Props) {
   const summary = props.summary ?? localSummary;
   const [period, setPeriod] = useState<"day" | "period">("period");
   const [day, setDay] = useState(props.today);
-  const [range, setRange] = useState(() => { const start = weekStartFor(props.today, props.weekStart); return { start, end: addDays(start, 6) }; });
+  const [periodSelection, setPeriodSelection] = useState<"current" | "previous" | TimesheetDateRange>("current");
+  const payCalendar = props.payCalendar ?? defaultPayCalendar;
+  const range = typeof periodSelection === "string" ? calendarPresetRange(periodSelection, props.today, payCalendar) : periodSelection;
   const [menu, setMenu] = useState<"date" | "filters" | "view" | "tools" | null>(null);
   const [roles, setRoles] = useState<string[]>([]);
   const [search, setSearch] = useState("");
@@ -86,7 +89,7 @@ export function TimesheetsPanel(props: Props) {
   const dataEnd = needFullWeek ? addDays(weekStartFor(end, props.weekStart), 6) : end;
   useEffect(() => { if (dataStart && dataEnd && dataEnd >= dataStart) onPeriodChange?.({ start: dataStart, end: dataEnd }); }, [dataStart, dataEnd, onPeriodChange]);
   const cards = useMemo(() => buildTimeCards({ ...props, employees: props.employees.filter(employee => props.manager || employee.id === props.activeEmployeeId), start, end }), [props, start, end]);
-  const members = props.employees.filter(employee => (props.manager || employee.id === props.activeEmployeeId) && (!employee.terminated || !employee.terminationDate || start <= retainedThrough(employee.terminationDate, props.weekStart, props.payPeriod ?? "weekly", props.payPeriodAnchor ?? "2026-11-02") || cards.some(card => card.employeeId === employee.id)));
+  const members = props.employees.filter(employee => (props.manager || employee.id === props.activeEmployeeId) && (!employee.terminated || !employee.terminationDate || start <= retainedThrough(employee.terminationDate, props.weekStart, payCalendar.payPeriod, payCalendar.anchorDate) || cards.some(card => card.employeeId === employee.id)));
   const memberById = new Map(members.map(member => [member.id, member]));
   const visibleCards = cards.filter(card => (!roles.length || roles.includes(card.role)) && (memberById.get(card.employeeId)?.name.toLowerCase().includes(search.toLowerCase())));
   const reviews = timeCardReviews(visibleCards);
@@ -230,9 +233,16 @@ export function TimesheetsPanel(props: Props) {
   };
 
   const dateControl = <div className="ts-menu-anchor ts-date-anchor"><button type="button" className="ts-date-button" aria-expanded={menu === "date"} onClick={event => toggleMenu("date", event.currentTarget)}><CalendarIcon />{period === "day" ? dayDateLabel(start) : dateLabel(start, true)}{start !== end ? ` – ${dateLabel(end, true)}` : ""}<Chevron /></button>
-          {menu === "date" ? <TimesheetsCalendar start={start} end={end} today={props.today} weekStart={props.weekStart} singleDay={period === "day"}
+          {menu === "date" ? <TimesheetsCalendar key={`${payCalendar.payPeriod}:${payCalendar.anchorDate}`} start={start} end={end} today={props.today} payCalendar={payCalendar} singleDay={period === "day"}
             onCancel={() => { setMenu(null); triggerRef.current?.focus(); }}
-            onApply={value => { if (value.start !== value.end) setRange(value); setDay(value.start); setPeriod(value.start === value.end ? "day" : "period"); setReviewExpanded(false); setMenu(null); triggerRef.current?.focus(); }} /> : null}
+            onApply={(value, preset) => {
+              if (value.start !== value.end) setPeriodSelection(preset === "current" || preset === "previous" ? preset : value);
+              setDay(value.start);
+              setPeriod(value.start === value.end ? "day" : "period");
+              setReviewExpanded(false);
+              setMenu(null);
+              triggerRef.current?.focus();
+            }} /> : null}
         </div>;
   if (summary) return <TimesheetsSummary
     employees={members.filter(member => visibleCards.some(card => card.employeeId === member.id) || (showEmpty && (!roles.length || roles.includes(member.role)) && member.name.toLowerCase().includes(search.toLowerCase())))}
