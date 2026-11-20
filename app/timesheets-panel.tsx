@@ -160,7 +160,7 @@ export function TimesheetsPanel(props: Props) {
     const endAt = endEvent?.at ?? new Date(props.now).toISOString();
     const breaks = original.filter(event => event.type === "break").map(event => {
       const breakEnd = original.find(other => other.type === "break_end" && other.at >= event.at)?.at ?? endAt;
-      return { id: event.id, start: timeValue(event.at), end: timeValue(breakEnd), nextDay: localDate(new Date(event.at)) !== localDate(new Date(startEvent.at)) };
+      return { id: event.id, start: timeValue(event.at), end: timeValue(breakEnd), kind: event.clockDetails?.breakKind, nextDay: localDate(new Date(event.at)) !== localDate(new Date(startEvent.at)) };
     });
     setDraft({ employeeId: card.employeeId, date: localDate(new Date(startEvent.at)), start: timeValue(startEvent.at), end: timeValue(endAt), nextDay: localDate(new Date(startEvent.at)) !== localDate(new Date(endAt)), breakMinutes: 0, breaks, role: card.role, note: "", eventIds: card.eventIds, cardId: startEvent.cardId ?? startEvent.id }); setFormError("");
   }

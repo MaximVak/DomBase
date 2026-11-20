@@ -1,5 +1,13 @@
 export const kioskCopy = {
   en: {
+    rest: "Paid rest break", meal: "Unpaid meal break", startRest: "Start paid rest break", startMeal: "Start unpaid meal break",
+    onRest: "You are on a paid rest break.", onMeal: "You are on an unpaid meal break.", remaining: "Break time remaining",
+    offDutyExtension: "I stayed off duty for all of the extra break time.", startedWork: "I already started work", resumedWork: "I already resumed work",
+    earlyClock: "It is too early to clock in. If you already started work, tell a manager so your time can be recorded.",
+    earlyReturn: "Your break is still in progress.", breaksChanged: "Break requirements changed. Enter your PIN again to review them.", earlyApproval: "Early work needs manager approval.",
+    reviewBreaks: "Review your breaks", breakOutcome: "What happened?", choose: "Choose an option", missed: "I missed this break",
+    unrecorded: "I took it and forgot to record it", waive: "I voluntarily agree to waive this meal", waiverConsent: "Your workplace also allows this waiver. You can choose to report a missed meal instead.",
+    waiverReason: "Reason for the waiver", breakTimes: "When did you start and end this break?", confirmClockOut: "Confirm and clock out", back: "Back",
     clock: "DomBase time clock", tablet: "Breakroom tablet", checking: "Checking this tablet…",
     register: "Register this tablet", registrationHint: "Ask an Owner or authorized manager to register this browser from the dashboard. Employee PINs are available after registration.",
     employeePin: "Employee PIN", managerPin: "Manager approval PIN", employeeHint: "Enter your own 4–8 digit PIN.", managerHint: "Approves this request only. The screen returns to employee PIN entry.",
@@ -21,6 +29,14 @@ export const kioskCopy = {
     in: "Clock-in recorded.", out: "Clock-out recorded.", break: "Break started.", break_end: "Break ended.", recovery: "The clock stopped unexpectedly. Reopening the clock…",
   },
   es: {
+    rest: "Descanso pagado", meal: "Comida no pagada", startRest: "Iniciar descanso pagado", startMeal: "Iniciar comida no pagada",
+    onRest: "Estás en un descanso pagado.", onMeal: "Estás en una pausa para comer no pagada.", remaining: "Tiempo restante de descanso",
+    offDutyExtension: "Estuve libre de tareas durante todo el tiempo adicional.", startedWork: "Ya empecé a trabajar", resumedWork: "Ya volví a trabajar",
+    earlyClock: "Es demasiado temprano para registrar la entrada. Si ya empezaste a trabajar, avisa a un gerente para registrar tu tiempo.",
+    earlyReturn: "Tu descanso aún no termina.", breaksChanged: "Los requisitos de descanso cambiaron. Ingresa tu PIN para revisarlos.", earlyApproval: "El trabajo antes del turno requiere aprobación del gerente.",
+    reviewBreaks: "Revisa tus descansos", breakOutcome: "¿Qué pasó?", choose: "Elige una opción", missed: "No tomé este descanso",
+    unrecorded: "Lo tomé, pero olvidé registrarlo", waive: "Acepto voluntariamente omitir esta comida", waiverConsent: "Tu lugar de trabajo también permite omitir esta comida. Puedes optar por reportarla como omitida sin renuncia.",
+    waiverReason: "Motivo de la renuncia", breakTimes: "¿A qué hora empezó y terminó tu descanso?", confirmClockOut: "Confirmar y registrar salida", back: "Volver",
     clock: "Reloj de asistencia DomBase", tablet: "Tableta de la sala de descanso", checking: "Verificando esta tableta…",
     register: "Registra esta tableta", registrationHint: "Pide a un propietario o gerente autorizado que registre este navegador desde el panel de administración. Después podrás ingresar tu PIN.",
     employeePin: "PIN de empleado", managerPin: "PIN de aprobación del gerente", employeeHint: "Ingresa tu propio PIN de 4 a 8 dígitos.", managerHint: "Solo aprueba esta solicitud. La pantalla vuelve al ingreso del PIN de empleado.",
@@ -52,6 +68,9 @@ export const localizedError = (message: unknown, status: number, action: string)
   if (status === 401 && action === "pin") return "badPin";
   if (message === kioskCopy.en.badManager) return "badManager";
   if (status === 401) return "expired";
+  if (message === "It is too early to clock in.") return "earlyClock";
+  if (message === kioskCopy.en.earlyReturn) return "earlyReturn";
+  if (message === kioskCopy.en.breaksChanged) return "breaksChanged";
   if (status === 409) return "changed";
   return "connection";
 };

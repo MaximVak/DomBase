@@ -7,6 +7,7 @@ import type { RecordContext } from "./records";
 import { employeeInScope, roleFor } from "./records";
 import * as v from "./validation";
 import { requireOtherEmployee } from "./self-edit";
+import type { ClockDetails } from "../kiosk/break-rules";
 export async function timecardChange(r: RecordContext, change: Change) {
   r.ctx.requirePermission("timesheets.manage");
   if (!change.after) throw new AuthError(400, "Time history cannot be removed.");
@@ -32,10 +33,18 @@ export async function timecardChange(r: RecordContext, change: Change) {
   if (beforeEvents.length !== removed.length || beforeEvents.some(event => event.employeeId !== employeeId)) throw new AuthError(403, "The selected time-card events are outside your access.");
   const values = v.list(data.events, 100); if (values.length < 2) throw new AuthError(400, "A corrected card needs a clock-in and clock-out.");
   const events: StaffState["clockEvents"] = values.map(value => {
-    const event = v.object(value); v.keys(event, ["id", "employeeId", "type", "at", "role", "explanation", "automatic", "cardId", "durationMinutes", "durationSeconds"]);
+    const event = v.object(value); v.keys(event, ["id", "employeeId", "type", "at", "role", "explanation", "automatic", "cardId", "durationMinutes", "durationSeconds", "clockDetails"]);
     if (event.employeeId !== employeeId || event.automatic) throw new AuthError(403, "Time-card identity must match the selected employee.");
     const at = v.text(event.at, 35, true); if (!Number.isFinite(Date.parse(at)) || new Date(at).toISOString() !== at || Date.parse(at) > Date.parse(r.tx.stamp) + 1000) throw new AuthError(400, "Use a valid timestamp that is not in the future.");
-    return { id: v.integer(event.id), employeeId, type: v.oneOf(event.type, ["in", "out", "break", "break_end"]), at, ...(event.role ? { role: v.text(event.role, 100) } : {}), ...(event.explanation ? { explanation: v.text(event.explanation, 1000) } : {}) };
+    const type = v.oneOf(event.type, ["in", "out", "break", "break_end"]);
+    let clockDetails: ClockDetails | undefined;
+    if (event.clockDetails !== undefined) {
+      const details = v.object(event.clockDetails);
+      v.keys(details, ["breakKind"]);
+      if (type !== "break") throw new AuthError(400, "A break type requires a break start.");
+      clockDetails = { breakKind: v.oneOf(details.breakKind, ["rest", "meal"] as const) };
+    }
+    return { id: v.integer(event.id), employeeId, type, at, ...(event.role ? { role: v.text(event.role, 100) } : {}), ...(event.explanation ? { explanation: v.text(event.explanation, 1000) } : {}), ...(clockDetails ? { clockDetails } : {}) };
   });
   if (new Set(events.map(event => event.id)).size !== events.length || events[0].type !== "in" || events.at(-1)!.type !== "out") throw new AuthError(400, "Invalid time-card sequence.");
   let previous = -Infinity; let breaking = false;
@@ -47,6 +56,22 @@ export async function timecardChange(r: RecordContext, change: Change) {
     previous = at;
   }
   if (breaking || Date.parse(events.at(-1)!.at) - Date.parse(events[0].at) > 24 * 3600000) throw new AuthError(400, "Use a complete time card of up to 24 hours.");
+  // Only an original clock action can supply a waiver, early-work report or overage attestation.
+  const original = [...beforeEvents].sort((a, b) => a.at.localeCompare(b.at));
+  const originalIn = original.find(event => event.type === "in");
+  const originalOut = original.find(event => event.type === "out");
+  if (originalIn?.clockDetails) events[0].clockDetails = originalIn.clockDetails;
+  if (originalOut?.clockDetails) events[events.length - 1].clockDetails = originalOut.clockDetails;
+  const sameMinute = (a: string, b: string) => Math.floor(Date.parse(a) / 60000) === Math.floor(Date.parse(b) / 60000);
+  for (let index = 1; index < events.length - 1; index += 2) {
+    const start = events[index], end = events[index + 1];
+    const previousIndex = original.findIndex(event => event.type === "break" && sameMinute(event.at, start.at));
+    const previous = original[previousIndex], previousEnd = original[previousIndex + 1];
+    if (previousIndex < 0 || previousEnd?.type !== "break_end" || !sameMinute(previousEnd.at, end.at)) continue;
+    if ((previous.clockDetails?.breakKind ?? "meal") !== (start.clockDetails?.breakKind ?? previous.clockDetails?.breakKind ?? "meal")) continue;
+    if (previous.clockDetails) start.clockDetails = previous.clockDetails;
+    if (previousEnd.clockDetails) end.clockDetails = previousEnd.clockDetails;
+  }
   const role = roleFor(r, events[0].role); const date = v.date(data.date);
   const actualDate = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(events[0].at));
   if (date !== actualDate) throw new AuthError(400, "Time-card date must match the location's clock-in date.");

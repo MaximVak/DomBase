@@ -3759,6 +3759,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                   afterHours={scheduleEnforcementDraft.mealBreakAfterHours}
                   minutes={scheduleEnforcementDraft.mealBreakMinutes}
                   mandatory={scheduleEnforcementDraft.mandatoryMealBreak}
+                  controls={scheduleEnforcementDraft}
                   dirty={isBreaksComplianceDirty}
                   message={breaksComplianceMessage}
                   onChange={changes => {
@@ -7280,12 +7281,14 @@ function shiftEndDateTime(shift: Shift) {
 }
 
 function breakDurationMs(event: ClockEvent) {
+  if (event.clockDetails?.minimumMinutes) return event.clockDetails.minimumMinutes * 60000;
   if (event.durationSeconds) return event.durationSeconds * 1000;
   if (event.durationMinutes) return event.durationMinutes * 60 * 1000;
   return 0;
 }
 
 function breakDurationLabel(event: ClockEvent) {
+  if (event.clockDetails?.minimumMinutes) return `${event.clockDetails.minimumMinutes} min`;
   if (event.durationSeconds) return `${event.durationSeconds} sec`;
   return `${event.durationMinutes ?? 0} min`;
 }
@@ -8091,20 +8094,16 @@ function clockIntervals(events: ClockEvent[], currentTime: number) {
 }
 
 function breakIntervalsForEvents(events: ClockEvent[], currentTime: number) {
-  return events
-    .filter((event) => event.type === "break")
-    .map((event) => {
-      const start = new Date(event.at).getTime();
-      const finished = events.find(
-        (entry) => entry.type === "break_end" && entry.at >= event.at,
-      );
-      const scheduledEnd = breakEndTime(event)?.getTime() ?? start;
-
-      return {
-        start,
-        end: finished ? new Date(finished.at).getTime() : Math.max(currentTime, scheduledEnd),
-      };
-    });
+  return events.flatMap((event, index) => {
+    if (event.type !== "break") return [];
+    const start = Date.parse(event.at);
+    const next = events.slice(index + 1).find(entry => entry.type === "break_end" || entry.type === "out" || entry.type === "in");
+    const end = next ? Date.parse(next.at) : Math.max(currentTime, breakEndTime(event)?.getTime() ?? start);
+    const unpaid = event.clockDetails?.breakKind === "rest"
+      ? Math.max(start, end - (next?.type === "break_end" ? next.clockDetails?.unpaidSeconds ?? 0 : 0) * 1000)
+      : start;
+    return end > unpaid ? [{ start: unpaid, end }] : [];
+  });
 }
 
 function clippedDuration(start: number, end: number, rangeStart: number, rangeEnd: number) {
@@ -8388,7 +8387,7 @@ function ScheduleEnforcementPanel({ settings, dirty, message, onChange, onSave }
       onChange={(event) => onChange({ [field]: Number(event.target.value) })}
     />
   );
-  const checkbox = (field: "requireEarlyClockInExplanation" | "requireLateClockInExplanation" | "requireClockOutExplanation" | "requireUnscheduledExplanation" | "noShowAlerts" | "automaticClockOut", label: string) => (
+  const checkbox = (field: "blockEarlyClockIn" | "requireEarlyClockInExplanation" | "requireLateClockInExplanation" | "requireClockOutExplanation" | "requireUnscheduledExplanation" | "noShowAlerts" | "automaticClockOut", label: string) => (
     <input type="checkbox" aria-label={label} checked={settings[field]} onChange={(event) => onChange({ [field]: event.target.checked })} />
   );
   return (
@@ -8434,7 +8433,9 @@ function ScheduleEnforcementPanel({ settings, dirty, message, onChange, onSave }
             {minuteInput("earlyClockInMinutes", "Early clock-in allowance in minutes")}
             <span>minutes before the scheduled start</span>
           </div>
-          <p>Team members can still clock in early after explaining why. The explanation appears in Events for manager review.</p>
+          <p>The allowance sets when a team member can clock in before a scheduled shift.</p>
+          <label className="enforcement-rule-line">{checkbox("blockEarlyClockIn", "Block early clock-in at the kiosk")}<span>Block early clock-in at the kiosk</span></label>
+          <p>Employees who already started work can request a manager approval on the tablet.</p>
         </div>
         <div className="enforcement-rule">
           <label className="enforcement-rule-line">{checkbox("requireLateClockInExplanation", "Require explanations for late clock-ins")}<span>Require an explanation for late clock-ins</span></label>

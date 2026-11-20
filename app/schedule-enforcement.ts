@@ -22,6 +22,12 @@ export type ScheduleEnforcement = {
   mealBreakAfterHours: number;
   mealBreakMinutes: number;
   mandatoryMealBreak: boolean;
+  blockEarlyClockIn: boolean;
+  blockEarlyBreakReturn: boolean;
+  breakWaivers: boolean;
+  missedBreakReports: boolean;
+  unpaidRestOverage: boolean;
+  paidRestMinutes: number;
   enableTeamMessaging: boolean;
 };
 
@@ -49,15 +55,22 @@ export const defaultScheduleEnforcement: ScheduleEnforcement = {
   mealBreakAfterHours: 5,
   mealBreakMinutes: 30,
   mandatoryMealBreak: true,
+  blockEarlyClockIn: true,
+  blockEarlyBreakReturn: true,
+  breakWaivers: false,
+  missedBreakReports: true,
+  unpaidRestOverage: false,
+  paidRestMinutes: 10,
   enableTeamMessaging: true,
 };
 
 export const alertsPermissionsFields = ["notifyScheduleChanges", "employeesOwnScheduleOnly", "requireAvailabilityApproval", "restrictManagerDepartments", "noShowAlerts", "noShowMinutes"] as const;
 export const eventsTradesFields = ["enableScheduleEvents"] as const;
 export const overtimeFields = ["workWeekStart"] as const;
-export const breaksComplianceFields = ["mealBreakAfterHours", "mealBreakMinutes", "mandatoryMealBreak"] as const;
+export const breakPolicyFields = ["blockEarlyClockIn", "blockEarlyBreakReturn", "breakWaivers", "missedBreakReports", "unpaidRestOverage", "paidRestMinutes"] as const;
+export const breaksComplianceFields = ["mealBreakAfterHours", "mealBreakMinutes", "mandatoryMealBreak", "blockEarlyBreakReturn", "breakWaivers", "missedBreakReports", "unpaidRestOverage", "paidRestMinutes"] as const;
 export const messagesSettingsFields = ["enableTeamMessaging"] as const;
-export const scheduleEnforcementFields = ["workWeekStart", "minRestHours", "availabilityReviewDays", "scheduleStartHour", "scheduleEndHour", "lateMinutes", "earlyClockInMinutes", "requireEarlyClockInExplanation", "requireLateClockInExplanation", "requireClockOutExplanation", "requireUnscheduledExplanation", "noShowAlerts", "noShowMinutes", "automaticClockOut", "automaticClockOutMinutes"] as const;
+export const scheduleEnforcementFields = ["workWeekStart", "minRestHours", "availabilityReviewDays", "scheduleStartHour", "scheduleEndHour", "lateMinutes", "earlyClockInMinutes", "blockEarlyClockIn", "requireEarlyClockInExplanation", "requireLateClockInExplanation", "requireClockOutExplanation", "requireUnscheduledExplanation", "noShowAlerts", "noShowMinutes", "automaticClockOut", "automaticClockOutMinutes"] as const;
 
 export function schedulingSettingsForSave(saved: ScheduleEnforcement, draft: ScheduleEnforcement, fields: readonly (keyof ScheduleEnforcement)[]) {
   return { ...saved, ...Object.fromEntries(fields.map(field => [field, draft[field]])) } as ScheduleEnforcement;
@@ -105,7 +118,7 @@ export function normalizeScheduleEnforcement(value: unknown): ScheduleEnforcemen
       : key === "scheduleStartHour" ? 23
       : key === "scheduleEndHour" ? 24
       : key === "automaticClockOutMinutes" ? 1440 : key === "mealBreakAfterHours" ? 24 : 120;
-    const minimum = key === "mealBreakMinutes" ? 30 : key === "scheduleEndHour" || key === "automaticClockOutMinutes" || key === "lateMinutes" || key === "mealBreakAfterHours" ? 1 : 0;
+    const minimum = key === "mealBreakMinutes" ? 30 : key === "paidRestMinutes" ? 10 : key === "scheduleEndHour" || key === "automaticClockOutMinutes" || key === "lateMinutes" || key === "mealBreakAfterHours" ? 1 : 0;
     const candidate = input[key];
     if (typeof candidate === "number" && Number.isInteger(candidate) && candidate >= minimum && candidate <= maximum) {
       Object.assign(result, { [key]: candidate });

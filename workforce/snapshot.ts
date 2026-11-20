@@ -134,7 +134,7 @@ export async function workspaceSnapshot(db: Database, ctx: Context, fieldKey: st
     deletedShiftIds: draftChanges.filter(row => row.operation === "delete").map(row => row.shiftId!), affectedEmployeeIds: draftEmployees.map(row => row.employeeId),
   };
   state.scheduleEvents = events.map(row => ({ id: row.id, date: row.date, title: row.title, notes: p["schedule.notes.read"] ? row.notes : "" }));
-  state.clockEvents = rawClocks.map(row => ({ id: row.id, employeeId: row.employeeId, type: row.eventType, at: timestamp(row.occurredAt), role: row.roleName || undefined, explanation: row.explanation || undefined, automatic: row.automatic, cardId: row.cardId ?? undefined }));
+  state.clockEvents = rawClocks.map(row => ({ id: row.id, employeeId: row.employeeId, type: row.eventType, at: timestamp(row.occurredAt), role: row.roleName || undefined, explanation: row.explanation || undefined, automatic: row.automatic, cardId: row.cardId ?? undefined, ...(row.clockDetails ? { clockDetails: row.clockDetails } : {}) }));
   for (const edit of edits) {
     if (Array.isArray(edit.before.eventIds) && Array.isArray(edit.after.events)) {
       const removed = new Set(edit.before.eventIds as number[]);

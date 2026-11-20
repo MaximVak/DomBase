@@ -1,6 +1,7 @@
 import type { ClockType } from "../../kiosk/replay";
+import type { ActionDetails } from "../../kiosk/break-rules";
 
-export type ClockInput = { eventType: ClockType; roleId?: number; explanation: string };
+export type ClockInput = { eventType: ClockType; roleId?: number; explanation: string; details?: ActionDetails };
 export type QueuedClock = ClockInput & { ticket: string; attemptedAt: number };
 type Entry = QueuedClock & { needsHelp?: boolean };
 const storeName = "actions";

@@ -11,6 +11,8 @@ import { KioskRateLimitError, devicePinLockouts, pinAttemptLimits, attemptBudget
 import { clockDraft, eventAllowed, makeReplayTicket, readReplayTicket, syncClock } from "./replay";
 import type { ClockDraft } from "./replay";
 import { clockIdleSeconds } from "./idle";
+import { clockPolicy, kioskBreakView, resolveBreakDetails, workplaceDate } from "./break-actions";
+import { nextDate, zonedTimestamp } from "../workforce/time";
 
 type Person = { interaction: typeof schema.kioskInteractions.$inferSelect; employee: typeof schema.employees.$inferSelect };
 type Approval = { accountId: number; sessionVersion: number; credentialRevision: string };
@@ -65,7 +67,7 @@ export function createKioskService(db: KioskOperatorDatabase, options: { secret:
       db.update(schema.kioskApprovalSessions).set({ usedAt: stamp() }).where(and(eq(schema.kioskApprovalSessions.deviceSessionId, device.session.id), isNull(schema.kioskApprovalSessions.usedAt))),
     ]);
   }
-  async function signIn(request: Request, device: RegisteredDevice, pin: unknown, queue: boolean) {
+  async function signIn(request: Request, device: RegisteredDevice, pin: unknown, queue: boolean, breaks: boolean) {
     if (!pinIsValid(pin)) throw new AuthError(401, "Invalid employee PIN.");
     const lookup = pinLookup(options.secret, pin);
     const deviceAttempt = await attemptBudget(db, options.secret, `employee-device:${device.device.id}`, pinAttemptLimits.employeeDevice, now());
@@ -87,6 +89,7 @@ export function createKioskService(db: KioskOperatorDatabase, options: { secret:
     await releaseAttempt(db, deviceAttempt); await releaseAttempt(db, pinAttempt);
     const [event, roles] = await Promise.all([lastEvent(employee.id), rolesFor(employee.id)]);
     return json({ employee: { id: employee.id, name: employee.name }, roles, state: event?.eventType ?? "out", expiresAt,
+      ...(breaks ? { breakView: await kioskBreakView(db, employee.id, event, now()), serverTime: now() } : {}),
       ...(queue ? { replay: { ticket: makeReplayTicket(options.secret, device, id, event?.id ?? 0), serverTime: now() } } : {}),
     }, 200, { "Set-Cookie": kioskCookie(new URL(request.url), "person", token, seconds) });
   }
@@ -115,8 +118,8 @@ export function createKioskService(db: KioskOperatorDatabase, options: { secret:
         AND s.publication_id IS NOT NULL AND s.archived_at IS NULL))
       AND ${pending.requiresApproval ? (approval ? approvalActor(approval, pending.roleId) : sql`0 = 1`) : sql`1 = 1`}`;
     const result = await atomicBatch(db, [
-      sql`INSERT INTO clock_events (employee_id, event_type, occurred_at, shift_id, role_name, explanation, source, device_id, recorded_by_account_id, received_at, idempotency_key)
-        SELECT ${person.employee.id}, ${pending.eventType}, ${time}, ${pending.shiftId}, ${pending.roleName}, ${pending.explanation}, 'kiosk', ${device.device.id}, ${approval?.accountId ?? null}, ${time}, ${pending.id}
+      sql`INSERT INTO clock_events (employee_id, event_type, occurred_at, shift_id, role_name, explanation, source, device_id, recorded_by_account_id, received_at, idempotency_key, clock_details)
+        SELECT ${person.employee.id}, ${pending.eventType}, ${pending.createdAt}, ${pending.shiftId}, ${pending.roleName}, ${pending.explanation}, 'kiosk', ${device.device.id}, ${approval?.accountId ?? null}, ${time}, ${pending.id}, ${pending.clockDetails ? JSON.stringify(pending.clockDetails) : null}
         WHERE ${guard}`,
       ...(approval ? [sql`INSERT INTO kiosk_approval_sessions (id, device_session_id, account_id, session_version, credential_revision, token_hash, action, target_id, expires_at, used_at, created_at)
         SELECT ${newToken()}, ${device.session.id}, ${approval.accountId}, ${approval.sessionVersion}, ${approval.credentialRevision}, ${tokenHash(newToken())}, ${`clock.${pending.eventType}`}, ${pending.id}, ${new Date(now() + 60000).toISOString()}, ${time}, ${time} WHERE changes() = 1`] : []),
@@ -129,42 +132,49 @@ export function createKioskService(db: KioskOperatorDatabase, options: { secret:
     return { recorded: true, eventType: pending.eventType };
   }
   async function planClock(employeeId: number, previous: typeof schema.clockEvents.$inferSelect | null, draft: ClockDraft, clockTime: number) {
-      if (draft.eventType !== "in") return { roleId: null, roleName: previous?.roleName ?? "", shift: null };
-      const roleId = draft.roleId!;
-      const role = (await rolesFor(employeeId)).find(role => role.id === roleId);
-      if (!role) throw new AuthError(403, "Choose one of your active job roles.");
-      const [business] = await db.select({ zone: schema.business.timeZone }).from(schema.business).limit(1);
-      const parts = new Intl.DateTimeFormat("en-CA", { timeZone: business?.zone ?? "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date(clockTime));
-      const part = (name: string) => parts.find(part => part.type === name)!.value;
-      const localTime = `${part("year")}-${part("month")}-${part("day")}T${part("hour")}:${part("minute")}`;
-      const [settings] = await db.select({ early: schema.locationSettings.earlyClockInMinutes }).from(schema.locationSettings).limit(1);
-      const shifts = await db.select().from(schema.shifts).where(and(eq(schema.shifts.shiftType, "work"), eq(schema.shifts.employeeId, employeeId), eq(schema.shifts.roleId, roleId), isNull(schema.shifts.archivedAt), sql`${schema.shifts.publicationId} IS NOT NULL`, sql`${schema.shifts.date} BETWEEN date(${localTime.slice(0, 10)}, '-1 day') AND ${localTime.slice(0, 10)}`));
-      const shift = shifts.find(shift => {
-        const start = new Date(`${shift.date}T${shift.startTime}:00Z`);
-        const end = new Date(`${shift.date}T${shift.endTime}:00Z`);
-        if (end <= start) end.setUTCDate(end.getUTCDate() + 1);
-        start.setUTCMinutes(start.getUTCMinutes() - (settings?.early ?? 5));
-        const clock = new Date(`${localTime}:00Z`);
-        return clock >= start && clock < end;
-      });
-      return { roleId, roleName: role.name, shift: shift ?? null };
+    const policy = await clockPolicy(db);
+    const details = await resolveBreakDetails(db, employeeId, previous, draft, clockTime, policy);
+    if (draft.eventType !== "in") return { roleId: null, roleName: previous?.roleName ?? "", shift: null, requiresApproval: false, details };
+    const roleId = draft.roleId!;
+    const role = (await rolesFor(employeeId)).find(role => role.id === roleId);
+    if (!role) throw new AuthError(403, "Choose one of your active job roles.");
+    const date = workplaceDate(clockTime, policy.zone);
+    const tomorrow = nextDate(date);
+    const shifts = await db.select().from(schema.shifts).where(and(eq(schema.shifts.shiftType, "work"),
+      eq(schema.shifts.employeeId, employeeId), eq(schema.shifts.roleId, roleId), isNull(schema.shifts.archivedAt),
+      sql`${schema.shifts.publicationId} IS NOT NULL`, sql`${schema.shifts.date} BETWEEN date(${date}, '-1 day') AND ${tomorrow}`));
+    const allowance = policy.earlyClockInMinutes * 60000;
+    const candidates = shifts.flatMap(shift => {
+      try {
+        const start = zonedTimestamp(shift.date, shift.startTime, policy.zone);
+        const end = zonedTimestamp(shift.endTime <= shift.startTime ? nextDate(shift.date) : shift.date, shift.endTime, policy.zone);
+        return [{ shift, start, end }];
+      } catch { return []; }
+    }).sort((a, b) => a.start - b.start);
+    const ready = candidates.find(candidate => clockTime >= candidate.start - allowance && clockTime < candidate.end);
+    const upcoming = candidates.find(candidate => candidate.shift.date === date && clockTime < candidate.start - allowance);
+    if (ready) return { roleId, roleName: role.name, shift: ready.shift, requiresApproval: false, details: { california: true as const } };
+    if (upcoming && policy.blockEarlyClockIn && !draft.details?.worked) throw new AuthError(422, "It is too early to clock in.");
+    return { roleId, roleName: role.name, shift: upcoming?.shift ?? null,
+      requiresApproval: !upcoming || policy.blockEarlyClockIn, details };
   }
   async function prepareClock(device: RegisteredDevice, person: Person, body: Record<string, unknown>) {
-    exactKeys(body, ["eventType", "roleId", "explanation", "ticket"]);
+    exactKeys(body, ["eventType", "roleId", "explanation", "ticket", "details"]);
     const draft = clockDraft(body);
     const previous = await lastEvent(person.employee.id);
     const ticket = body.ticket === undefined ? null : readReplayTicket(options.secret, device, body.ticket);
     if (ticket && ticket.interactionId !== person.interaction.id) throw expired();
     if (!eventAllowed(previous?.eventType ?? null, draft.eventType) || (ticket && ticket.previousId !== (previous?.id ?? 0))) throw new AuthError(409, "Your clock status changed. Enter your PIN again.");
-    const plan = await planClock(person.employee.id, previous, draft, now());
+    const actionAt = now();
+    const plan = await planClock(person.employee.id, previous, draft, actionAt);
     const shiftId = draft.eventType === "in" ? plan.shift?.id ?? null : previous?.shiftId ?? null;
-    const requiresApproval = draft.eventType === "in" && !plan.shift;
-    const approvalReason = requiresApproval ? "Clock-in is outside a published shift. A manager must approve it." : "";
+    const requiresApproval = plan.requiresApproval;
+    const approvalReason = requiresApproval ? plan.shift ? "Early work needs manager approval." : "Clock-in is outside a published shift. A manager must approve it." : "";
     const id = ticket?.interactionId ?? newToken();
     const result = await atomicBatch(db, [
       db.update(schema.kioskClockRequests).set({ cancelledAt: stamp() }).where(and(eq(schema.kioskClockRequests.interactionId, person.interaction.id), isNull(schema.kioskClockRequests.completedAt), isNull(schema.kioskClockRequests.cancelledAt), sql`id <> ${id}`)),
-      sql`INSERT INTO kiosk_clock_requests (id, interaction_id, event_type, role_id, shift_id, role_name, previous_event_id, explanation, requires_approval, approval_reason, expires_at, created_at)
-        SELECT ${id}, ${person.interaction.id}, ${draft.eventType}, ${plan.roleId}, ${shiftId}, ${plan.roleName}, ${previous?.id ?? null}, ${draft.explanation}, ${requiresApproval ? 1 : 0}, ${approvalReason}, ${person.interaction.expiresAt}, ${stamp()}
+      sql`INSERT INTO kiosk_clock_requests (id, interaction_id, event_type, role_id, shift_id, role_name, previous_event_id, explanation, requires_approval, approval_reason, expires_at, created_at, action_details, clock_details)
+        SELECT ${id}, ${person.interaction.id}, ${draft.eventType}, ${plan.roleId}, ${shiftId}, ${plan.roleName}, ${previous?.id ?? null}, ${draft.explanation}, ${requiresApproval ? 1 : 0}, ${approvalReason}, ${person.interaction.expiresAt}, ${new Date(actionAt).toISOString()}, ${draft.details ? JSON.stringify(draft.details) : null}, ${plan.details ? JSON.stringify(plan.details) : null}
         WHERE ${activePerson(device, person)} AND NOT EXISTS (SELECT 1 FROM kiosk_clock_replays WHERE interaction_id = ${person.interaction.id})
         ON CONFLICT (id) DO NOTHING`,
     ]);
@@ -201,7 +211,7 @@ export function createKioskService(db: KioskOperatorDatabase, options: { secret:
       if (request.method !== "POST") return json({ error: "Method not allowed." }, 405, { Allow: action === "status" ? "GET" : "POST" });
       const body = await readAuthBody(request);
       if (action === "lock") { exactKeys(body, []); await lock(device); return json({ locked: true }, 200, { "Set-Cookie": kioskCookie(url, "person", "", 0) }); }
-      if (action === "pin") { exactKeys(body, ["pin", "queue"]); return await signIn(request, device, body.pin, body.queue === true); }
+      if (action === "pin") { exactKeys(body, ["pin", "queue", "breaks"]); return await signIn(request, device, body.pin, body.queue === true, body.breaks === true); }
       if (action === "sync") return json(await syncClock(db, device, activeDevice(device), options.secret, now(), body, lastEvent, planClock));
       const person = await personFor(request, device);
       let result;

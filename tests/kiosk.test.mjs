@@ -153,7 +153,16 @@ test("registered tablets, PIN sessions and action-scoped approvals use isolated 
     const before = (await db.select().from(schema.clockEvents)).length;
     const concurrent = await Promise.all([clock("clock", p.cookie, { eventType: "in", roleId: f.roleA.id, explanation: "" }), clock("clock", p.cookie, { eventType: "in", roleId: f.roleA.id, explanation: "" })]);
     assert.equal(concurrent.filter(r => r.status === 200).length, 1); assert.equal((await db.select().from(schema.clockEvents)).length, before + 1);
-    for (const eventType of ["break", "break_end", "out"]) { const next = await person(); await ok(await clock("clock", next.cookie, { eventType, explanation: "" })); }
+    const rest = await person();
+    await ok(await clock("clock", rest.cookie, { eventType: "break", explanation: "", details: { breakKind: "rest" } }));
+    const returning = await person();
+    assert.equal((await clock("clock", returning.cookie, { eventType: "break_end", explanation: "" })).status, 422);
+    await ok(await clock("clock", returning.cookie, { eventType: "break_end", explanation: "", details: { worked: true } }));
+    const endOfShift = await person();
+    await ok(await clock("clock", endOfShift.cookie, { eventType: "out", explanation: "" }));
+    const recent = await db.select().from(schema.clockEvents).where(eq(schema.clockEvents.employeeId, f.a.id));
+    assert.deepEqual(recent.at(-3).clockDetails, { breakKind: "rest", minimumMinutes: 10 });
+    assert.deepEqual(recent.at(-2).clockDetails, { earlyWork: true });
     const out = await person(); assert.equal((await clock("clock", out.cookie, { eventType: "out", explanation: "" })).status, 409);
     await clock("lock", deviceCookie, {});
   });
@@ -212,9 +221,64 @@ test("registered tablets, PIN sessions and action-scoped approvals use isolated 
     assert.equal((await adm("offline-review", deviceCookie)).status, 403);
     const { entries } = await ok(await adm("offline-review", ownerCookie));
     assert.deepEqual(entries, [{ id: conflict.ticket.split(".")[0], employee: f.a.name, role: f.roleA.name,
-      eventType: "break", attemptedAt: new Date(conflict.attemptedAt).toISOString(), explanation: conflict.explanation }]);
+      eventType: "break", attemptedAt: new Date(conflict.attemptedAt).toISOString(), explanation: conflict.explanation, details: null }]);
     await ok(await adm("offline-review", ownerCookie, { id: entries[0].id }));
     assert.deepEqual(await ok(await adm("offline-review", ownerCookie)), { entries: [] });
+  });
+  await t.test("California clock controls preserve paid rest and validate a voluntary waiver on the server", async () => {
+    const { zonedTimestamp } = await loadServerModule("workforce/time.ts");
+    const date = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(time));
+    const fixed = wall => zonedTimestamp(date, wall, "America/Los_Angeles");
+    let at = fixed("08:50");
+    const ca = createKioskService(db, { secret, now: () => at });
+    const send = (action, session, body) => request(ca, `/api/kiosk/${action}`, session, body);
+    const pin = "610746";
+    await ok(await adm("employee-pin", ownerCookie, { employeeId: f.multi.id, pin, password }));
+    await db.insert(schema.employeeSettings).values({ employeeId: f.multi.id, canWaiveMissedBreaks: true });
+    const [publication] = await db.insert(schema.schedulePublications).values({ version: 2, publishedByAccountId: f.owner.id }).returning();
+    await db.insert(schema.shifts).values({ employeeId: f.multi.id, roleId: f.roleA.id, date, startTime: "09:00", endTime: "18:00", publicationId: publication.id });
+    const settings = values => db.update(schema.locationSettings).set(values).where(eq(schema.locationSettings.businessId, 1));
+    const sign = async () => {
+      const response = await send("pin", deviceCookie, { pin, breaks: true, queue: true });
+      return { data: await ok(response), cookie: `${deviceCookie}; ${cookiesOf(response)[0]}` };
+    };
+    const entry = { eventType: "in", roleId: f.roleA.id, explanation: "" };
+    let actor = await sign();
+    assert.equal((await send("clock", actor.cookie, entry)).status, 422);
+    assert.equal((await send("clock", actor.cookie, { ...entry, details: { worked: true } })).status, 202);
+    await ok(await send("lock", deviceCookie, {}));
+    await settings({ blockEarlyClockIn: false, breakWaivers: true, unpaidRestOverage: true });
+    try {
+      actor = await sign();
+      await ok(await send("clock", actor.cookie, entry));
+      at = fixed("10:00");
+      actor = await sign();
+      const ticket = actor.data.replay.ticket;
+      await ok(await send("lock", deviceCookie, {}));
+      const sync = { eventType: "break", explanation: "", details: { breakKind: "rest" }, ticket, attemptedAt: at };
+      at += 31000;
+      assert.deepEqual(await ok(await send("sync", deviceCookie, sync)), { outcome: "synced" });
+      at = fixed("10:15");
+      actor = await sign();
+      assert.deepEqual(actor.data.breakView.active, { kind: "rest", availableAt: fixed("10:10"), extensionAt: fixed("10:10") });
+      await ok(await send("clock", actor.cookie, { eventType: "break_end", explanation: "", details: { offDutyExtension: true } }));
+      at = fixed("14:20");
+      actor = await sign();
+      assert.deepEqual(actor.data.breakView.issues, [{ kind: "meal", slot: 1, canWaive: true }]);
+      const waiver = { kind: "meal", slot: 1, outcome: "waived", reason: "Voluntarily elected to waive the first meal." };
+      const exit = reports => ({ eventType: "out", explanation: "", details: { reports } });
+      assert.equal((await send("clock", actor.cookie, exit([]))).status, 422);
+      assert.equal((await send("clock", actor.cookie, exit([{ ...waiver, slot: 2 }]))).status, 422);
+      await ok(await send("clock", actor.cookie, exit([waiver])));
+      const events = await db.select().from(schema.clockEvents).where(eq(schema.clockEvents.employeeId, f.multi.id));
+      assert.equal(events.length, 4);
+      assert.equal(events[1].source, "offline");
+      assert.deepEqual(events[1].clockDetails, { breakKind: "rest", minimumMinutes: 10 });
+      assert.deepEqual(events[2].clockDetails, { unpaidSeconds: 300 });
+      assert.deepEqual(events[3].clockDetails, { california: true, reports: [waiver] });
+    } finally {
+      await settings({ blockEarlyClockIn: true, breakWaivers: false, unpaidRestOverage: false });
+    }
   });
   await t.test("PIN resets, inactive employees and device revocation invalidate access", async () => {
     ownerCookie = await login(f.owner.email);

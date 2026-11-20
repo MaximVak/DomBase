@@ -11338,3 +11338,9 @@ body:has(dialog.time-exception-modal[open]) { overflow: hidden; }
   .schedule-print-entry b { font-size:8pt; }
   .schedule-print-footnote { font-size:7pt; margin-top:6pt; }
 }
+
+.kiosk-report, .kiosk-report fieldset { display: grid; gap: .75rem; min-width: 0; }
+.kiosk-report fieldset { border: 1px solid var(--line); border-radius: 6px; padding: .75rem; }
+.kiosk-report label { display: grid; gap: .5rem; }
+.kiosk-clock-panel .kiosk-check { display: flex; align-items: center; }
+.kiosk-shell .kiosk-check input { width: 24px; height: 24px; min-height: 0; flex: 0 0 auto; }

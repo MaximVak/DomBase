@@ -13,7 +13,7 @@ export async function clockReview(request: Request, db: KioskOperatorDatabase, a
     actor.account.accessLevel === "owner" ? sql`1 = 1` : sql`${interactions.employeeId} IS NOT ${actor.account.employeeId}`);
   if (request.method === "GET") {
     const entries = await db.select({ id: replays.interactionId, employee: employees.name, role: roles.name,
-      eventType: replays.eventType, attemptedAt: replays.attemptedAt, explanation: replays.explanation })
+      eventType: replays.eventType, attemptedAt: replays.attemptedAt, explanation: replays.explanation, details: replays.actionDetails })
       .from(replays).innerJoin(interactions, eq(interactions.id, replays.interactionId))
       .innerJoin(employees, eq(employees.id, interactions.employeeId)).leftJoin(roles, eq(roles.id, replays.roleId))
       .where(and(isNull(replays.eventId), isNull(replays.reviewedAt), scope)).orderBy(replays.receivedAt, replays.interactionId).limit(100);

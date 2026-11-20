@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import * as s from "../db/schema";
 import { AuthError } from "../auth/http";
-import { normalizeScheduleEnforcement } from "../app/schedule-enforcement";
+import { breakPolicyFields, normalizeScheduleEnforcement } from "../app/schedule-enforcement";
 import { equal, defaultInfo } from "./contract";
 import type { Change } from "./contract";
 import type { RecordContext } from "./records";
@@ -25,7 +25,9 @@ export async function settingsChange(r: RecordContext, change: Change) {
     r.tx.insert(s.business, { id: 1, ...values, updatedAt: r.tx.stamp }, sql`1 = 1`, { target: ["id"], update: [...Object.keys(values), "updatedAt"] }); return;
   }
   const data = v.object(change.after); v.keys(data, [...Object.keys(r.view.settings), "hoursRoundingMinutes"]);
-  const { hoursRoundingMinutes, ...rest } = data; const settings = normalizeScheduleEnforcement(rest);
+  const { hoursRoundingMinutes, ...rest } = data;
+  for (const field of breakPolicyFields) if (!(field in rest)) rest[field] = r.view.settings[field];
+  const settings = normalizeScheduleEnforcement(rest);
   if (!equal(rest, settings)) throw new AuthError(400, "Settings contain an invalid switch, time or limit.");
   const rounding = hoursRoundingMinutes === undefined ? r.view.state.hoursRoundingMinutes : v.integer(hoursRoundingMinutes, 5, 15);
   if (![5, 10, 15].includes(rounding)) throw new AuthError(400, "Choose 5, 10 or 15 minutes for rounding.");

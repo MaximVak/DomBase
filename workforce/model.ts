@@ -1,5 +1,6 @@
 import type { ScheduleEvent } from "../app/schedule-events";
 import type { TimeCardEdit } from "../app/timesheets-model";
+import type { ClockDetails } from "../kiosk/break-rules";
 
 export type Mode = "manager" | "employee";
 export type ViewId = "dashboard" | "employees" | "departments_roles" | "schedule" | "time_off" | "my_availability" | "team_availability" | "clockins" | "hours" | "settings" | "profile" | "team_members";
@@ -158,6 +159,7 @@ export type ClockEvent = {
   employeeId: number;
   type: "in" | "out" | "break" | "break_end";
   at: string;
+  clockDetails?: ClockDetails;
   durationMinutes?: 30 | 45;
   durationSeconds?: 5;
   explanation?: string;

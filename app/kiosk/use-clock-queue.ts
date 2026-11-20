@@ -35,7 +35,7 @@ export function useClockQueue() {
         let synced = false;
         let review = false;
         for (const entry of entries) {
-          const action = { ticket: entry.ticket, attemptedAt: entry.attemptedAt, eventType: entry.eventType, roleId: entry.roleId, explanation: entry.explanation };
+          const action = { ticket: entry.ticket, attemptedAt: entry.attemptedAt, eventType: entry.eventType, roleId: entry.roleId, explanation: entry.explanation, details: entry.details };
           const response = await kioskPost("sync", action);
           if ([401, 403, 409, 422].includes(response.status)) {
             await holdClock(action);

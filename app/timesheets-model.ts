@@ -1,12 +1,14 @@
 import { hourlyRate, rateFor } from "../team/rules";
 import type { WageRate } from "../team/rules";
 import { scheduledPaidMinutes } from "./schedule-estimates";
+import { inspectBreaks, requiredBreaks } from "../kiosk/break-rules";
+import type { BreakKind, ClockDetails } from "../kiosk/break-rules";
 export type TimesheetEmployee = { id: number; name: string; role: string; wage: string; active: boolean; terminated?: boolean; terminationDate?: string; wageRates?: WageRate[]; jobs?: { id: number; name: string }[]; payrollId?: string; legalFirstName?: string; legalMiddleName?: string; legalLastName?: string };
-export type TimesheetEvent = { id: number; employeeId: number; type: "in" | "out" | "break" | "break_end"; at: string; explanation?: string; automatic?: boolean; role?: string; cardId?: number };
+export type TimesheetEvent = { id: number; employeeId: number; type: "in" | "out" | "break" | "break_end"; at: string; explanation?: string; automatic?: boolean; role?: string; cardId?: number; clockDetails?: ClockDetails };
 export type TimesheetShift = { shiftType?: "work" | "day_off"; employeeId: number; date: string; start: string; end: string; role: string };
 export type TimesheetAdjustment = { id: number; employeeId: number; date: string; hours: number };
 export type TimesheetPto = { employeeId: number; startDate: string; endDate: string; compensation: string; status: string };
-export type TimeCardBreak = { id: number; start: string; end: string; nextDay: boolean };
+export type TimeCardBreak = { id: number; start: string; end: string; nextDay: boolean; kind?: BreakKind };
 export type TimeCardDraft = { employeeId: number; date: string; start: string; end: string; nextDay: boolean; breakMinutes: number; role: string; note: string; eventIds: number[]; breaks?: TimeCardBreak[]; cardId?: number };
 export type TimeCardEdit = { id: number; employeeId: number; date: string; at: string; actor: string; before: string; after: string; cardId?: number };
 export type Rounding = "actual" | 5 | 10 | 15;
@@ -54,27 +56,44 @@ export function buildTimeCards(input: {
       if (!session.length) return;
       const start = Date.parse(session[0].at);
       const end = closed ? Date.parse(session[session.length - 1].at) : boundary ?? input.now;
-      const breaks: [number, number][] = [];
-      let breakStart: number | null = null;
+      const breaks: { start: number; end: number; meal: boolean }[] = [];
+      let breakStart: TimesheetEvent | null = null;
+      const closeBreak = (until: number, endDetails?: ClockDetails) => {
+        if (!breakStart) return;
+        const from = Date.parse(breakStart.at);
+        const meal = breakStart.clockDetails?.breakKind !== "rest";
+        const unpaid = meal ? from : Math.max(from, until - (endDetails?.unpaidSeconds ?? 0) * 1000);
+        if (until > unpaid) breaks.push({ start: unpaid, end: until, meal });
+        breakStart = null;
+      };
       for (const event of session) {
-        if (event.type === "break" && breakStart === null) breakStart = Date.parse(event.at);
-        if (event.type === "break_end" && breakStart !== null) { breaks.push([breakStart, Date.parse(event.at)]); breakStart = null; }
+        if (event.type === "break" && !breakStart) breakStart = event;
+        if (event.type === "break_end") closeBreak(Date.parse(event.at), event.clockDetails);
       }
-      if (breakStart !== null) breaks.push([breakStart, end]);
+      closeBreak(end);
+      const california = session.some(event => event.clockDetails?.california || event.clockDetails?.breakKind);
       for (let date = localDate(new Date(start)) < contextStart ? contextStart : localDate(new Date(start)); date <= contextEnd && date <= localDate(new Date(end)); date = addDays(date, 1)) {
         if (date < contextStart) continue;
         const dayStart = Date.parse(`${date}T00:00:00`), dayEnd = Date.parse(`${addDays(date, 1)}T00:00:00`);
         const elapsed = overlap(start, end, dayStart, dayEnd);
         if (!elapsed) continue;
-        const breakMs = breaks.reduce((total, [a, b]) => total + overlap(Math.max(a, start), Math.min(b, end), dayStart, dayEnd), 0);
+        const breakMs = breaks.reduce((total, item) => total + overlap(Math.max(item.start, start), Math.min(item.end, end), dayStart, dayEnd), 0);
         const shift = input.shifts.find(shift => shift.shiftType !== "day_off" && shift.employeeId === employee.id && shift.date === date);
         const card: TimeCard = { id: `clock-${session[0].id}-${date}`, employeeId: employee.id, date, role: session[0].role || shift?.role || employee.role || "Unassigned", start: session[0].at, end: closed ? session[session.length - 1].at : undefined, eventIds: session.map(event => event.id), issues: [], notes: session.flatMap(event => event.explanation ? [event.explanation] : []), adjustment: 0, metrics: metrics() };
         card.metrics.actual = Math.max(0, elapsed - breakMs) / HOUR;
-        card.metrics.breaks = breakMs / HOUR;
+        card.metrics.breaks = breaks.reduce((total, item) => total + (item.meal ? overlap(Math.max(item.start, start), Math.min(item.end, end), dayStart, dayEnd) : 0), 0) / HOUR;
         card.metrics.spread = elapsed / HOUR;
         if (!closed) card.issues.push("Missing clock-out");
         if (session.some(event => event.automatic)) card.issues.push("Automatic clock-out");
-        if (input.mandatoryMealBreak && elapsed / HOUR >= input.mealBreakAfterHours && breakMs < 30 * 60000) card.issues.push("Missing breaks");
+        if (!california && input.mandatoryMealBreak && elapsed / HOUR >= input.mealBreakAfterHours && breakMs < 30 * 60000) card.issues.push("Missing breaks");
+        if (session.some(event => event.clockDetails?.earlyWork)) card.issues.push("Early work reported");
+        for (const event of session) {
+          for (const report of event.clockDetails?.reports ?? []) {
+            const title = report.kind === "meal" ? "Meal" : "Rest break";
+            if (report.outcome === "unrecorded") card.notes.push(`${title} ${report.slot} reported as taken: ${report.reason}`);
+            if (report.outcome === "waived") card.notes.push(`Meal ${report.slot} waiver: ${report.reason}`);
+          }
+        }
         cards.push(card);
       }
       session = [];
@@ -84,6 +103,24 @@ export function buildTimeCards(input: {
       else if (session.length) { session.push(event); if (event.type === "out") flush(true); }
     }
     flush(false);
+    const typed = events.filter(event => event.clockDetails?.california || event.clockDetails?.breakKind);
+    if (typed.length) {
+      const history = events.map(event => ({ type: event.type, at: Date.parse(event.at), details: event.clockDetails }));
+      const typedIds = new Set(typed.map(event => event.id));
+      const byDate = new Map<string, TimeCard>();
+      for (const card of cards) if (card.end && card.eventIds.some(id => typedIds.has(id))) byDate.set(card.date, card);
+      for (const [date, card] of byDate) {
+        const dayStart = Date.parse(`${date}T00:00:00`);
+        const dayEnd = Math.min(input.now, Date.parse(`${addDays(date, 1)}T00:00:00`));
+        const policy = { mealBreakAfterHours: input.mealBreakAfterHours, mealBreakMinutes: input.mealBreakMinutes ?? 30 };
+        const reports = history.filter(event => event.type === "out" && event.at > dayStart && event.at <= dayEnd).flatMap(event => event.details?.reports ?? []);
+        for (const issue of requiredBreaks(inspectBreaks(history, dayStart, dayEnd), policy, true)) {
+          if (issue.canWaive && reports.some(report => report.kind === issue.kind && report.slot === issue.slot && report.outcome === "waived")) continue;
+          const label = issue.kind === "meal" ? "Missing or noncompliant meal" : "Missing or short paid rest break";
+          if (!card.issues.includes(label)) card.issues.push(label);
+        }
+      }
+    }
     const dayCard = (date: string, role = employee.role || "Unassigned") => {
       let card = cards.find(card => card.date === date && card.role === role);
       if (!card) { card = { id: `day-${employee.id}-${date}-${role}`, employeeId: employee.id, date, role, eventIds: [], issues: [], notes: [], adjustment: 0, metrics: metrics() }; cards.push(card); }
@@ -205,7 +242,7 @@ export function timeCardBounds(draft: TimeCardDraft) {
     end: Date.parse(`${draft.nextDay ? addDays(draft.date, 1) : draft.date}T${draft.end}`),
   };
 }
-export function timeCardBreakIntervals(draft: TimeCardDraft): { start: number; end: number }[] {
+export function timeCardBreakIntervals(draft: TimeCardDraft): { start: number; end: number; kind?: BreakKind }[] {
   const bounds = timeCardBounds(draft);
   if (draft.breaks !== undefined) {
     return draft.breaks.map(entry => {
@@ -213,7 +250,7 @@ export function timeCardBreakIntervals(draft: TimeCardDraft): { start: number; e
       const start = Date.parse(`${date}T${entry.start}`);
       let end = Date.parse(`${date}T${entry.end}`);
       if (end <= start && draft.nextDay) end = Date.parse(`${addDays(date, 1)}T${entry.end}`);
-      return { start, end };
+      return { start, end, ...(entry.kind ? { kind: entry.kind } : {}) };
     }).sort((a, b) => a.start - b.start);
   }
   // Older callers supplied only a duration. Keep their midpoint-break behavior.
@@ -224,10 +261,14 @@ export function timeCardBreakIntervals(draft: TimeCardDraft): { start: number; e
 export function timeCardPreview(draft: TimeCardDraft) {
   const { start, end } = timeCardBounds(draft);
   const elapsedMinutes = Number.isFinite(start) && Number.isFinite(end) && end > start ? (end - start) / 60000 : 0;
-  const breakMinutes = timeCardBreakIntervals(draft).reduce((sum, entry) => {
-    return sum + (Number.isFinite(entry.start) && Number.isFinite(entry.end) ? Math.max(0, entry.end - entry.start) / 60000 : 0);
-  }, 0);
-  return { elapsedMinutes, breakMinutes, workedMinutes: Math.max(0, elapsedMinutes - breakMinutes) };
+  let breakMinutes = 0;
+  let restMinutes = 0;
+  for (const entry of timeCardBreakIntervals(draft)) {
+    const duration = Number.isFinite(entry.start) && Number.isFinite(entry.end) ? Math.max(0, entry.end - entry.start) / 60000 : 0;
+    if (entry.kind === "rest") restMinutes += duration;
+    else breakMinutes += duration;
+  }
+  return { elapsedMinutes, breakMinutes, restMinutes, workedMinutes: Math.max(0, elapsedMinutes - breakMinutes) };
 }
 export function validateTimeCard(draft: TimeCardDraft, events: TimesheetEvent[], now: number): string {
   if (!Number.isInteger(draft.employeeId) || draft.employeeId <= 0) return "Select an employee.";
@@ -260,7 +301,7 @@ export function timeCardEvents(draft: TimeCardDraft, firstId: number): Timesheet
   const cardId = draft.cardId ?? draft.eventIds[0] ?? firstId;
   const events: TimesheetEvent[] = [{ id: firstId, employeeId: draft.employeeId, type: "in", at: new Date(start).toISOString(), role: draft.role, explanation: draft.note.trim() || undefined, cardId }];
   for (const entry of timeCardBreakIntervals(draft)) {
-    events.push({ id: firstId + events.length, employeeId: draft.employeeId, type: "break", at: new Date(entry.start).toISOString(), cardId });
+    events.push({ id: firstId + events.length, employeeId: draft.employeeId, type: "break", at: new Date(entry.start).toISOString(), cardId, ...(entry.kind ? { clockDetails: { breakKind: entry.kind } } : {}) });
     events.push({ id: firstId + events.length, employeeId: draft.employeeId, type: "break_end", at: new Date(entry.end).toISOString(), cardId });
   }
   events.push({ id: firstId + events.length, employeeId: draft.employeeId, type: "out", at: new Date(end).toISOString(), cardId });

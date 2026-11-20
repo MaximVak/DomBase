@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import { check, foreignKey, index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import type { ActionDetails, ClockDetails } from "../kiosk/break-rules";
 
 // One database serves one company/location. Additional locations are out of scope.
 const id = () => integer("id").primaryKey({ autoIncrement: true });
@@ -98,6 +99,7 @@ export const clockEvents = sqliteTable(
     cardId: integer("card_id").references(() => timeCards.id),
     roleName: text("role_name").notNull().default(""),
     durationSeconds: integer("duration_seconds"),
+    clockDetails: text("clock_details", { mode: "json" }).$type<ClockDetails>(),
     explanation: text("explanation").notNull().default(""),
     automatic: integer("automatic", { mode: "boolean" }).notNull().default(false),
     source: text("source", { enum: ["legacy", "kiosk", "manager", "system", "offline"] }).notNull().default("legacy"),
@@ -221,6 +223,12 @@ export const locationSettings = sqliteTable("location_settings", {
   mealBreakAfterHours: integer("meal_break_after_hours").notNull().default(5),
   mealBreakMinutes: integer("meal_break_minutes").notNull().default(30),
   mandatoryMealBreak: integer("mandatory_meal_break", { mode: "boolean" }).notNull().default(true),
+  blockEarlyClockIn: integer("block_early_clock_in", { mode: "boolean" }).notNull().default(true),
+  blockEarlyBreakReturn: integer("block_early_break_return", { mode: "boolean" }).notNull().default(true),
+  breakWaivers: integer("break_waivers", { mode: "boolean" }).notNull().default(false),
+  missedBreakReports: integer("missed_break_reports", { mode: "boolean" }).notNull().default(true),
+  unpaidRestOverage: integer("unpaid_rest_overage", { mode: "boolean" }).notNull().default(false),
+  paidRestMinutes: integer("paid_rest_minutes").notNull().default(10),
   enableTeamMessaging: integer("enable_team_messaging", { mode: "boolean" }).notNull().default(true),
   hoursRoundingMinutes: integer("hours_rounding_minutes").notNull().default(15),
   kioskIdleSeconds: integer("kiosk_idle_seconds").notNull().default(30),
@@ -428,6 +436,8 @@ export const kioskClockRequests = sqliteTable("kiosk_clock_requests", {
   shiftId: integer("shift_id").references(() => shifts.id),
   roleName: text("role_name").notNull().default(""),
   previousEventId: integer("previous_event_id").references(() => clockEvents.id),
+  actionDetails: text("action_details", { mode: "json" }).$type<ActionDetails>(),
+  clockDetails: text("clock_details", { mode: "json" }).$type<ClockDetails>(),
   explanation: text("explanation").notNull().default(""),
   requiresApproval: integer("requires_approval", { mode: "boolean" }).notNull(),
   approvalReason: text("approval_reason").notNull().default(""),
@@ -447,6 +457,7 @@ export const kioskClockReplays = sqliteTable("kiosk_clock_replays", {
   attemptedAt: text("attempted_at").notNull(),
   explanation: text("explanation").notNull(),
   payloadHash: text("payload_hash").notNull(),
+  actionDetails: text("action_details", { mode: "json" }).$type<ActionDetails>(),
   eventId: integer("event_id").references(() => clockEvents.id),
   receivedAt: text("received_at").notNull(),
   reviewedAt: text("reviewed_at"),

@@ -18,7 +18,7 @@ export function KioskScreen() {
   const [phase, setPhase] = useState<Phase>("loading");
   const [deviceName, setDeviceName] = useState("");
   const [person, setPerson] = useState<ClockPerson | null>(null);
-  const [pending, setPending] = useState<string | null>(null);
+  const [pending, setPending] = useState<{ id: string; early: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
   const [online, setOnline] = useState(true);
   const [message, setMessage] = useState<KioskText | null>(null);
@@ -173,7 +173,7 @@ export function KioskScreen() {
           setCooldowns(current => ({ ...current, [action]: pinCooldown(response.headers.get("retry-after"), data.limitScope, Date.now()) }));
           return;
         }
-        if (action === "clock" && [401, 409].includes(response.status)) reset();
+        if (action === "clock" && ([401, 409].includes(response.status) || data.error === kioskCopy.en.breaksChanged)) reset();
         setMessage(localizedError(data.error, response.status, action));
         return;
       }
@@ -183,7 +183,7 @@ export function KioskScreen() {
         setCooldowns(current => ({ ...current, pin: null }));
         setPerson(data); setPhase("person");
       } else if (data.approvalRequired) {
-        setPending(data.requestId); setPhase("approval");
+        setPending({ id: data.requestId, early: data.reason === kioskCopy.en.earlyApproval }); setPhase("approval");
       } else {
         if (action === "approve") setCooldowns(current => ({ ...current, approve: null }));
         reset(data.eventType);
@@ -218,10 +218,10 @@ export function KioskScreen() {
       {phase === "error" ? <button type="button" onClick={() => void check()}>{text.retry}</button> : null}
       {phase === "unregistered" ? <><h2>{text.register}</h2><p>{text.registrationHint}</p></> : null}
       {phase === "pin" && cooldowns.pin ? <PinLockout value={cooldowns.pin} language={language} onExpired={clearPinCooldown} /> : null}
-      {phase === "pin" ? <PinForm key={epoch} language={language} busy={busy} offline={!online} locked={cooldowns.pin?.scope === "device"} describedBy={cooldowns.pin ? "kiosk-lockout" : undefined} onSubmit={pin => submit("pin", { pin, queue: available })} /> : null}
-      {phase === "person" && person ? <ClockPanel person={person} language={language} busy={busy} offlineBlocked={!online && !(person.replay && available)} onClock={input => submit("clock", input, input)} onCancel={() => reset()} /> : null}
-      {phase === "approval" && pending ? <><h2>{text.approval}</h2><p>{text.approvalReason}</p>{cooldowns.approve ? <PinLockout value={cooldowns.approve} language={language} manager onExpired={clearApprovalCooldown} /> : null}
-        <PinForm key={"manager-" + epoch} language={language} manager busy={busy} offline={!online} locked={cooldowns.approve?.scope === "device"} describedBy={cooldowns.approve ? "kiosk-lockout" : undefined} onSubmit={pin => submit("approve", { requestId: pending, pin })} /><button type="button" onClick={() => reset()}>{text.cancel}</button>
+      {phase === "pin" ? <PinForm key={epoch} language={language} busy={busy} offline={!online} locked={cooldowns.pin?.scope === "device"} describedBy={cooldowns.pin ? "kiosk-lockout" : undefined} onSubmit={pin => submit("pin", { pin, queue: available, breaks: true })} /> : null}
+      {phase === "person" && person ? <ClockPanel person={person} language={language} busy={busy} earlyClockBlocked={message === "earlyClock"} offlineBlocked={!online && !(person.replay && available)} onClock={input => submit("clock", input, input)} onCancel={() => reset()} /> : null}
+      {phase === "approval" && pending ? <><h2>{text.approval}</h2><p>{pending.early ? text.earlyApproval : text.approvalReason}</p>{cooldowns.approve ? <PinLockout value={cooldowns.approve} language={language} manager onExpired={clearApprovalCooldown} /> : null}
+        <PinForm key={"manager-" + epoch} language={language} manager busy={busy} offline={!online} locked={cooldowns.approve?.scope === "device"} describedBy={cooldowns.approve ? "kiosk-lockout" : undefined} onSubmit={pin => submit("approve", { requestId: pending.id, pin })} /><button type="button" onClick={() => reset()}>{text.cancel}</button>
       </> : null}
     </section>
   </main>;

@@ -1,7 +1,8 @@
 "use client";
 import { useState } from "react";
+import type { ActionDetails } from "../../kiosk/break-rules";
 
-type Entry = { id: string; employee: string; role: string | null; eventType: keyof typeof labels; attemptedAt: string; explanation: string };
+type Entry = { id: string; employee: string; role: string | null; eventType: keyof typeof labels; attemptedAt: string; explanation: string; details: ActionDetails | null };
 const labels = { in: "Clock in", out: "Clock out", break: "Start break", break_end: "End break" };
 const time = new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", dateStyle: "medium", timeStyle: "medium" });
 
@@ -27,6 +28,9 @@ export function OfflineClockReview({ entries, onReviewed }: { entries: Entry[]; 
       <ul className="kiosk-device-list">{entries.map(entry => <li key={entry.id}>
         <div><strong>{entry.employee}{entry.role ? ` · ${entry.role}` : ""}</strong>
           <span>{labels[entry.eventType]} · {time.format(Date.parse(entry.attemptedAt))} Pacific</span>
+          {entry.details?.breakKind ? <p>{entry.details.breakKind === "rest" ? "Paid rest break" : "Unpaid meal break"}</p> : null}
+          {entry.details?.worked ? <p>Employee reported work had already started.</p> : null}
+          {entry.details?.reports?.map(report => <p key={report.kind + report.slot}>{report.kind === "meal" ? "Meal" : "Rest"} {report.slot} · {report.outcome}{report.reason ? ` · ${report.reason}` : ""}</p>)}
           {entry.explanation ? <p>{entry.explanation}</p> : null}
         </div>
         <button type="button" disabled={busy !== null} onClick={() => void markReviewed(entry.id)}>{busy === entry.id ? "Saving…" : "Mark reviewed"}</button>

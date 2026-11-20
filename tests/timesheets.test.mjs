@@ -118,7 +118,7 @@ test("a second clock-in bounds a missing clock-out so broken records do not crea
 test("explicit meal breaks save their exact intervals and produce the same live and ledger totals", () => {
   const draft = { employeeId: 1, date: "2026-08-03", start: "09:00", end: "17:00", nextDay: false, breakMinutes: 0, role: "Sales", note: "", eventIds: [], breaks: [{ id: 1, start: "12:00", end: "12:30", nextDay: false }, { id: 2, start: "15:00", end: "15:15", nextDay: false }] };
   assert.equal(validateTimeCard(draft, [], base.now), "");
-  assert.deepEqual(timeCardPreview(draft), { elapsedMinutes: 480, breakMinutes: 45, workedMinutes: 435 });
+  assert.deepEqual(timeCardPreview(draft), { elapsedMinutes: 480, breakMinutes: 45, restMinutes: 0, workedMinutes: 435 });
   const events = timeCardEvents(draft, 100);
   assert.deepEqual(events.filter(event => event.type === "break").map(event => event.at), [at(draft.date, "12:00"), at(draft.date, "15:00")]);
   assert.equal(new Set(events.map(event => event.id)).size, events.length);
@@ -323,4 +323,41 @@ test("summary ribbon sums displayed employees, leaves identity and rates blank, 
   const ownRibbon = ownHtml.match(/<table[^>]*aria-label="Combined summary totals"[\s\S]*?<\/table>/)[0];
   assert.match(ownRibbon, /Filtered totals/);
   assert.match(ownRibbon, /data-total-column="regular"><strong>7\.50<\/strong>/);
+});
+
+test("California timesheets keep paid rest paid and recheck waivers against the entire workday", () => {
+  const date = "2026-08-03";
+  const make = (id, type, time, clockDetails) => ({ id, employeeId: 1, type, at: at(date, time), clockDetails });
+  const event = [
+    make(1, "in", "08:00", { california: true }),
+    make(2, "break", "10:00", { breakKind: "rest" }),
+    make(3, "break_end", "10:15", { unpaidSeconds: 300 }),
+    make(4, "out", "13:45", { california: true, reports: [{ kind: "meal", slot: 1, outcome: "waived", reason: "Voluntary" }] }),
+  ];
+  const [first] = buildTimeCards({ ...base, events: event });
+  assert.equal(first.metrics.actual, 5 + 40 / 60);
+  assert.equal(first.metrics.breaks, 0);
+  assert.deepEqual(first.issues, []);
+  assert.ok(first.notes.includes("Meal 1 waiver: Voluntary"));
+  const extension = [...event, make(5, "in", "15:00", { california: true }), make(6, "out", "16:00")];
+  const rows = buildTimeCards({ ...base, events: extension });
+  assert.ok(rows.at(-1).issues.includes("Missing or noncompliant meal"));
+  assert.ok(rows.at(-1).issues.includes("Missing or short paid rest break"));
+});
+
+test("California meal checks use exact timing and only allow the second waiver after a compliant first meal", async () => {
+  const { inspectBreaks, requiredBreaks } = await loadServerModule("kiosk/break-rules.ts");
+  const hour = 3600000;
+  const event = (type, at) => ({ type, at });
+  const assess = (work, firstMeal) => {
+    const events = firstMeal === undefined ? [event("in", 0)] : [event("in", 0), event("break", firstMeal), event("break_end", firstMeal + hour / 2)];
+    return requiredBreaks(inspectBreaks(events, 0, work + (firstMeal === undefined ? 0 : hour / 2)), { mealBreakAfterHours: 5, mealBreakMinutes: 30 }, true)
+      .filter(issue => issue.kind === "meal");
+  };
+  assert.deepEqual(assess(5 * hour), []);
+  assert.deepEqual(assess(6 * hour), [{ kind: "meal", slot: 1, canWaive: true }]);
+  assert.deepEqual(assess(6 * hour + 1), [{ kind: "meal", slot: 1, canWaive: false }]);
+  assert.deepEqual(assess(12 * hour, 5 * hour), [{ kind: "meal", slot: 2, canWaive: true }]);
+  assert.deepEqual(assess(12 * hour + 1, 5 * hour), [{ kind: "meal", slot: 2, canWaive: false }]);
+  assert.deepEqual(assess(11 * hour, 5 * hour + 1).map(issue => issue.canWaive), [false, false]);
 });

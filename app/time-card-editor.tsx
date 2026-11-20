@@ -84,11 +84,12 @@ export function TimeCardEditor(props: Props) {
           <SectionIcon name="break" />
           <div className="ts-card-section-content">
             <h3 id="ts-card-breaks-title">Breaks ({breaks.length})</h3>
-            <h4>Rest breaks (0 min)</h4>
-            <div className="ts-card-break-notice"><span className="ts-card-info" aria-hidden="true">i</span><span>Set up your paid breaks in Settings.</span><button type="button" onClick={props.onBreakSettings}>Go to Settings</button></div>
+            <h4>Paid rest breaks ({Math.round(preview.restMinutes)} min)</h4>
+            <div className="ts-card-break-notice"><span className="ts-card-info" aria-hidden="true">i</span><span>Edit paid rest and unpaid meal intervals below.</span><button type="button" onClick={props.onBreakSettings}>Go to Settings</button></div>
             <h4>Meal breaks ({Math.round(preview.breakMinutes)} min)</h4>
             <div className="ts-card-break-list">{breaks.map((entry, index) => <div className="ts-card-break-entry" key={entry.id}>
-              <div className="ts-card-break-times"><label><span className="sr-only">Meal break {index + 1} start</span><input type="time" required value={entry.start} onInput={event => updateBreak(entry.id, { start: event.currentTarget.value })} /></label><span aria-hidden="true">–</span><label><span className="sr-only">Meal break {index + 1} end</span><input type="time" required value={entry.end} onInput={event => updateBreak(entry.id, { end: event.currentTarget.value })} /></label><button type="button" className="ts-card-remove-break" aria-label={`Remove meal break ${index + 1}`} onClick={() => onChange({ ...draft, breaks: breaks.filter(value => value.id !== entry.id) })}>×</button></div>
+              <label>Break type<select value={entry.kind ?? "meal"} onChange={event => updateBreak(entry.id, { kind: event.target.value === "rest" ? "rest" : "meal" })}><option value="meal">Unpaid meal</option><option value="rest">Paid rest</option></select></label>
+              <div className="ts-card-break-times"><label><span className="sr-only">Break {index + 1} start</span><input type="time" required value={entry.start} onInput={event => updateBreak(entry.id, { start: event.currentTarget.value })} /></label><span aria-hidden="true">–</span><label><span className="sr-only">Break {index + 1} end</span><input type="time" required value={entry.end} onInput={event => updateBreak(entry.id, { end: event.currentTarget.value })} /></label><button type="button" className="ts-card-remove-break" aria-label={`Remove break ${index + 1}`} onClick={() => onChange({ ...draft, breaks: breaks.filter(value => value.id !== entry.id) })}>×</button></div>
               {draft.nextDay ? <label className="ts-card-overnight"><input type="checkbox" checked={entry.nextDay} onChange={event => updateBreak(entry.id, { nextDay: event.target.checked })} />Break starts the next day</label> : null}
             </div>)}</div>
             <button className="ts-card-add-break" type="button" onClick={addBreak}><span aria-hidden="true">＋</span>Add a break</button>
