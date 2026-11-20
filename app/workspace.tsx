@@ -50,7 +50,7 @@ import type { TimeCardDraft, TimeCardEdit } from "./timesheets-model";
 import type { ProfileValues } from "./account-profile";
 import type { DashboardAccount } from "../auth/types";
 
-import type { Mode, ViewId, CalendarTab, SettingsTab, BasicInfo, BasicInfoField, CompanyLocation, NewLocationDraft, EmployeeScheduleTab, HoursRoundingMinutes, HoursRounding, HoursDisplay, TeamMemberProfileTab, PayrollClassification, AccessLevel, EmployeeLocationSettings, EmploymentHistoryEvent, EmployeeCertificate, ManagerNote, PtoHistoryStatusFilter, TimeExceptionAction, Employee, Department, Shift, ClockEvent, OperationalAlert, HeaderNotification, ScheduleUpdateNotification, HoursAdjustment, PtoRequest, PtoPolicyMethod, PtoPolicy, PtoPolicyForm, TeamMessage, TeamConversation, ScheduleDraft, AvailabilityRequestSlot, AvailabilityRequest, StaffState } from "../workforce/model";
+import type { Mode, ViewId, CalendarTab, SettingsTab, BasicInfo, BasicInfoField, CompanyLocation, NewLocationDraft, EmployeeScheduleTab, HoursRoundingMinutes, TeamMemberProfileTab, PayrollClassification, AccessLevel, EmployeeLocationSettings, EmploymentHistoryEvent, EmployeeCertificate, ManagerNote, PtoHistoryStatusFilter, TimeExceptionAction, Employee, Department, Shift, ClockEvent, OperationalAlert, HeaderNotification, ScheduleUpdateNotification, HoursAdjustment, PtoRequest, PtoPolicyMethod, PtoPolicy, PtoPolicyForm, TeamMessage, TeamConversation, ScheduleDraft, AvailabilityRequestSlot, AvailabilityRequest, StaffState } from "../workforce/model";
 export type { BasicInfo, Employee, StaffState } from "../workforce/model";
 
 import { TimeExceptionDialog } from "./time-exception-dialog";
@@ -267,8 +267,8 @@ export default function Home({ account }: { account: DashboardAccount }) {
   const ptoHistoryEmployeeFilterRef = useRef<HTMLDivElement>(null);
   const [activeCalendarTab, setActiveCalendarTab] = useState<CalendarTab>("today");
   const [activeHoursTab, setActiveHoursTab] = useState<CalendarTab>("today");
-  const [hoursRounding, setHoursRounding] = useState<HoursRounding>("actual");
-  const [hoursDisplay, setHoursDisplay] = useState<HoursDisplay>("actual");
+  const [clockRoundingDraft, setClockRoundingDraft] = useState<{ enabled: boolean; minutes: HoursRoundingMinutes } | null>(null);
+  const [clockRoundingMessage, setClockRoundingMessage] = useState("");
   const [authMessage, setAuthMessage] = useState("");
 
   useEffect(() => {
@@ -836,6 +836,9 @@ export default function Home({ account }: { account: DashboardAccount }) {
   const isScheduleEnforcementDirty = scheduleEnforcementFields.some(field => scheduleEnforcementDraft[field] !== scheduleEnforcement[field]);
   const isAlertsPermissionsDirty = alertsPermissionsFields.some(field => scheduleEnforcementDraft[field] !== scheduleEnforcement[field]);
   const isEventsTradesDirty = eventsTradesFields.some(field => scheduleEnforcementDraft[field] !== scheduleEnforcement[field]);
+  const savedClockRounding = { enabled: scheduleEnforcement.roundClockPunches, minutes: state.hoursRoundingMinutes };
+  const clockRounding = clockRoundingDraft ?? savedClockRounding;
+  const clockRoundingDirty = clockRounding.enabled !== savedClockRounding.enabled || clockRounding.minutes !== savedClockRounding.minutes;
   const isOvertimeDirty = overtimeFields.some(field => scheduleEnforcementDraft[field] !== scheduleEnforcement[field]);
   const isBreaksComplianceDirty = breaksComplianceFields.some(field => scheduleEnforcementDraft[field] !== scheduleEnforcement[field]);
   const isMessagesSettingsDirty = messagesSettingsFields.some(field => scheduleEnforcementDraft[field] !== scheduleEnforcement[field]);
@@ -2326,13 +2329,13 @@ export default function Home({ account }: { account: DashboardAccount }) {
     setScheduleDate(toDateInputValue(nextDate));
   }
 
-  async function setHoursRoundingPolicy() {
-    if (!activeUserIsAdmin || hoursRounding === "actual") return;
-
-    if (!await setState((current) => ({
-      ...current,
-      hoursRoundingMinutes: hoursRounding,
-    }))) return;
+  async function saveClockRounding(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const previous = { ...scheduleEnforcement, hoursRoundingMinutes: state.hoursRoundingMinutes };
+    const after = { ...previous, roundClockPunches: clockRounding.enabled, hoursRoundingMinutes: clockRounding.minutes };
+    const saved = await shared.save([{ entity: "settings", id: 1, before: previous, after }]);
+    if (saved) setClockRoundingDraft(current => current?.enabled === clockRounding.enabled && current.minutes === clockRounding.minutes ? null : current);
+    setClockRoundingMessage(saved ? "Clock rounding saved." : "Clock rounding could not be saved. Check the shared-data message above.");
   }
 
   async function saveTimeCard(draft: TimeCardDraft) {
@@ -3748,7 +3751,23 @@ export default function Home({ account }: { account: DashboardAccount }) {
                   onSave={saveEventsTrades}
                 />
               ) : activeSettingsTab === "Time clock options" ? (
-                <TimeClockOptionsPanel roundingMinutes={state.hoursRoundingMinutes} onLaunch={() => window.location.assign("/kiosk")} />
+                <TimeClockOptionsPanel
+                  roundClockPunches={clockRounding.enabled}
+                  roundingMinutes={clockRounding.minutes}
+                  canManage={shared.data.permissions["settings.manage"] && shared.data.scheduleEstimateScopeComplete === true}
+                  dirty={clockRoundingDirty}
+                  message={clockRoundingMessage}
+                  onToggleRounding={enabled => {
+                    setClockRoundingDraft(current => ({ ...(current ?? savedClockRounding), enabled }));
+                    setClockRoundingMessage("");
+                  }}
+                  onRoundingMinutes={minutes => {
+                    setClockRoundingDraft(current => ({ ...(current ?? savedClockRounding), minutes }));
+                    setClockRoundingMessage("");
+                  }}
+                  onSave={saveClockRounding}
+                  onLaunch={() => window.location.assign("/kiosk")}
+                />
               ) : activeSettingsTab === "Overtime" ? (
                 <OvertimeOptionsPanel
                   settings={scheduleEnforcementDraft}
@@ -5399,32 +5418,10 @@ export default function Home({ account }: { account: DashboardAccount }) {
                 mealLimit: scheduleEnforcement.mealPremiumLimit, restLimit: scheduleEnforcement.restPremiumLimit,
                 companyWide: shared.data.scheduleEstimateScopeComplete === true, dataPeriod: shared.data.period,
               } : undefined}
-              rounding={activeUserIsAdmin && mode === "manager" ? hoursRounding : hoursDisplay === "rounded" ? state.hoursRoundingMinutes : "actual"}
-              roundingControl={activeUserIsAdmin && mode === "manager" ? (
-                <div className="hours-rounding-actions">
-                  <label className="hours-rounding-control">
-                    <span>Round</span>
-                    <select value={hoursRounding} aria-label="Preview rounded time worked" onChange={(event) => {
-                      const value = event.target.value;
-                      setHoursRounding(value === "actual" ? "actual" : Number(value) as HoursRounding);
-                    }}>
-                      <option value="actual">Actual</option>
-                      <option value={5}>5 min</option>
-                      <option value={10}>10 min</option>
-                      <option value={15}>15 min</option>
-                    </select>
-                  </label>
-                  <button type="button" className="hours-rounding-set-button" onClick={setHoursRoundingPolicy} disabled={hoursRounding === "actual" || hoursRounding === state.hoursRoundingMinutes}>Set</button>
-                </div>
-              ) : (
-                <label className="hours-rounding-control">
-                  <span>Hours</span>
-                  <select value={hoursDisplay} onChange={(event) => setHoursDisplay(event.target.value as HoursDisplay)} aria-label="View actual or rounded time worked">
-                    <option value="actual">Actual</option>
-                    <option value="rounded">Rounded ({state.hoursRoundingMinutes} min)</option>
-                  </select>
-                </label>
-              )}
+              rounding={scheduleEnforcement.roundClockPunches ? state.hoursRoundingMinutes : "actual"}
+              roundingControl={mode === "manager" && shared.data.permissions["settings.manage"] && shared.data.scheduleEstimateScopeComplete === true ? (
+                <button type="button" className="hours-rounding-set-button" onClick={() => { navigateToView("settings"); setActiveSettingsTab("Time clock options"); }}>Clock rounding settings</button>
+              ) : null}
               onAddTeamMember={() => { navigateToView("employees"); openAddEmployeeModal(); }}
               onSaveCard={saveTimeCard}
               onAdjust={(employeeId, date, hours) => {

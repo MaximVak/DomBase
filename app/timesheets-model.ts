@@ -8,6 +8,7 @@ import { scheduledPaidMinutes } from "./schedule-estimates";
 import { inspectBreaks, requiredBreaks } from "../kiosk/break-rules";
 import type { BreakIssue, BreakKind, BreakReport, ClockDetails } from "../kiosk/break-rules";
 import { zonedTimestamp } from "../workforce/time";
+import type { HoursRounding, HoursRoundingMinutes } from "../workforce/model";
 export type TimesheetEmployee = { id: number; name: string; role: string; wage: string; active: boolean; terminated?: boolean; terminationDate?: string; wageRates?: WageRate[]; jobs?: { id: number; name: string }[]; payrollId?: string; legalFirstName?: string; legalMiddleName?: string; legalLastName?: string };
 export type TimesheetEvent = { id: number; employeeId: number; type: "in" | "out" | "break" | "break_end"; at: string; explanation?: string; automatic?: boolean; role?: string; cardId?: number; clockDetails?: ClockDetails; assistedStatus?: "pending" | "approved" | "edited" };
 export type TimesheetShift = { shiftType?: "work" | "day_off"; employeeId: number; date: string; start: string; end: string; role: string };
@@ -16,9 +17,10 @@ export type TimesheetPto = { employeeId: number; startDate: string; endDate: str
 export type TimeCardBreak = { id: number; start: string; end: string; nextDay: boolean; kind?: BreakKind; confirmEnd?: boolean };
 export type TimeCardDraft = { employeeId: number; date: string; start: string; end: string; nextDay: boolean; breakMinutes: number; role: string; note: string; eventIds: number[]; breaks?: TimeCardBreak[]; cardId?: number; timeZone?: string; confirmBreakRecord?: boolean };
 export type TimeCardEdit = { id: number; employeeId: number; date: string; at: string; actor: string; before: string; after: string; cardId?: number };
-export type Rounding = "actual" | 5 | 10 | 15;
+export type Rounding = HoursRounding;
 export const timesheetColumns = [
   { id: "role", label: "Role" }, { id: "wage", label: "Wage rate" }, { id: "card", label: "Time card" },
+  { id: "roundedCard", label: "Rounded clock times (preview)" }, { id: "roundedHours", label: "Rounded hours (preview)" },
   { id: "issues", label: "Issues" }, { id: "scheduled", label: "Scheduled hours" }, { id: "actual", label: "Actual hours" },
   { id: "variance", label: "Actual vs. scheduled" }, { id: "paid", label: "Total paid hours" }, { id: "regular", label: "Regular hours" },
   { id: "mealPremium", label: "Meal premium hours" }, { id: "restPremium", label: "Rest premium hours" }, { id: "premiumPay", label: "Est. break premium pay" },
@@ -29,9 +31,10 @@ export const timesheetColumns = [
   { id: "others", label: "FFCRA – others" }, { id: "child", label: "FFCRA – child" }, { id: "holiday", label: "Holiday pay" },
 ] as const;
 export type ColumnId = typeof timesheetColumns[number]["id"];
-export const defaultTimesheetColumns: ColumnId[] = ["role", "card", "issues", "scheduled", "regular", "breaks", "mealPremium", "restPremium", "premiumPay", "ot", "doubleOt", "qualifiedOt", "wages", "pto"];
+export const defaultTimesheetColumns: ColumnId[] = ["role", "card", "roundedCard", "roundedHours", "issues", "scheduled", "regular", "breaks", "mealPremium", "restPremium", "premiumPay", "ot", "doubleOt", "qualifiedOt", "wages", "pto"];
 export type TimeCard = {
   id: string; employeeId: number; date: string; role: string; start?: string; end?: string; eventIds: number[];
+  roundedStart?: string; roundedEnd?: string;
   issues: string[]; notes: string[]; adjustment: number; metrics: Record<string, number | null>;
   wageLabel?: string;
 };
@@ -57,14 +60,17 @@ export function workTimestamp(date: string, time: string, zone?: string) {
 }
 export function addDays(date: string, days: number) { const value = new Date(`${date}T12:00:00`); value.setDate(value.getDate() + days); return localDate(value); }
 export function weekStartFor(date: string, weekStart: number) { const value = new Date(`${date}T12:00:00`); return addDays(date, -((value.getDay() - weekStart + 7) % 7)); }
-export function roundTimeHours(hours: number, rounding: Rounding) { return rounding === "actual" ? hours : Math.round(hours * 60 / rounding) * rounding / 60; }
+export function roundClockPunch(time: number, minutes: HoursRoundingMinutes) {
+  const step = minutes * 60000;
+  return Math.round(time / step) * step;
+}
 export function hourlyWage(value: string): number | null {
   if (!value.trim() || /salary|year|month|week|annual/i.test(value)) return null;
   const amount = Number(value.replace(/,/g, "").match(/\d+(?:\.\d+)?/)?.[0]);
   return Number.isFinite(amount) && amount > 0 ? amount : null;
 }
 const overlap = (start: number, end: number, a: number, b: number) => Math.max(0, Math.min(end, b) - Math.max(start, a));
-function metrics(): Record<string, number | null> { return { scheduled: 0, actual: 0, variance: 0, paid: 0, regular: 0, breaks: 0, restBreaks: 0, mealPremium: 0, restPremium: 0, premiumPay: 0, ot: 0, doubleOt: 0, qualifiedOt: null, spread: 0, split: 0, wages: null, pto: 0 }; }
+function metrics(): Record<string, number | null> { return { scheduled: 0, actual: 0, roundedHours: 0, variance: 0, paid: 0, regular: 0, breaks: 0, restBreaks: 0, mealPremium: 0, restPremium: 0, premiumPay: 0, ot: 0, doubleOt: 0, qualifiedOt: null, spread: 0, split: 0, wages: null, pto: 0 }; }
 const premiumHours = (card: TimeCard) => (card.metrics.mealPremium ?? 0) + (card.metrics.restPremium ?? 0);
 function cardWageRate(rates: WageRate[], card: TimeCard) {
   const ids = new Set(rates.filter(rate => rate.roleId !== null && rate.role === card.role && rate.effectiveDate <= card.date).map(rate => rate.roleId));
@@ -110,6 +116,8 @@ export function buildTimeCards(input: {
       if (!session.length) return;
       const start = Date.parse(session[0].at);
       const end = closed ? Date.parse(session[session.length - 1].at) : boundary ?? input.now;
+      const roundedStart = input.rounding === "actual" ? undefined : roundClockPunch(start, input.rounding);
+      const roundedEnd = input.rounding === "actual" || !closed ? undefined : roundClockPunch(end, input.rounding);
       const breaks: { start: number; end: number; meal: boolean }[] = [];
       const rests: { start: number; end: number }[] = [];
       let breakStart: TimesheetEvent | null = null;
@@ -140,6 +148,13 @@ export function buildTimeCards(input: {
         const shift = input.shifts.find(shift => shift.shiftType !== "day_off" && shift.employeeId === employee.id && shift.date === date);
         const card: TimeCard = { id: `clock-${session[0].id}-${date}`, employeeId: employee.id, date, role: session[0].role || shift?.role || employee.role || "Unassigned", start: session[0].at, end: closed ? session[session.length - 1].at : undefined, eventIds: session.map(event => event.id), issues: [], notes: session.flatMap(event => event.explanation ? [event.explanation] : []), adjustment: 0, metrics: metrics() };
         card.metrics.actual = Math.max(0, elapsed - breakMs) / HOUR;
+        if (roundedStart !== undefined) card.roundedStart = new Date(roundedStart).toISOString();
+        if (roundedStart !== undefined && roundedEnd !== undefined) {
+          card.roundedEnd = new Date(roundedEnd).toISOString();
+          const previewUnpaid = breaks.reduce((total, item) => total
+            + overlap(Math.max(item.start, roundedStart), Math.min(item.end, roundedEnd), dayStart, dayEnd), 0);
+          card.metrics.roundedHours = Math.max(0, overlap(roundedStart, roundedEnd, dayStart, dayEnd) - previewUnpaid) / HOUR;
+        }
         card.metrics.breaks = breaks.reduce((total, item) => total + (item.meal ? overlap(Math.max(item.start, start), Math.min(item.end, end), dayStart, dayEnd) : 0), 0) / HOUR;
         card.metrics.restBreaks = rests.reduce((total, item) => total + overlap(item.start, item.end, dayStart, dayEnd), 0) / HOUR;
         card.metrics.spread = elapsed / HOUR;
@@ -246,13 +261,12 @@ export function buildTimeCards(input: {
         // Apply positive adjustments once and distribute negative adjustments without going below zero.
         const raw = Math.min(remaining, Math.max(0, (card.metrics.actual ?? 0) + (index === 0 ? Math.max(0, adjustment) : 0)));
         remaining = Math.max(0, remaining - raw);
-        const hours = roundTimeHours(raw, input.rounding);
         card.metrics.actual = raw;
-        card.metrics.paid = hours + (card.metrics.pto ?? 0) + premiumHours(card);
+        card.metrics.paid = raw + (card.metrics.pto ?? 0) + premiumHours(card);
         card.metrics.variance = raw - (card.metrics.scheduled ?? 0);
         card.metrics.split = index === 0 ? Math.max(0, day.filter(other => other.start).length - 1) : 0;
         const rate = employee.wageRates ? cardWageRate(employee.wageRates, card) ?? null : undefined;
-        group.push({ card, hours, rate, hourly: rate === undefined ? legacyRate : hourlyRate(rate ?? undefined) });
+        group.push({ card, hours: raw, rate, hourly: rate === undefined ? legacyRate : hourlyRate(rate ?? undefined) });
       }
       weeks.set(week, group);
     }

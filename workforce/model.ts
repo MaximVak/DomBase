@@ -50,7 +50,6 @@ export type NewLocationDraft = CompanyLocation;
 export type EmployeeScheduleTab = "day" | "week" | "month";
 export type HoursRoundingMinutes = 5 | 10 | 15;
 export type HoursRounding = "actual" | HoursRoundingMinutes;
-export type HoursDisplay = "actual" | "rounded";
 export type TeamMemberProfileTab = "job" | "personal" | "documents" | "performance";
 export type PayrollClassification = "W-2 Employee" | "1099 Contractor";
 export type AccessLevel = "Admin" | "Manager" | "Employee" | "";

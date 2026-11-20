@@ -29,6 +29,7 @@ export type ScheduleEnforcement = OvertimePolicy & {
   noShowMinutes: number;
   automaticClockOut: boolean;
   automaticClockOutMinutes: number;
+  roundClockPunches: boolean;
   notifyScheduleChanges: boolean;
   employeesOwnScheduleOnly: boolean;
   requireAvailabilityApproval: boolean;
@@ -74,6 +75,7 @@ export const defaultScheduleEnforcement: ScheduleEnforcement = {
   noShowMinutes: 5,
   automaticClockOut: true,
   automaticClockOutMinutes: 120,
+  roundClockPunches: false,
   notifyScheduleChanges: true,
   employeesOwnScheduleOnly: false,
   requireAvailabilityApproval: true,

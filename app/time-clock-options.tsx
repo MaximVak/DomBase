@@ -1,7 +1,16 @@
 // Use native navigation to avoid the vinext RSC prefetch error.
+import type { FormEvent } from "react";
+import type { HoursRoundingMinutes } from "../workforce/model";
 
 type TimeClockOptionsProps = {
-  roundingMinutes: 5 | 10 | 15;
+  roundClockPunches: boolean;
+  roundingMinutes: HoursRoundingMinutes;
+  canManage: boolean;
+  dirty: boolean;
+  message: string;
+  onToggleRounding: (enabled: boolean) => void;
+  onRoundingMinutes: (minutes: HoursRoundingMinutes) => void;
+  onSave: (event: FormEvent<HTMLFormElement>) => void;
   onLaunch: () => void;
 };
 
@@ -56,12 +65,12 @@ function ClockIllustration({ kind }: { kind: "mobile" | "tablet" | "web" }) {
   );
 }
 
-export function TimeClockOptionsPanel({ roundingMinutes, onLaunch }: TimeClockOptionsProps) {
+export function TimeClockOptionsPanel({ roundClockPunches, roundingMinutes, canManage, dirty, message, onToggleRounding, onRoundingMinutes, onSave, onLaunch }: TimeClockOptionsProps) {
   return (
-    <section className="panel settings-enforcement-panel settings-time-clock-panel">
+    <form className="panel settings-enforcement-panel settings-time-clock-panel" onSubmit={onSave}>
       <div className="settings-panel-heading">
         <h3>Time clock options</h3>
-        <button type="button" disabled>Save</button>
+        <button type="submit" disabled={!canManage || !dirty}>Save</button>
       </div>
       <p className="enforcement-intro">Track your team&apos;s time with the DomBase Time Clock. <button type="button" className="time-clock-link" disabled title={unavailable}>Learn more</button></p>
 
@@ -70,12 +79,16 @@ export function TimeClockOptionsPanel({ roundingMinutes, onLaunch }: TimeClockOp
         <div className="enforcement-rules">
           <PlaceholderCheckbox label="Request employees to provide their shift experience at the end of their shift" checked />
           <PlaceholderCheckbox label="Require employees to declare cash tips at the end of their shift" />
-          <div className="enforcement-rule-line time-clock-placeholder" title="Clock timestamp rounding is not available yet. Timesheets supports rounding total hours.">
-            <label><input type="checkbox" checked disabled /><span>Round clock in and clock out times to the nearest</span></label>
-            <select aria-label="Clock time rounding increment" value={roundingMinutes} disabled>
-              {[5, 10, 15].map(minutes => <option value={minutes} key={minutes}>{minutes}</option>)}
-            </select>
-            <span>minute increment</span>
+          <div className="enforcement-rule">
+            <div className="enforcement-rule-line">
+              <label><input type="checkbox" checked={roundClockPunches} disabled={!canManage} onChange={event => onToggleRounding(event.target.checked)} />
+                <span>Round clock-in and clock-out times for comparison</span></label>
+              <select aria-label="Clock time rounding increment" value={roundingMinutes} disabled={!canManage || !roundClockPunches}
+                onChange={event => onRoundingMinutes(Number(event.target.value) as HoursRoundingMinutes)}>
+                {[5, 10, 15].map(minutes => <option value={minutes} key={minutes}>{minutes} minutes</option>)}
+              </select>
+            </div>
+            <p>Timesheets shows the nearest increment alongside exact time. Pay, overtime, and break checks use the recorded times.</p>
           </div>
         </div>
       </section>
@@ -129,6 +142,7 @@ export function TimeClockOptionsPanel({ roundingMinutes, onLaunch }: TimeClockOp
         </div>
       </section>
       <button type="button" className="time-clock-disable" disabled title={unavailable}>Disable time tracking</button>
-    </section>
+      {message && <p className="enforcement-save-message" role="status">{message}</p>}
+    </form>
   );
 }

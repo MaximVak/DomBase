@@ -18,6 +18,7 @@ export const summaryColumns = [
   { id: "doubleOt", label: "Double OT" }, { id: "qualifiedOt", label: "Qualified OT" },
   { id: "spread", label: "Spread of hours" }, { id: "split", label: "Split shifts" },
   { id: "scheduled", label: "Scheduled hours" }, { id: "actual", label: "Actual hours" },
+  { id: "roundedHours", label: "Rounded hours (preview)" },
   { id: "variance", label: "Actual vs. scheduled" }, { id: "paid", label: "Total paid hours" },
   { id: "breaks", label: "Meal breaks" }, { id: "wages", label: "Estimated wages" },
   { id: "mealPremium", label: "Meal premium hours" }, { id: "restPremium", label: "Rest premium hours" },
@@ -90,7 +91,8 @@ export function TimesheetsSummary(props: Props) {
     window.addEventListener("resize", update);
     return () => { observer.disconnect(); window.removeEventListener("resize", update); };
   }, []);
-  const defaultColumns = props.showBreakPremiums ? [...defaultSummaryColumns, ...premiumColumns] : defaultSummaryColumns;
+  const showRoundedClock = props.rounding !== "actual";
+  const defaultColumns = [...defaultSummaryColumns, ...(props.showBreakPremiums ? premiumColumns : []), ...(showRoundedClock ? ["roundedHours"] : [])];
   const [columns, setColumns] = useState(defaultColumns);
   const [sort, setSort] = useState({ id: "first", direction: 1 });
   const [printMode, setPrintMode] = useState<"current" | "all">("current");
@@ -109,7 +111,8 @@ export function TimesheetsSummary(props: Props) {
     window.addEventListener("afterprint", resetPrint);
     return () => window.removeEventListener("afterprint", resetPrint);
   }, []);
-  const orderedColumns = columnOrder.filter(id => props.showBreakPremiums || !premiumColumns.includes(id)).map(id => summaryColumns.find(column => column.id === id)!);
+  const orderedColumns = columnOrder.filter(id => (props.showBreakPremiums || !premiumColumns.includes(id))
+    && (showRoundedClock || id !== "roundedHours")).map(id => summaryColumns.find(column => column.id === id)!);
   const activeColumns = orderedColumns.filter(column => columns.includes(column.id));
   const ledgerWidths = activeColumns.map(column => column.id === "payroll" ? 200 : column.id === "role" ? 190 : textColumns.includes(column.id) ? 140 : 130);
   const ledgerMinWidth = ledgerWidths.reduce((sum, width) => sum + width, 0);
@@ -164,7 +167,7 @@ export function TimesheetsSummary(props: Props) {
     </div>
     <div className="ts-summary-ledger-scroll" ref={ledgerScrollRef} tabIndex={0} role="region" aria-label="Employee summary ledger" onScroll={event => syncLedgerScroll(event.currentTarget, totalsScrollRef.current)}><table className="ts-summary-ledger" style={{ minWidth: ledgerMinWidth }}><caption className="sr-only">Employee totals from {props.start} to {props.end}</caption>{ledgerColumns}<thead><tr>{activeColumns.map(column => <th key={column.id} scope="col" aria-sort={sort.id === column.id ? sort.direction === 1 ? "ascending" : "descending" : "none"}><button type="button" onClick={() => setSort(current => ({ id: column.id, direction: current.id === column.id ? -current.direction : 1 }))}>{column.label}{sort.id === column.id ? <span aria-hidden="true">{sort.direction === 1 ? "▾" : "▴"}</span> : null}</button></th>)}</tr></thead><tbody>{rows.map(({ employee, values }) => <tr key={employee.id}>{activeColumns.map(column => <td className={textColumns.filter(id => id !== "wage").includes(column.id) ? "ts-summary-text" : "ts-summary-number"} key={column.id}>{column.id === "payroll" && props.onPayrollId ? editing === employee.id ? <form className="ts-payroll-editor" onSubmit={async event => { event.preventDefault(); if (await props.onPayrollId?.(employee.id, payrollId.trim()) !== false) setEditing(null); }}><input aria-label={`Payroll ID for ${employee.name}`} value={payrollId} maxLength={100} onChange={event => setPayrollId(event.target.value)} /><button type="submit">Save</button><button type="button" onClick={() => setEditing(null)}>Cancel</button></form> : <button type="button" className={values.payroll ? "ts-payroll-id" : "ts-payroll-missing"} aria-label={`Edit payroll ID for ${employee.name}`} onClick={() => { setEditing(employee.id); setPayrollId(values.payroll); }}>{values.payroll || "＋ Payroll ID"}</button> : values[column.id] || "—"}</td>)}</tr>)}</tbody></table>{!rows.length ? <div className="ts-empty-state"><h3>No hours recorded in this period</h3><p>Choose another date range or return to Timesheets to add a time card.</p></div> : null}</div>
     <table className="ts-summary-print-ledger" aria-label="Printable timesheet summary"><caption>Timesheet summary · {props.start} – {props.end}</caption><thead><tr>{printColumns.map(column => <th key={column.id} scope="col" data-column={column.id}>{column.label}</th>)}</tr></thead><tbody>{rows.map(({ employee, values }) => <tr key={employee.id}>{printColumns.map(column => <td key={column.id} className={textColumns.filter(id => id !== "wage").includes(column.id) ? "ts-summary-text" : "ts-summary-number"}>{values[column.id] || "—"}</td>)}</tr>)}</tbody><tfoot>{totalsRow(printColumns)}</tfoot></table>
-    <p className="ts-summary-page-note">Summary follows the selected dates{props.filtered ? ", filters" : ""} and {props.rounding === "actual" ? "actual hours" : `${props.rounding}-minute rounding`}. Wage and overtime amounts are estimates. Unrecorded amounts show a dash.</p>
+    <p className="ts-summary-page-note">Wage and overtime estimates use recorded clock times. {showRoundedClock ? `Rounded hours compare closed cards using ${props.rounding}-minute clock times. ` : ""}The summary follows the selected dates{props.filtered ? " and filters" : ""}.</p>
     <div className="ts-summary-totals-ribbon" ref={totalsScrollRef} tabIndex={0} role="region" aria-label="Summary totals ribbon" onScroll={event => syncLedgerScroll(event.currentTarget, ledgerScrollRef.current)}><table className="ts-summary-ledger ts-summary-totals-table" style={{ minWidth: ledgerMinWidth }} aria-label="Combined summary totals">{ledgerColumns}<tbody>{totalsRow(activeColumns)}</tbody></table></div>
   </section>;
 }

@@ -252,6 +252,7 @@ export const locationSettings = sqliteTable("location_settings", {
   clockOutReminderThird: integer("clock_out_reminder_third").notNull().default(120),
   enableTeamMessaging: integer("enable_team_messaging", { mode: "boolean" }).notNull().default(true),
   hoursRoundingMinutes: integer("hours_rounding_minutes").notNull().default(15),
+  roundClockPunches: integer("round_clock_punches", { mode: "boolean" }).notNull().default(false),
   kioskIdleSeconds: integer("kiosk_idle_seconds").notNull().default(30),
   version: integer("version").notNull().default(1),
   ...timestamps(),

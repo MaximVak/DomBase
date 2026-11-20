@@ -1,0 +1,1 @@
+ALTER TABLE `location_settings` ADD `round_clock_punches` integer DEFAULT false NOT NULL;

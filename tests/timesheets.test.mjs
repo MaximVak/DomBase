@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { loadServerModule } from "../scripts/server-runtime.mjs";
-const { buildTimeCards, totalMetrics, timeCardReviews, timeCardEvents, validateTimeCard, timesheetCsv, hourlyWage, weekStartFor, timeCardPreview, timeCardBreakIntervals } = await loadServerModule("app/timesheets-model.ts");
+const { buildTimeCards, totalMetrics, timeCardReviews, timeCardEvents, validateTimeCard, timesheetCsv, hourlyWage, weekStartFor, timeCardPreview, timeCardBreakIntervals, roundClockPunch } = await loadServerModule("app/timesheets-model.ts");
 const { defaultOvertimePolicy } = await loadServerModule("app/schedule-enforcement.ts");
 const employees = [{ id: 1, name: "Test Employee", role: "Sales", wage: "$20/hr", active: true }];
 const at = (date, time) => new Date(`${date}T${time}:00`).toISOString();
@@ -13,12 +13,51 @@ test("time cards deduct meal breaks, preserve raw hours, and round the preview",
   const actual = buildTimeCards({ ...base, events });
   const rounded = buildTimeCards({ ...base, events, rounding: 15 });
   assert.ok(Math.abs(actual[0].metrics.actual - (7 + 37 / 60)) < 1e-9);
-  assert.equal(rounded[0].metrics.paid, 7.5);
+  assert.equal(rounded[0].metrics.paid, actual[0].metrics.paid);
+  assert.equal(rounded[0].metrics.roundedHours, 7.5);
+  assert.equal(rounded[0].roundedStart, events[0].at);
+  assert.equal(rounded[0].roundedEnd, at("2026-08-03", "17:00"));
+  assert.equal(actual[0].roundedEnd, undefined);
   assert.equal(rounded[0].metrics.actual, actual[0].metrics.actual);
   assert.equal(actual[0].metrics.breaks, .5);
   assert.deepEqual(actual[0].issues, []);
-  assert.equal(totalMetrics(rounded).wages, 150);
+  assert.equal(totalMetrics(rounded).wages, 152.33);
   assert.equal(events[0].at, at("2026-08-03", "09:00"));
+});
+
+test("rounding previews both timestamps independently and leaves worked hours and overtime exact", () => {
+  const date = "2026-08-03";
+  const events = eventsFor(date, "09:04", "17:06");
+  const [card] = buildTimeCards({ ...base, events, rounding: 10 });
+  assert.deepEqual([card.roundedStart, card.roundedEnd], [at(date, "09:00"), at(date, "17:10")]);
+  assert.deepEqual([card.start, card.end], events.map(event => event.at));
+  assert.equal(card.metrics.roundedHours, 8 + 10 / 60);
+  assert.equal(card.metrics.paid, 8 + 2 / 60);
+  assert.equal(card.metrics.ot, 2 / 60);
+  assert.equal(card.metrics.wages, 161);
+  for (const interval of [5, 10, 15]) {
+    const boundary = Date.parse(at(date, "14:00"));
+    assert.equal(roundClockPunch(boundary + interval * 30000 - 1, interval), boundary);
+    assert.equal(roundClockPunch(boundary + interval * 30000, interval), boundary + interval * 60000);
+  }
+});
+
+test("short, overnight and open sessions keep their original work date and exact paid time", () => {
+  const [short] = buildTimeCards({ ...base, events: eventsFor("2026-08-03", "09:01", "09:02"), rounding: 5 });
+  assert.equal(short.roundedEnd, short.roundedStart);
+  assert.equal(short.metrics.roundedHours, 0);
+  assert.equal(short.metrics.actual, 1 / 60);
+  const overnight = buildTimeCards({ ...base, events: eventsFor("2026-08-03", "23:58", "00:13", 0, 1, true), rounding: 5 });
+  assert.deepEqual(overnight.map(card => [card.date, card.metrics.roundedHours, card.metrics.paid]), [
+    ["2026-08-03", 0, 2 / 60],
+    ["2026-08-04", 15 / 60, 13 / 60],
+  ]);
+  assert.equal(overnight[0].roundedStart, at("2026-08-04", "00:00"));
+  const [open] = buildTimeCards({ ...base, start: "2026-08-03", end: "2026-08-03", now: Date.parse(at("2026-08-03", "09:45")),
+    events: eventsFor("2026-08-03", "09:01", "09:40").slice(0, 1), rounding: 10 });
+  assert.equal(open.roundedStart, at("2026-08-03", "09:00"));
+  assert.equal(open.roundedEnd, undefined);
+  assert.equal(open.metrics.roundedHours, 0);
 });
 
 test("overnight cards clip at local midnight without double-counting hours or breaks", () => {
@@ -214,7 +253,7 @@ test("summary aggregates employee totals, preserves payroll IDs, and distinguish
   const staff = [{ ...employees[0], name: "Alex Van Peshkov", payrollId: "007", legalFirstName: "Alexander", legalMiddleName: "V", legalLastName: "Peshkov" }, { id: 2, name: "Other Member", wage: "", role: "Sales", active: true }];
   const cards = buildTimeCards({ ...base, employees: staff, events: [...eventsFor("2026-08-03", "09:00", "17:00", 30), ...eventsFor("2026-08-04", "09:00", "17:00", 30, 10), ...eventsFor("2026-08-04", "09:00", "17:00", 30, 20).map(event => ({ ...event, employeeId: 2 }))] });
   const rows = summaryRows(staff, cards);
-  assert.equal(summaryColumns.length, 31);
+  assert.equal(summaryColumns.length, 32);
   assert.equal(defaultSummaryColumns.length, 9);
   assert.equal(rows[0].values.first, "Alex");
   assert.equal(rows[0].values.last, "Van Peshkov");
