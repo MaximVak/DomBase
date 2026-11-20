@@ -1,5 +1,9 @@
 export const kioskCopy = {
   en: {
+    assistedIn: "Report a missed clock-in", assistedOut: "Report a missed clock-out", actualDate: "Actual date", actualTime: "Actual time",
+    assistanceReason: "Reason for the correction", submitTime: "Submit actual time", assistancePending: "Time reported. A manager can review it.",
+    assistanceApproved: "Corrected clock-out recorded and approved.", clockOutReminder: "Your shift has ended. Clock out or report the time you finished.",
+    assistanceUnavailable: "This correction is unavailable for your current shift.", assistanceTime: "Enter a valid recent time that follows your other clock entries.",
     rest: "Paid rest break", meal: "Unpaid meal break", startRest: "Start paid rest break", startMeal: "Start unpaid meal break",
     onRest: "You are on a paid rest break.", onMeal: "You are on an unpaid meal break.", remaining: "Break time remaining",
     offDutyExtension: "I stayed off duty for all of the extra break time.", startedWork: "I already started work", resumedWork: "I already resumed work",
@@ -29,6 +33,10 @@ export const kioskCopy = {
     in: "Clock-in recorded.", out: "Clock-out recorded.", break: "Break started.", break_end: "Break ended.", recovery: "The clock stopped unexpectedly. Reopening the clock…",
   },
   es: {
+    assistedIn: "Reportar entrada olvidada", assistedOut: "Reportar salida olvidada", actualDate: "Fecha real", actualTime: "Hora real",
+    assistanceReason: "Motivo de la corrección", submitTime: "Enviar hora real", assistancePending: "Se registró la hora. Un gerente puede revisarla.",
+    assistanceApproved: "Salida corregida y aprobada.", clockOutReminder: "Tu turno terminó. Registra tu salida o reporta la hora en que terminaste.",
+    assistanceUnavailable: "Esta corrección no está disponible para tu turno actual.", assistanceTime: "Ingresa una hora reciente y válida que siga el orden de tus registros.",
     rest: "Descanso pagado", meal: "Comida no pagada", startRest: "Iniciar descanso pagado", startMeal: "Iniciar comida no pagada",
     onRest: "Estás en un descanso pagado.", onMeal: "Estás en una pausa para comer no pagada.", remaining: "Tiempo restante de descanso",
     offDutyExtension: "Estuve libre de tareas durante todo el tiempo adicional.", startedWork: "Ya empecé a trabajar", resumedWork: "Ya volví a trabajar",
@@ -71,6 +79,8 @@ export const localizedError = (message: unknown, status: number, action: string)
   if (message === "It is too early to clock in.") return "earlyClock";
   if (message === kioskCopy.en.earlyReturn) return "earlyReturn";
   if (message === kioskCopy.en.breaksChanged) return "breaksChanged";
+  if (typeof message === "string" && (/Assisted clock|automatic clock-out already/.test(message))) return "assistanceUnavailable";
+  if (typeof message === "string" && (/actual date|recent time|local date|overlaps another clock/.test(message))) return "assistanceTime";
   if (status === 409) return "changed";
   return "connection";
 };

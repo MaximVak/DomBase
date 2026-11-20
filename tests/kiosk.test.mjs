@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { randomBytes, randomInt } from "node:crypto";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { drizzle } from "drizzle-orm/d1";
@@ -17,9 +18,14 @@ test("registered tablets, PIN sessions and action-scoped approvals use isolated 
   const open = () => getPlatformProxy({ configPath, persist: { path: join(state, "v3") }, remoteBindings: false, envFiles: [] });
   platform = await open();
   const schema = await loadServerModule("db/schema.ts");
-  const { createAuthService, createAccessService, createKioskAdmin, createKioskService, pinLookup, verifyPin, tokenHash } = await loadServerModule("tests/support/kiosk-runtime.ts");
-  const secret = "isolated-kiosk-verification-secret-at-least-32-characters";
-  const password = "Temporary kiosk verification passphrase!";
+  const { createAuthService, createAccessService, createKioskAdmin, createKioskService, pinLookup, verifyPin, tokenHash,
+    createWorkforceService, runScheduledMaintenance, createSelfService, dispatchClockReminderEmails } = await loadServerModule("tests/support/kiosk-runtime.ts");
+  const secret = randomBytes(32).toString("hex");
+  const password = randomBytes(24).toString("base64url");
+  let fixturePin1;
+  do { fixturePin1 = String(randomInt(100000, 810000)); } while ([employeePin, otherEmployeePin].includes(fixturePin1));
+  let fixturePin2;
+  do { fixturePin2 = String(randomInt(100000, 810000)); } while ([employeePin, otherEmployeePin, fixturePin1].includes(fixturePin2));
   const origin = "http://localhost:3000";
   let time = Date.now(); let db; let auth; let access; let admin; let kiosk;
   function services() {
@@ -62,7 +68,7 @@ test("registered tablets, PIN sessions and action-scoped approvals use isolated 
     const [stored] = await db.select().from(schema.employees).where(eq(schema.employees.id, f.a.id));
     assert.equal(stored.pinLookup, pinLookup(secret, employeePin));
     assert.equal(await verifyPin(secret, employeePin, stored.pinHash), true);
-    assert.equal(await verifyPin("wrong-server-secret-at-least-32-characters", employeePin, stored.pinHash), false);
+    assert.equal(await verifyPin(randomBytes(32).toString("hex"), employeePin, stored.pinHash), false);
     assert.equal(JSON.stringify(stored).includes(employeePin), false);
     assert.equal((await adm("approval-pin", managerCookie, { pin: "1234", password, accountId: f.owner.id })).status, 400);
   });
@@ -232,7 +238,7 @@ test("registered tablets, PIN sessions and action-scoped approvals use isolated 
     let at = fixed("08:50");
     const ca = createKioskService(db, { secret, now: () => at });
     const send = (action, session, body) => request(ca, `/api/kiosk/${action}`, session, body);
-    const pin = "610746";
+    const pin = fixturePin1;
     await ok(await adm("employee-pin", ownerCookie, { employeeId: f.multi.id, pin, password }));
     await db.insert(schema.employeeSettings).values({ employeeId: f.multi.id, canWaiveMissedBreaks: true });
     const [publication] = await db.insert(schema.schedulePublications).values({ version: 2, publishedByAccountId: f.owner.id }).returning();
@@ -280,16 +286,148 @@ test("registered tablets, PIN sessions and action-scoped approvals use isolated 
       await settings({ blockEarlyClockIn: true, breakWaivers: false, unpaidRestOverage: false });
     }
   });
+  await t.test("assisted clock times, role-scoped attendance and reminders preserve raw entries", async () => {
+    const { nextDate, zonedTimestamp } = await loadServerModule("workforce/time.ts");
+    const { fieldKey } = await import("./support/workforce-fixture.mjs");
+    const day = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(time));
+    const date = nextDate(day);
+    const fixed = wall => zonedTimestamp(date, wall);
+    let at = fixed("09:00");
+    const ca = createKioskService(db, { secret, now: () => at });
+    const workforce = createWorkforceService(db, access, { secret, fieldKey, now: () => at });
+    const self = createSelfService(db, auth, secret, () => time);
+    const send = (action, session, body) => request(ca, `/api/kiosk/${action}`, session, body);
+    const manage = (action, session, body) => request(workforce, `/api/workspace/${action}`, session, body);
+    const [pub] = await db.insert(schema.schedulePublications).values({ version: 3, publishedByAccountId: f.owner.id }).returning();
+    const [morning, other, afternoon] = await db.insert(schema.shifts).values([
+      { employeeId: f.multi.id, roleId: f.roleA.id, date, startTime: "09:00", endTime: "11:30", publicationId: pub.id },
+      { employeeId: f.b.id, roleId: f.roleB.id, date, startTime: "09:00", endTime: "12:30", publicationId: pub.id },
+      { employeeId: f.multi.id, roleId: f.roleA.id, date, startTime: "14:30", endTime: "15:00", publicationId: pub.id },
+    ]).returning();
+    const [employeeAccount] = await db.insert(schema.accounts).values({
+      email: "assisted-clock-employee@example.test", normalizedEmail: "assisted-clock-employee@example.test",
+      displayName: f.multi.name, accessLevel: "employee", employeeId: f.multi.id, passwordHash: f.owner.passwordHash, loginEnabled: true,
+    }).returning();
+    const employee = await login(employeeAccount.email);
+    const ownAlerts = body => request(self, "/api/self/schedule-alerts", employee, body);
+    const pin = fixturePin1;
+    async function sign() {
+      const response = await send("pin", deviceCookie, { pin, breaks: true, queue: true });
+      return { data: await ok(response), cookie: `${deviceCookie}; ${cookiesOf(response)[0]}` };
+    }
+    const report = (eventType, wall) => ({ eventType, ...(eventType === "in" ? { roleId: f.roleA.id } : {}),
+      explanation: "I forgot to use the tablet.", details: { assisted: { date, time: wall } } });
+    assert.equal((await manage("attendance", "")).status, 401);
+    assert.equal((await manage("assisted-clocks", deviceCookie)).status, 403);
+    at = fixed("09:04");
+    await runScheduledMaintenance(db, at);
+    const overdue = await ok(await manage("attendance", managerCookie));
+    assert.equal(overdue.rows.find(row => row.id === "shift-" + morning.id).status, "Late");
+    assert.equal(overdue.alerts.some(alert => alert.employee === f.multi.name && alert.title === "Clock-in overdue"), true);
+    assert.equal(overdue.rows.some(row => row.id === "shift-" + other.id), false);
+    const person = await sign();
+    assert.equal(person.data.assist.in, true);
+    assert.equal((await send("clock", person.cookie, report("in", "09:20"))).status, 422);
+    assert.equal((await ok(await send("clock", person.cookie, report("in", "08:58")))).assistance, "pending");
+    const [start] = (await db.select().from(schema.clockEvents).where(eq(schema.clockEvents.shiftId, morning.id)));
+    assert.equal(start.occurredAt, new Date(at).toISOString());
+    assert.equal((await manage("assisted-clocks", managerCookie)).status, 403);
+    await db.insert(schema.accountPermissions).values({ accountId: f.manager.id, permission: "timesheets.manage", allowed: true });
+    const review = await ok(await manage("assisted-clocks", managerCookie));
+    assert.equal(review.requests[0].id, start.id);
+    assert.equal(review.requests[0].requestedAt, new Date(fixed("08:58")).toISOString());
+    assert.equal((await ok(await manage("attendance", managerCookie))).pendingReports, 1);
+    const before = await ok(await manage("state", managerCookie));
+    const provisional = before.state.clockEvents.find(event => event.id === start.id);
+    assert.equal(provisional.at, new Date(fixed("08:58")).toISOString());
+    assert.equal(provisional.assistedStatus, "pending");
+    await ok(await manage("assisted-clocks", managerCookie, { id: start.id, action: "edit", actual: { date, time: "08:59" } }));
+    assert.equal((await manage("assisted-clocks", managerCookie, { id: start.id, action: "approve" })).status, 404);
+    at = fixed("09:45");
+    await runScheduledMaintenance(db, at);
+    const ownerAttendance = await ok(await manage("attendance", ownerCookie));
+    assert.equal(ownerAttendance.rows.find(row => row.id === "shift-" + other.id).status, "No show");
+    assert.equal(ownerAttendance.alerts.some(alert => alert.employee === f.b.name && alert.title === "No-show"), true);
+    const breakActor = await sign();
+    await ok(await send("clock", breakActor.cookie, { eventType: "break", explanation: "", details: { breakKind: "rest" } }));
+    assert.equal((await ok(await manage("attendance", managerCookie))).rows.find(row => row.id === "shift-" + morning.id).status, "On break");
+    at = fixed("10:00");
+    const returnActor = await sign();
+    await ok(await send("clock", returnActor.cookie, { eventType: "break_end", explanation: "" }));
+    assert.equal((await ok(await manage("attendance", managerCookie))).rows.find(row => row.id === "shift-" + morning.id).status, "On shift");
+    const reminders = () => db.all(sql`SELECT id,clock_email_state AS email FROM notifications WHERE employee_id=${f.multi.id} AND source_key LIKE 'clock-out-%' ORDER BY id`);
+    at = fixed("11:39");
+    await runScheduledMaintenance(db, at);
+    assert.deepEqual(await reminders(), []);
+    at = fixed("11:40");
+    await runScheduledMaintenance(db, at);
+    await runScheduledMaintenance(db, at);
+    assert.deepEqual(await reminders(), [{ id: `clock-out-${start.id}-0`, email: null }]);
+    const notices = await ok(await ownAlerts());
+    assert.deepEqual(notices.notices.map(notice => notice.id), [`clock-out-${start.id}-0`]);
+    assert.equal((await ownAlerts({ notificationId: "clock-manager-late-" + morning.id, action: "read", contextToken: notices.contextToken })).status, 404);
+    await ok(await ownAlerts({ notificationId: notices.notices[0].id, action: "read", contextToken: notices.contextToken }));
+    assert.equal((await ok(await ownAlerts())).notices[0].opened, true);
+    at = fixed("11:45");
+    const finish = await sign();
+    assert.equal(finish.data.assist.reminder, true);
+    assert.equal((await ok(await send("clock", finish.cookie, report("out", "11:30")))).assistance, "approved");
+    at = fixed("13:45");
+    await runScheduledMaintenance(db, at);
+    assert.equal((await reminders()).length, 1);
+    const applied = await ok(await manage("state", managerCookie));
+    assert.equal(applied.state.clockEvents.find(event => event.id === start.id).at, new Date(fixed("08:59")).toISOString());
+    const events = await db.select().from(schema.clockEvents).where(eq(schema.clockEvents.shiftId, morning.id));
+    const end = events.find(event => event.eventType === "out");
+    assert.equal(end.occurredAt, new Date(fixed("11:45")).toISOString());
+    assert.equal(applied.state.clockEvents.find(event => event.id === end.id).at, new Date(fixed("11:30")).toISOString());
+
+    at = fixed("14:30");
+    const newStart = await sign();
+    await ok(await send("clock", newStart.cookie, { eventType: "in", roleId: f.roleA.id, explanation: "" }));
+    await db.update(schema.locationSettings).set({ clockOutReminderEmail: true });
+    const emails = [];
+    const deliver = () => dispatchClockReminderEmails(db, {
+      INVITATION_EMAIL: { send: async message => { emails.push(message); return { messageId: "isolated-test-message" }; } },
+      INVITATION_EMAIL_FROM: "clock@example.test", INVITATION_EMAIL_REPLY_TO: "team@example.test", INVITATION_EMAIL_ORIGIN: "https://local.example.test",
+    }, at);
+    for (const wall of ["15:10", "16:00", "17:00"]) {
+      at = fixed(wall);
+      await runScheduledMaintenance(db, at, deliver);
+      await runScheduledMaintenance(db, at, deliver);
+    }
+    const automatic = await db.select().from(schema.clockEvents).where(eq(schema.clockEvents.shiftId, afternoon.id));
+    assert.equal(automatic.length, 2);
+    assert.equal(automatic[1].automatic, true);
+    assert.deepEqual((await reminders()).map(row => row.id).filter(id => id.startsWith(`clock-out-${automatic[0].id}-`)),
+      [0, 1, 2].map(slot => `clock-out-${automatic[0].id}-${slot}`));
+    assert.equal(emails.length, 3);
+    assert.ok(emails.every(message => message.to === f.multi.email && message.subject === "DomBase clock-out reminder"));
+    assert.equal((await reminders()).filter(row => row.email === "accepted").length, 3);
+    at = fixed("17:01");
+    const recover = await sign();
+    assert.equal(recover.data.assist.recovery, true);
+    const submission = { ...report("out", "15:01"), ticket: recover.data.replay.ticket, attemptedAt: at };
+    assert.deepEqual(await ok(await send("sync", deviceCookie, submission)), { outcome: "synced" });
+    assert.deepEqual(await ok(await send("sync", deviceCookie, submission)), { outcome: "synced" });
+    assert.deepEqual(await db.select().from(schema.clockEvents).where(eq(schema.clockEvents.shiftId, afternoon.id)), automatic);
+    const pending = await ok(await manage("assisted-clocks", managerCookie));
+    assert.deepEqual(pending.requests.map(row => row.id), [automatic[1].id]);
+    await ok(await manage("assisted-clocks", managerCookie, { id: automatic[1].id, action: "approve" }));
+    const recovered = await ok(await manage("state", managerCookie));
+    assert.equal(recovered.state.clockEvents.find(event => event.id === automatic[1].id).at, new Date(fixed("15:01")).toISOString());
+    assert.deepEqual(await db.all(sql`PRAGMA foreign_key_check`), []);
+  });
   await t.test("PIN resets, inactive employees and device revocation invalidate access", async () => {
     ownerCookie = await login(f.owner.email);
     const p = await person();
-    await ok(await adm("employee-pin", ownerCookie, { employeeId: f.a.id, pin: "567832", password }));
+    await ok(await adm("employee-pin", ownerCookie, { employeeId: f.a.id, pin: fixturePin2, password }));
     assert.equal((await clock("clock", p.cookie, { eventType: "out", explanation: "" })).status, 401);
     assert.equal((await clock("pin", deviceCookie, { pin: employeePin })).status, 401);
     await db.update(schema.employees).set({ active: false }).where(eq(schema.employees.id, f.a.id));
-    assert.equal((await clock("pin", deviceCookie, { pin: "567832" })).status, 401);
+    assert.equal((await clock("pin", deviceCookie, { pin: fixturePin2 })).status, 401);
     await db.update(schema.employees).set({ active: true }).where(eq(schema.employees.id, f.a.id));
-    const current = await person("567832");
+    const current = await person(fixturePin2);
     await platform.dispose(); platform = await open(); services();
     assert.equal((await clock("status", deviceCookie)).status, 200);
     await ok(await adm("revoke", ownerCookie, { deviceId }));

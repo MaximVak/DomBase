@@ -186,7 +186,7 @@ export function KioskScreen() {
         setPending({ id: data.requestId, early: data.reason === kioskCopy.en.earlyApproval }); setPhase("approval");
       } else {
         if (action === "approve") setCooldowns(current => ({ ...current, approve: null }));
-        reset(data.eventType);
+        reset(data.assistance === "approved" ? "assistanceApproved" : data.assistance === "pending" ? "assistancePending" : data.eventType);
       }
     } catch {
       if (version === generation.current) {

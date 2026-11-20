@@ -5,11 +5,14 @@ import type { ClockInput } from "./clock-queue";
 import { kioskCopy } from "./copy";
 import type { KioskLanguage } from "./copy";
 import { BreakReportForm } from "./break-report";
+import { AssistanceForm } from "./assistance-form";
+import type { ReportedTime } from "../../kiosk/assistance";
 
 export type ClockPerson = {
   employee: { id: number; name: string }; roles: { id: number; name: string }[];
   state: "in" | "out" | "break" | "break_end"; expiresAt: string; serverTime?: number;
   replay?: { ticket: string; serverTime: number };
+  assist?: { in: boolean; out: boolean; recovery: boolean; reminder: boolean; date: string };
   breakView?: { issues: BreakIssue[]; active?: { kind: BreakKind; availableAt: number; extensionAt: number } };
 };
 
@@ -21,10 +24,12 @@ export function ClockPanel({ person, language, busy, offlineBlocked, earlyClockB
   const [roleId, setRoleId] = useState(String(person.roles[0]?.id ?? ""));
   const [explanation, setExplanation] = useState("");
   const [reporting, setReporting] = useState(false);
+  const [assistance, setAssistance] = useState<"in" | "out" | null>(null);
+  const [assistedExit, setAssistedExit] = useState<{ actual: ReportedTime; explanation: string }>();
   const [extension, setExtension] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const heading = useRef<HTMLHeadingElement>(null);
-  useEffect(() => { heading.current?.focus(); }, [reporting]);
+  useEffect(() => { heading.current?.focus(); }, [reporting, assistance]);
   const activeBreak = person.breakView?.active;
   useEffect(() => {
     if (!activeBreak?.availableAt && !activeBreak?.extensionAt) return;
@@ -42,10 +47,24 @@ export function ClockPanel({ person, language, busy, offlineBlocked, earlyClockB
   const input = (eventType: ClockInput["eventType"], details?: ClockInput["details"]) =>
     ({ eventType, explanation, ...(eventType === "in" ? { roleId: Number(roleId) } : {}), ...(details ? { details } : {}) });
   if (reporting) return <BreakReportForm issues={issues} language={language} busy={disabled}
-    onSave={reports => void onClock(input("out", { reports }))} onBack={() => setReporting(false)} />;
+    onSave={reports => void onClock(assistedExit
+      ? { ...input("out", { reports, assisted: assistedExit.actual }), explanation: assistedExit.explanation }
+      : input("out", { reports }))}
+    onBack={() => { setReporting(false); setAssistedExit(undefined); }} />;
+  if (assistance && person.assist) return <AssistanceForm kind={assistance} language={language} date={person.assist.date} busy={disabled}
+    onBack={() => setAssistance(null)} onSubmit={(actual, explanation) => {
+      if (assistance === "out" && issues.length) {
+        setAssistedExit({ actual, explanation });
+        setReporting(true);
+        return;
+      }
+      const details = assistance === "out" && !person.assist?.recovery ? { assisted: actual, reports: [] } : { assisted: actual };
+      void onClock({ ...input(assistance, details), explanation });
+    }} />;
   return <section aria-labelledby="clock-person-heading" className="kiosk-clock-panel">
     <h2 ref={heading} id="clock-person-heading" tabIndex={-1}>{text.hello}, {person.employee.name}</h2>
     <p>{off ? text.clockedOut : onBreak ? activeBreak?.kind === "rest" ? text.onRest : text.onMeal : text.clockedIn}</p>
+    {person.assist?.reminder ? <p className="kiosk-status" role="status">{text.clockOutReminder}</p> : null}
     {off ? <label htmlFor="kiosk-role">{text.role}
       <select id="kiosk-role" value={roleId} disabled={busy || !person.roles.length} onChange={event => setRoleId(event.target.value)}>
         {!person.roles.length ? <option value="">{text.noRole}</option> : person.roles.map(role => <option key={role.id} value={role.id}>{role.name}</option>)}
@@ -65,6 +84,8 @@ export function ClockPanel({ person, language, busy, offlineBlocked, earlyClockB
         : <><button type="button" className="kiosk-primary" disabled={disabled} onClick={() => issues.length ? setReporting(true) : void onClock(input("out", { reports: [] }))}>{text.clockOut}</button>
           <button type="button" disabled={disabled} onClick={() => void onClock(input("break", { breakKind: "rest" }))}>{text.startRest}</button>
           <button type="button" disabled={disabled} onClick={() => void onClock(input("break", { breakKind: "meal" }))}>{text.startMeal}</button></>}
+      {person.assist?.in && off ? <button type="button" disabled={disabled || !roleId} onClick={() => setAssistance("in")}>{text.assistedIn}</button> : null}
+      {person.assist?.out ? <button type="button" disabled={disabled} onClick={() => setAssistance("out")}>{text.assistedOut}</button> : null}
       <button type="button" onClick={onCancel}>{text.cancel}</button>
     </div>
     <p className="kiosk-hint">{text.lockHint}</p>

@@ -4,7 +4,7 @@ import { scheduledPaidMinutes } from "./schedule-estimates";
 import { inspectBreaks, requiredBreaks } from "../kiosk/break-rules";
 import type { BreakKind, ClockDetails } from "../kiosk/break-rules";
 export type TimesheetEmployee = { id: number; name: string; role: string; wage: string; active: boolean; terminated?: boolean; terminationDate?: string; wageRates?: WageRate[]; jobs?: { id: number; name: string }[]; payrollId?: string; legalFirstName?: string; legalMiddleName?: string; legalLastName?: string };
-export type TimesheetEvent = { id: number; employeeId: number; type: "in" | "out" | "break" | "break_end"; at: string; explanation?: string; automatic?: boolean; role?: string; cardId?: number; clockDetails?: ClockDetails };
+export type TimesheetEvent = { id: number; employeeId: number; type: "in" | "out" | "break" | "break_end"; at: string; explanation?: string; automatic?: boolean; role?: string; cardId?: number; clockDetails?: ClockDetails; assistedStatus?: "pending" | "approved" | "edited" };
 export type TimesheetShift = { shiftType?: "work" | "day_off"; employeeId: number; date: string; start: string; end: string; role: string };
 export type TimesheetAdjustment = { id: number; employeeId: number; date: string; hours: number };
 export type TimesheetPto = { employeeId: number; startDate: string; endDate: string; compensation: string; status: string };
@@ -87,6 +87,7 @@ export function buildTimeCards(input: {
         if (session.some(event => event.automatic)) card.issues.push("Automatic clock-out");
         if (!california && input.mandatoryMealBreak && elapsed / HOUR >= input.mealBreakAfterHours && breakMs < 30 * 60000) card.issues.push("Missing breaks");
         if (session.some(event => event.clockDetails?.earlyWork)) card.issues.push("Early work reported");
+        if (session.some(event => event.assistedStatus === "pending")) card.issues.push("Clock time needs review");
         for (const event of session) {
           for (const report of event.clockDetails?.reports ?? []) {
             const title = report.kind === "meal" ? "Meal" : "Rest break";

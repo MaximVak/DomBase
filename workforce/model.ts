@@ -160,6 +160,7 @@ export type ClockEvent = {
   type: "in" | "out" | "break" | "break_end";
   at: string;
   clockDetails?: ClockDetails;
+  assistedStatus?: "pending" | "approved" | "edited";
   durationMinutes?: 30 | 45;
   durationSeconds?: 5;
   explanation?: string;

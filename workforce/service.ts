@@ -27,6 +27,8 @@ import type { Database } from "./context";
 import * as v from "./validation";
 import { requestPeriod, workspacePeriod } from "./period";
 import { runClockMaintenance } from "./maintenance";
+import { createAttendanceNotices, readAttendance } from "./attendance";
+import { readAssistedClocks, decideAssistedClock } from "./assisted-clock";
 
 const entities: Entity[] = ["employee", "department", "schedule-event", "schedule-draft", "schedule-publish", "open-shift-draft", "timecard", "hours-adjustment", "pto-request", "pto-policy", "availability", "conversation", "settings", "business", "notifications"];
 function currentRecord(view: WorkspaceData, change: Change, employeeKey: number): unknown {
@@ -51,6 +53,12 @@ export function createWorkforceService(db: Database, access: ReturnType<typeof c
       const ctx = await access.workspaceContext(request);
       const url = new URL(request.url);
       const action = url.pathname.slice("/api/workspace/".length);
+      if (action === "attendance" || action === "assisted-clocks") {
+        if (url.search) throw new AuthError(400, "Attendance does not accept employee selectors.");
+        if (request.method === "GET") return json(action === "attendance" ? await readAttendance(db, ctx, now()) : await readAssistedClocks(db, ctx));
+        if (action === "assisted-clocks" && request.method === "POST") return json(await decideAssistedClock(db, ctx, await readAuthBody(request, 4096), now()));
+        return json({ error: "Method not allowed." }, 405, { Allow: action === "attendance" ? "GET" : "GET, POST" });
+      }
       if (action === "schedule-print") {
         if (request.method !== "GET") return json({ error: "Method not allowed." }, 405, { Allow: "GET" });
         return json(await readSchedulePrint(db, ctx, url, options.fieldKey, now()));
@@ -100,7 +108,9 @@ export function createWorkforceService(db: Database, access: ReturnType<typeof c
         ctx.requirePermission("timesheets.manage");
         if (!ctx.allDepartments) throw new AuthError(403, "This action requires company-wide time management.");
         const body = await readAuthBody(request); v.keys(body, []);
-        return json({ recorded: await runClockMaintenance(db, now()) });
+        const time = now();
+        await createAttendanceNotices(db, time).catch(() => console.error("Clock notices are temporarily unavailable."));
+        return json({ recorded: await runClockMaintenance(db, time) });
       }
       if (action !== "commit") throw new AuthError(404, "Not found.");
       if (request.method !== "POST") return json({ error: "Method not allowed." }, 405, { Allow: "POST" });

@@ -33,21 +33,22 @@ export async function saveSchedulePreferences(db: Database, ctx: SchedulePrefere
   if (!await tx.commit(revision, hash, ["schedule-notification-preferences"])) throw new AuthError(409, "Your access or shared data changed. Reload before saving.");
   return { saved: true, revision: revision + 1 };
 }
+const employeeNotice = sql`(${s.notifications.kind}='schedule' OR (${s.notifications.kind}='alert' AND ${s.notifications.sourceKey} LIKE 'clock-out-%'))`;
 export async function readScheduleAlerts(db: Database, ctx: SchedulePreferenceContext, url: URL) {
   if ([...url.searchParams.keys()].some(key => key !== "cursor") || url.searchParams.getAll("cursor").length > 1) throw new AuthError(400, "Schedule alerts do not accept employee selectors.");
   await readSchedulePreferences(db, ctx);
   const cursor = url.searchParams.get("cursor"); let position = sql`1=1`;
-  if (cursor) { const id = v.text(cursor, 200, true); const [row] = await db.select({ id: s.notifications.id, at: s.notifications.occurredAt }).from(s.notifications).where(and(eq(s.notifications.id, id), eq(s.notifications.employeeId, ctx.account.employeeId!), eq(s.notifications.kind, "schedule"), ctx.guard)).limit(1); if (!row) throw new AuthError(404, "Alert page is unavailable."); position = sql`(julianday(${s.notifications.occurredAt})<julianday(${row.at}) OR (julianday(${s.notifications.occurredAt})=julianday(${row.at}) AND ${s.notifications.id}<${row.id}))`; }
+  if (cursor) { const id = v.text(cursor, 200, true); const [row] = await db.select({ id: s.notifications.id, at: s.notifications.occurredAt }).from(s.notifications).where(and(eq(s.notifications.id, id), eq(s.notifications.employeeId, ctx.account.employeeId!), employeeNotice, ctx.guard)).limit(1); if (!row) throw new AuthError(404, "Alert page is unavailable."); position = sql`(julianday(${s.notifications.occurredAt})<julianday(${row.at}) OR (julianday(${s.notifications.occurredAt})=julianday(${row.at}) AND ${s.notifications.id}<${row.id}))`; }
   const rows = await db.select({ id: s.notifications.id, title: s.notifications.title, detail: s.notifications.detail, at: s.notifications.occurredAt, opened: s.notificationReceipts.openedAt, weekStart: s.schedulePublications.periodStart }).from(s.notifications)
     .leftJoin(s.notificationReceipts, and(eq(s.notificationReceipts.accountId, ctx.account.id), eq(s.notificationReceipts.sourceKey, sql`'schedule-' || ${s.notifications.id}`))).leftJoin(s.schedulePublications, eq(s.schedulePublications.id, s.notifications.publicationId))
-    .where(and(eq(s.notifications.employeeId, ctx.account.employeeId!), eq(s.notifications.kind, "schedule"), isNull(s.notificationReceipts.dismissedAt), position, ctx.guard)).orderBy(desc(sql`julianday(${s.notifications.occurredAt})`), desc(s.notifications.id)).limit(51);
+    .where(and(eq(s.notifications.employeeId, ctx.account.employeeId!), employeeNotice, isNull(s.notificationReceipts.dismissedAt), position, ctx.guard)).orderBy(desc(sql`julianday(${s.notifications.occurredAt})`), desc(s.notifications.id)).limit(51);
   return { contextToken: ctx.contextToken, notices: rows.slice(0, 50).map(row => ({ ...row, opened: !!row.opened })), nextCursor: rows.length > 50 ? rows[49].id : null };
 }
 export async function saveScheduleAlertReceipt(db: Database, ctx: SchedulePreferenceContext, body: Record<string, unknown>, now: number) {
   v.keys(body, ["notificationId", "action", "contextToken"]); const id = v.text(body.notificationId, 200, true), action = v.oneOf(body.action, ["read", "dismiss"]);
   if (body.contextToken !== ctx.contextToken) throw new AuthError(409, "Your sign-in changed. Reload your alerts.");
   await readSchedulePreferences(db, ctx);
-  const own = sql`EXISTS (SELECT 1 FROM notifications n WHERE n.id=${id} AND n.employee_id=${ctx.account.employeeId} AND n.kind='schedule')`;
+  const own = sql`EXISTS (SELECT 1 FROM notifications n WHERE n.id=${id} AND n.employee_id=${ctx.account.employeeId} AND (n.kind='schedule' OR (n.kind='alert' AND n.source_key LIKE 'clock-out-%')))`;
   if (!await db.get(sql`SELECT 1 WHERE ${own} AND ${ctx.guard}`)) throw new AuthError(404, "Alert is unavailable.");
   const stamp = new Date(now).toISOString(), sourceKey = `schedule-${id}`;
   await atomicBatch(db, [sql`INSERT INTO notification_receipts (account_id,source_key,opened_at,dismissed_at) SELECT ${ctx.account.id},${sourceKey},${stamp},${action === "dismiss" ? stamp : null} WHERE ${own} AND ${ctx.guard}

@@ -28,6 +28,14 @@ export type ScheduleEnforcement = {
   missedBreakReports: boolean;
   unpaidRestOverage: boolean;
   paidRestMinutes: number;
+  lateAttendanceAlerts: boolean;
+  assistedClockIn: boolean;
+  assistedClockOut: boolean;
+  clockOutReminders: boolean;
+  clockOutReminderEmail: boolean;
+  clockOutReminderFirst: number;
+  clockOutReminderSecond: number;
+  clockOutReminderThird: number;
   enableTeamMessaging: boolean;
 };
 
@@ -61,6 +69,14 @@ export const defaultScheduleEnforcement: ScheduleEnforcement = {
   missedBreakReports: true,
   unpaidRestOverage: false,
   paidRestMinutes: 10,
+  lateAttendanceAlerts: true,
+  assistedClockIn: true,
+  assistedClockOut: true,
+  clockOutReminders: true,
+  clockOutReminderEmail: false,
+  clockOutReminderFirst: 10,
+  clockOutReminderSecond: 60,
+  clockOutReminderThird: 120,
   enableTeamMessaging: true,
 };
 
@@ -68,9 +84,10 @@ export const alertsPermissionsFields = ["notifyScheduleChanges", "employeesOwnSc
 export const eventsTradesFields = ["enableScheduleEvents"] as const;
 export const overtimeFields = ["workWeekStart"] as const;
 export const breakPolicyFields = ["blockEarlyClockIn", "blockEarlyBreakReturn", "breakWaivers", "missedBreakReports", "unpaidRestOverage", "paidRestMinutes"] as const;
+export const attendancePolicyFields = ["lateAttendanceAlerts", "assistedClockIn", "assistedClockOut", "clockOutReminders", "clockOutReminderEmail", "clockOutReminderFirst", "clockOutReminderSecond", "clockOutReminderThird"] as const;
 export const breaksComplianceFields = ["mealBreakAfterHours", "mealBreakMinutes", "mandatoryMealBreak", "blockEarlyBreakReturn", "breakWaivers", "missedBreakReports", "unpaidRestOverage", "paidRestMinutes"] as const;
 export const messagesSettingsFields = ["enableTeamMessaging"] as const;
-export const scheduleEnforcementFields = ["workWeekStart", "minRestHours", "availabilityReviewDays", "scheduleStartHour", "scheduleEndHour", "lateMinutes", "earlyClockInMinutes", "blockEarlyClockIn", "requireEarlyClockInExplanation", "requireLateClockInExplanation", "requireClockOutExplanation", "requireUnscheduledExplanation", "noShowAlerts", "noShowMinutes", "automaticClockOut", "automaticClockOutMinutes"] as const;
+export const scheduleEnforcementFields = ["workWeekStart", "minRestHours", "availabilityReviewDays", "scheduleStartHour", "scheduleEndHour", "lateMinutes", "earlyClockInMinutes", "blockEarlyClockIn", "requireEarlyClockInExplanation", "requireLateClockInExplanation", "requireClockOutExplanation", "requireUnscheduledExplanation", "noShowAlerts", "noShowMinutes", "automaticClockOut", "automaticClockOutMinutes", ...attendancePolicyFields] as const;
 
 export function schedulingSettingsForSave(saved: ScheduleEnforcement, draft: ScheduleEnforcement, fields: readonly (keyof ScheduleEnforcement)[]) {
   return { ...saved, ...Object.fromEntries(fields.map(field => [field, draft[field]])) } as ScheduleEnforcement;
@@ -117,8 +134,8 @@ export function normalizeScheduleEnforcement(value: unknown): ScheduleEnforcemen
     const maximum = key === "workWeekStart" ? 6 : key === "minRestHours" ? 24 : key === "availabilityReviewDays" ? 365
       : key === "scheduleStartHour" ? 23
       : key === "scheduleEndHour" ? 24
-      : key === "automaticClockOutMinutes" ? 1440 : key === "mealBreakAfterHours" ? 24 : 120;
-    const minimum = key === "mealBreakMinutes" ? 30 : key === "paidRestMinutes" ? 10 : key === "scheduleEndHour" || key === "automaticClockOutMinutes" || key === "lateMinutes" || key === "mealBreakAfterHours" ? 1 : 0;
+      : key === "automaticClockOutMinutes" || key.startsWith("clockOutReminder") ? 1440 : key === "mealBreakAfterHours" ? 24 : 120;
+    const minimum = key === "mealBreakMinutes" ? 30 : key === "paidRestMinutes" ? 10 : key === "scheduleEndHour" || key === "automaticClockOutMinutes" || key.startsWith("clockOutReminder") || key === "lateMinutes" || key === "mealBreakAfterHours" ? 1 : 0;
     const candidate = input[key];
     if (typeof candidate === "number" && Number.isInteger(candidate) && candidate >= minimum && candidate <= maximum) {
       Object.assign(result, { [key]: candidate });
@@ -127,6 +144,11 @@ export function normalizeScheduleEnforcement(value: unknown): ScheduleEnforcemen
   if (result.scheduleEndHour <= result.scheduleStartHour) {
     result.scheduleStartHour = defaultScheduleEnforcement.scheduleStartHour;
     result.scheduleEndHour = defaultScheduleEnforcement.scheduleEndHour;
+  }
+  if (!(result.clockOutReminderFirst < result.clockOutReminderSecond && result.clockOutReminderSecond < result.clockOutReminderThird)) {
+    result.clockOutReminderFirst = defaultScheduleEnforcement.clockOutReminderFirst;
+    result.clockOutReminderSecond = defaultScheduleEnforcement.clockOutReminderSecond;
+    result.clockOutReminderThird = defaultScheduleEnforcement.clockOutReminderThird;
   }
   return result;
 }

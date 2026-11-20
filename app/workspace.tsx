@@ -1,5 +1,6 @@
 "use client";
 import { ShiftExchangeRequests } from "./shift-exchange-requests";
+import { AssistedClockReview, AttendancePanel } from "./clock-attendance";
 
 import { FormEvent, MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { DragEvent } from "react";
@@ -4006,6 +4007,10 @@ export default function Home({ account }: { account: DashboardAccount }) {
                 </section>
               ) : null}
 
+              {mode === "manager" && shared.data.permissions["timesheets.read"] && shared.data.permissions["schedule.read"] && (
+                <AttendancePanel onReview={shared.data.permissions["timesheets.manage"] ? () => navigateToView("hours") : undefined} />
+              )}
+
               <section className="panel">
                 <div className="panel-heading calendar-heading">
                   <div>
@@ -5347,7 +5352,11 @@ export default function Home({ account }: { account: DashboardAccount }) {
           )}
 
           {activeView === "hours" && !isPublicSchedule && (
-            <TimesheetsPanel
+            <>
+              {mode === "manager" && shared.data.permissions["timesheets.read"] && shared.data.permissions["timesheets.manage"] && (
+                <AssistedClockReview onSaved={shared.refresh} />
+              )}
+              <TimesheetsPanel
               onPeriodChange={setWorkspacePeriod}
               payPeriod={shared.data.teamPeriod?.payPeriod}
               payPeriodAnchor={shared.data.teamPeriod?.anchorDate}
@@ -5414,7 +5423,8 @@ export default function Home({ account }: { account: DashboardAccount }) {
               locationName={sidebarLocationName}
               onBreakSettings={() => { navigateToView("settings"); setActiveSettingsTab("Breaks & compliance"); }}
               onSettings={() => { navigateToView("settings"); setActiveSettingsTab("Time clock options"); }}
-            />
+              />
+            </>
           )}
 
           {activeView === "time_off" && !isPublicSchedule && (
@@ -7041,6 +7051,7 @@ function operationalAlertsFor(
       if (isWithinAllowedWindow) return;
 
       const timing = eventTime < scheduledTime.getTime() ? "Early" : "Late";
+      if (event.type === "in" && timing === "Late" && !settings.lateAttendanceAlerts) return;
       alerts.push({
         id: `${timing.toLocaleLowerCase()}-${action}-${event.id}`,
         employeeId: event.employeeId,
@@ -8387,7 +8398,7 @@ function ScheduleEnforcementPanel({ settings, dirty, message, onChange, onSave }
       onChange={(event) => onChange({ [field]: Number(event.target.value) })}
     />
   );
-  const checkbox = (field: "blockEarlyClockIn" | "requireEarlyClockInExplanation" | "requireLateClockInExplanation" | "requireClockOutExplanation" | "requireUnscheduledExplanation" | "noShowAlerts" | "automaticClockOut", label: string) => (
+  const checkbox = (field: "blockEarlyClockIn" | "requireEarlyClockInExplanation" | "requireLateClockInExplanation" | "requireClockOutExplanation" | "requireUnscheduledExplanation" | "noShowAlerts" | "automaticClockOut" | "lateAttendanceAlerts" | "assistedClockIn" | "assistedClockOut" | "clockOutReminders" | "clockOutReminderEmail", label: string) => (
     <input type="checkbox" aria-label={label} checked={settings[field]} onChange={(event) => onChange({ [field]: event.target.checked })} />
   );
   return (
@@ -8450,12 +8461,39 @@ function ScheduleEnforcementPanel({ settings, dirty, message, onChange, onSave }
           <p>Team members without a shift can record their time after explaining why they are working.</p>
         </div>
         <div className="enforcement-rule">
+          <label className="enforcement-rule-line">{checkbox("lateAttendanceAlerts", "Show late attendance alerts")}<span>Show late attendance alerts</span></label>
+          <p>Notify managers when a scheduled clock-in is overdue or recorded late.</p>
+        </div>
+        <div className="enforcement-rule">
           <div className="enforcement-rule-line">
             <label>{checkbox("noShowAlerts", "Show no-show alerts")}<span>Show no-show alerts</span></label>
             {minuteInput("noShowMinutes", "No-show alert delay in minutes", !settings.noShowAlerts)}
             <span>minutes after a missed clock-in</span>
           </div>
           <p>Show managers an in-app notification and an Events entry if no clock-in is recorded for the shift.</p>
+        </div>
+        <div className="enforcement-rule">
+          <label className="enforcement-rule-line">{checkbox("assistedClockIn", "Allow missed clock-in reports")}<span>Allow missed clock-in reports</span></label>
+          <p>Employees can report when they started after the late threshold. The reported start counts while a manager reviews it.</p>
+          <label className="enforcement-rule-line">{checkbox("assistedClockOut", "Allow missed clock-out reports")}<span>Allow missed clock-out reports</span></label>
+          <p>Reports submitted within 15 minutes after the scheduled end are approved automatically. Other reports go to a manager.</p>
+        </div>
+        <div className="enforcement-rule">
+          <label className="enforcement-rule-line">{checkbox("clockOutReminders", "Send clock-out reminders")}<span>Send clock-out reminders</span></label>
+          <p>Send in-app reminders after the scheduled shift ends while the employee is still clocked in.</p>
+          <div className="clock-reminder-intervals">
+            {([
+              ["clockOutReminderFirst", "First reminder", 1, settings.clockOutReminderSecond - 1],
+              ["clockOutReminderSecond", "Second reminder", settings.clockOutReminderFirst + 1, settings.clockOutReminderThird - 1],
+              ["clockOutReminderThird", "Third reminder", settings.clockOutReminderSecond + 1, 1440],
+            ] as const).map(([field, label, min, max]) => (
+              <label key={field}>{label} (minutes)
+                <input type="number" className="enforcement-minutes" min={min} max={max} step={1} required disabled={!settings.clockOutReminders}
+                  value={settings[field]} onChange={event => onChange({ [field]: Number(event.target.value) })} />
+              </label>
+            ))}
+          </div>
+          <label className="enforcement-rule-line">{checkbox("clockOutReminderEmail", "Also email clock-out reminders")}<span>Also email clock-out reminders when email delivery is set up</span></label>
         </div>
         <div className="enforcement-rule">
           <div className="enforcement-rule-line">

@@ -78,7 +78,7 @@ export async function workspaceSnapshot(db: Database, ctx: Context, fieldKey: st
     db.select().from(s.scheduleDraftChanges).where(sql`${allowed(p["schedule.manage"])} AND EXISTS (SELECT 1 FROM schedule_drafts sd WHERE sd.id = ${s.scheduleDraftChanges.draftId} AND sd.owner_account_id = ${ctx.account.id}) AND ${ctx.roleFilter(s.scheduleDraftChanges.roleId)}`),
     db.select().from(s.scheduleDraftEmployees).where(sql`EXISTS (SELECT 1 FROM schedule_drafts sd WHERE sd.id = ${s.scheduleDraftEmployees.draftId} AND sd.owner_account_id = ${ctx.account.id}) AND ${employeeScope(s.scheduleDraftEmployees.employeeId)}`),
     db.select().from(s.scheduleEvents).where(and(allowed(p["schedule.read"]), dates(s.scheduleEvents.date))).orderBy(s.scheduleEvents.date),
-    db.select().from(s.clockEvents).where(and(allowed(p["timesheets.read"]), employeeScope(s.clockEvents.employeeId), clockScope, clockIds)).orderBy(s.clockEvents.id),
+    db.select({ event: s.clockEvents, assistance: s.assistedClockReports }).from(s.clockEvents).leftJoin(s.assistedClockReports, eq(s.assistedClockReports.eventId, s.clockEvents.id)).where(and(allowed(p["timesheets.read"]), employeeScope(s.clockEvents.employeeId), clockScope, clockIds)).orderBy(s.clockEvents.id),
     db.select().from(s.timeCards).where(and(allowed(p["timesheets.read"]), employeeScope(s.timeCards.employeeId), cardDates(s.timeCards.workDate), ctx.allDepartments ? sql`1 = 1` : ctx.roleFilter(s.timeCards.roleId))),
     db.select().from(s.timeCardEdits).where(sql`${allowed(p["timesheets.read"])} AND ${employeeScope(s.timeCardEdits.employeeId)} AND EXISTS (SELECT 1 FROM time_cards tc WHERE tc.id = ${s.timeCardEdits.cardId} AND ${cardDates(sql`tc.work_date`)} AND ${ctx.allDepartments ? sql`1 = 1` : ctx.roleFilter(sql`tc.role_id`)})`).orderBy(s.timeCardEdits.createdAt, s.timeCardEdits.id),
     db.select().from(s.hoursAdjustments).where(and(allowed(p["timesheets.read"] && ctx.allDepartments), employeeScope(s.hoursAdjustments.employeeId), dates(s.hoursAdjustments.date))).orderBy(s.hoursAdjustments.id),
@@ -134,7 +134,14 @@ export async function workspaceSnapshot(db: Database, ctx: Context, fieldKey: st
     deletedShiftIds: draftChanges.filter(row => row.operation === "delete").map(row => row.shiftId!), affectedEmployeeIds: draftEmployees.map(row => row.employeeId),
   };
   state.scheduleEvents = events.map(row => ({ id: row.id, date: row.date, title: row.title, notes: p["schedule.notes.read"] ? row.notes : "" }));
-  state.clockEvents = rawClocks.map(row => ({ id: row.id, employeeId: row.employeeId, type: row.eventType, at: timestamp(row.occurredAt), role: row.roleName || undefined, explanation: row.explanation || undefined, automatic: row.automatic, cardId: row.cardId ?? undefined, ...(row.clockDetails ? { clockDetails: row.clockDetails } : {}) }));
+  state.clockEvents = rawClocks.map(({ event: row, assistance }) => {
+    const resolved = assistance && (assistance.status !== "pending" || row.eventType === "in");
+    const clockAt = resolved ? assistance.decidedTime ?? assistance.requestedAt : row.occurredAt;
+    return { id: row.id, employeeId: row.employeeId, type: row.eventType, at: timestamp(clockAt),
+      role: row.roleName || undefined, explanation: assistance?.reason ?? (row.explanation || undefined), automatic: row.automatic,
+      cardId: row.cardId ?? undefined, ...(row.clockDetails ? { clockDetails: row.clockDetails } : {}),
+      ...(assistance ? { assistedStatus: assistance.status } : {}) };
+  });
   for (const edit of edits) {
     if (Array.isArray(edit.before.eventIds) && Array.isArray(edit.after.events)) {
       const removed = new Set(edit.before.eventIds as number[]);

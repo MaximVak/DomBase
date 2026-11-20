@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import { atomicBatch } from "../kiosk/database";
 import type { Database } from "./context";
 import { nextDate, zonedTimestamp } from "./time";
+import { createAttendanceNotices } from "./attendance";
 export async function runClockMaintenance(db: Database, now = Date.now()) {
   const settings = await db.get<{ enabled: number; delay: number; zone: string }>(sql`SELECT ls.automatic_clock_out AS enabled, ls.automatic_clock_out_minutes AS delay, b.time_zone AS zone FROM location_settings ls JOIN business b ON b.id = ls.business_id LIMIT 1`);
   if (!settings?.enabled) return 0;
@@ -34,7 +35,9 @@ export async function runClockMaintenance(db: Database, now = Date.now()) {
 
 // One immutable, non-personal receipt per hour proves scheduled execution without
 // an open dashboard or access to Cloudflare's live-log permission.
-export async function runScheduledMaintenance(db: Database, now = Date.now()) {
+export async function runScheduledMaintenance(db: Database, now = Date.now(), deliver?: () => Promise<void>) {
+  await createAttendanceNotices(db, now).catch(() => console.error("Clock notices are temporarily unavailable."));
+  if (deliver) await deliver().catch(() => console.error("Clock reminder email is temporarily unavailable."));
   const recorded = await runClockMaintenance(db, now);
   const hour = new Date(now); hour.setUTCMinutes(0, 0, 0);
   await db.run(sql`INSERT INTO audit_log (action, entity_type, entity_id, metadata, created_at)

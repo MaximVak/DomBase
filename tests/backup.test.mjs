@@ -27,8 +27,9 @@ test("encrypted local backups restore all D1 data, protected files and private-f
   const { seedDemo } = await loadServerModule("demo/seed.ts"); await seedDemo(db, { weekStart: "2026-11-02" });
   const { createAuthService, issueSetupToken } = await loadServerModule("auth/service.ts"); const { createAccessService } = await loadServerModule("access/service.ts");
   const { createDocumentService } = await loadServerModule("documents/service.ts"); const { encryptSsn, decryptSsn } = await loadServerModule("workforce/private.ts"); const { newToken, tokenHash } = await loadServerModule("auth/crypto.ts");
-  const secrets = { AUTH_RATE_LIMIT_SECRET: "isolated-backup-authentication-secret-32-characters", AUTH_PRIVATE_FIELD_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" };
-  const password = "Isolated backup Owner verification passphrase!", email = "backup-owner@example.test", origin = "http://localhost:3000";
+  const secrets = { AUTH_RATE_LIMIT_SECRET: randomBytes(32).toString("hex"), AUTH_PRIVATE_FIELD_KEY: randomBytes(32).toString("base64url") };
+  const privateFixtureValue = randomBytes(12).toString("hex");
+  const password = randomBytes(24).toString("base64url"), email = "backup-owner@example.test", origin = "http://localhost:3000";
   const auth = createAuthService(db, { secret: secrets.AUTH_RATE_LIMIT_SECRET });
   const req = (path, cookie = "", body, method = body === undefined ? "GET" : "POST") => new Request(origin + path, { method, headers: { Cookie: cookie, ...(body === undefined ? {} : { Origin: origin, "Content-Type": body instanceof Uint8Array ? (body[0] === 137 ? "image/png" : "application/pdf") : "application/json" }) }, ...(body === undefined ? {} : { body: body instanceof Uint8Array ? body : JSON.stringify(body) }) });
   const good = async response => { assert.equal(response.status, 200); return response.json(); };
@@ -48,7 +49,7 @@ test("encrypted local backups restore all D1 data, protected files and private-f
   const invitationToken = newToken(), invitationId = newToken();
   await db.insert(s.teamInvitations).values({ id: invitationId, employeeId: 900003, channel: "email", recipient: "recovered-invite@example.test", tokenHash: tokenHash(invitationToken), localTokenEncrypted: encryptSsn(invitationToken, 900003, secrets.AUTH_PRIVATE_FIELD_KEY, `invitation:${invitationId}`), issuedByAccountId: owner.id, issuerVersion: owner.sessionVersion, expiresAt: new Date(Date.now() + 3600000).toISOString() });
   await db.update(s.teamSettings).set({ payPeriod: "biweekly" }).where(eq(s.teamSettings.id, 1));
-  await db.insert(s.employeeProfiles).values({ employeeId: 900001, ssnEncrypted: encryptSsn("000-34-5678", 900001, secrets.AUTH_PRIVATE_FIELD_KEY) });
+  await db.insert(s.employeeProfiles).values({ employeeId: 900001, ssnEncrypted: encryptSsn(privateFixtureValue, 900001, secrets.AUTH_PRIVATE_FIELD_KEY) });
   await db.insert(s.clockEvents).values({ employeeId: 900002, eventType: "in", occurredAt: "2026-11-02T17:00:00.000Z", roleName: "Demo Sales Associate", source: "system" });
   await db.insert(s.invitationEmails).values({ invitationId, state: "pending", nextAttemptAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
   const pendingSetup = await issueSetupToken(db, { email: "pending-backup@example.test", displayName: "Pending recovery fixture", accessLevel: "manager" });
@@ -81,7 +82,7 @@ test("encrypted local backups restore all D1 data, protected files and private-f
     backup = await createBackup({ database: source.env.DB, bucket: source.env.FILES, secrets, directory, key });
     const bytes = await readFile(backup.file); assert.equal(bytes.includes(Buffer.from(email)), false); assert.equal(bytes.includes(Buffer.from("scrypt$16384")), false); assert.equal(bytes.includes(certificate.bytes), false); assert.equal(bytes.includes(Buffer.from(secrets.AUTH_RATE_LIMIT_SECRET)), false);
     assert.equal((await stat(backup.file)).mode & 0o777, 0o600); assert.equal((await stat(keyPath)).mode & 0o777, 0o600); assert.equal((await stat(directory)).mode & 0o777, 0o700);
-    payload = await readBackup(backup.file, key); assert.equal(payload.snapshot.tables.length, 76); assert.equal(payload.objects.length, 4); assert.equal(payload.secrets.AUTH_PRIVATE_FIELD_KEY, secrets.AUTH_PRIVATE_FIELD_KEY);
+    payload = await readBackup(backup.file, key); assert.equal(payload.snapshot.tables.length, 77); assert.equal(payload.objects.length, 4); assert.equal(payload.secrets.AUTH_PRIVATE_FIELD_KEY, secrets.AUTH_PRIVATE_FIELD_KEY);
     assert.equal(await containedBackup(backup.file, directory), backup.file);
   });
   await t.test("wrong key, damaged ciphertext, loose permissions and external paths are rejected", async () => {
@@ -104,7 +105,7 @@ test("encrypted local backups restore all D1 data, protected files and private-f
   await t.test("fresh isolated D1/R2 restores all table contents, migrations, sequences, indexes and triggers", async () => {
     destination = await open(destinationPath);
     const result = await restoreIntoEmpty({ database: destination.env.DB, bucket: destination.env.FILES, payload });
-    assert.deepEqual(result, { tables: 75, migrations: 22, objects: 4, exactDatabase: true, exactFiles: true });
+    assert.deepEqual(result, { tables: 76, migrations: 23, objects: 4, exactDatabase: true, exactFiles: true });
     await assert.rejects(destination.env.DB.prepare("UPDATE clock_events SET event_type=event_type").run());
     await assert.rejects(destination.env.DB.prepare("UPDATE audit_log SET action=action").run());
     await assert.rejects(destination.env.DB.prepare("UPDATE wage_rates SET amount_cents=amount_cents").run());
@@ -117,7 +118,7 @@ test("encrypted local backups restore all D1 data, protected files and private-f
     assert.equal((await recovered.select().from(s.scheduleOpenTemplateEntries))[0].color, "amber");
     assert.equal((await recovered.select().from(s.scheduleTemplates))[0].version, 2);
     assert.equal((await recovered.select().from(s.scheduleTemplateEntries))[0].notes, "Preserved fictional template note");
-    const profile = (await recovered.select().from(s.employeeProfiles))[0]; assert.equal(decryptSsn(profile.ssnEncrypted, profile.employeeId, payload.secrets.AUTH_PRIVATE_FIELD_KEY), "000-34-5678");
+    const profile = (await recovered.select().from(s.employeeProfiles))[0]; assert.equal(decryptSsn(profile.ssnEncrypted, profile.employeeId, payload.secrets.AUTH_PRIVATE_FIELD_KEY), privateFixtureValue);
   });
   await t.test("recovery revokes all old contexts while preserving passwords, files and immutable history", async () => {
     await invalidateRecoveredAccess(destination.env.DB); const recovered = drizzle(destination.env.DB, { schema: s });

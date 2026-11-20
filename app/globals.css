@@ -2540,6 +2540,82 @@ h1 {
   gap: 22px;
 }
 
+.clock-attendance-panel {
+  min-width: 0;
+}
+.clock-attendance-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.clock-attendance-table {
+  overflow-x: auto;
+}
+.clock-attendance-table table {
+  border-collapse: collapse;
+  width: 100%;
+  text-align: left;
+}
+.clock-attendance-table :is(th, td) {
+  padding: 10px;
+  border-bottom: 1px solid #e3e8ed;
+  white-space: nowrap;
+}
+.clock-attendance-flag {
+  color: #a33827;
+}
+.clock-late-note {
+  font-size: 0.85em;
+}
+.clock-attendance-alerts {
+  margin-top: 16px;
+}
+.clock-attendance-alerts summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.clock-attendance-alerts li {
+  margin-top: 8px;
+}
+.assisted-clock-list {
+  display: grid;
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.assisted-clock-list li {
+  display: grid;
+  gap: 6px;
+  padding-top: 12px;
+  border-top: 1px solid #e3e8ed;
+  overflow-wrap: anywhere;
+}
+.assisted-clock-list p {
+  margin: 0;
+}
+.assisted-clock-controls,
+.clock-reminder-intervals {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 10px;
+  margin-block: 8px;
+}
+.assisted-clock-controls label,
+.clock-reminder-intervals label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.assisted-clock-controls input {
+  max-width: 100%;
+  border: 1px solid #bac2ca;
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+
 .enforcement-field-row {
   display: grid;
   grid-template-columns: 180px minmax(0, 340px);

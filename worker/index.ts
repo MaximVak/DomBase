@@ -10,10 +10,11 @@ import { scheduleHostedBackup } from "../backup/schedule";
 import type { BackupScheduleEnv } from "../backup/schedule";
 import type { DocumentBucket } from "../documents/types";
 import { dispatchScheduleEmails } from "../workforce/schedule-email";
+import { dispatchClockReminderEmails } from "../workforce/clock-reminder-email";
 import { dispatchInvitationEmails } from "../team/email";
 import type { InvitationEmailEnv } from "../team/email";
 
-interface Env extends BackupScheduleEnv, InvitationEmailEnv {
+interface Env extends Omit<BackupScheduleEnv, "AUTH_PRIVATE_FIELD_KEY">, InvitationEmailEnv {
   ASSETS: Fetcher;
   DB: D1Database;
   FILES?: DocumentBucket;
@@ -43,7 +44,8 @@ const worker = {
     const db = drizzle(env.DB, { schema });
     ctx.waitUntil(dispatchScheduleEmails(db, env).catch(() => { console.error("Schedule email status is temporarily unavailable."); }));
     ctx.waitUntil(dispatchInvitationEmails(db, env).catch(() => { console.error("Invitation email queue is temporarily unavailable."); }));
-    ctx.waitUntil(runScheduledMaintenance(db).then(recorded => {
+    const now = Date.now();
+    ctx.waitUntil(runScheduledMaintenance(db, now, () => dispatchClockReminderEmails(db, env, now)).then(recorded => {
       // Scheduled-only, non-personal evidence that background work ran without a browser.
       console.info("Scheduled workforce maintenance complete", { recorded });
     }));

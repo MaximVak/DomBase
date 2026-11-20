@@ -16,27 +16,36 @@ export function parseActionDetails(type: ClockType, value: unknown): ActionDetai
   if (value === undefined) return;
   if (!value || typeof value !== "object" || Array.isArray(value)) throw invalid();
   const data = value as Record<string, unknown>;
-  exactKeys(data, type === "break" ? ["breakKind"] : type === "out" ? ["reports"] : type === "in" ? ["worked"] : ["worked", "offDutyExtension"]);
+  exactKeys(data, type === "break" ? ["breakKind"] : type === "out" ? ["reports", "assisted"] : type === "in" ? ["worked", "assisted"] : ["worked", "offDutyExtension"]);
+  let assisted: ActionDetails["assisted"];
+  if (data.assisted !== undefined) {
+    if (!data.assisted || typeof data.assisted !== "object" || Array.isArray(data.assisted)) throw invalid();
+    const value = data.assisted as Record<string, unknown>;
+    exactKeys(value, ["date", "time"]);
+    if (typeof value.date !== "string" || value.date.length !== 10 || typeof value.time !== "string" || value.time.length > 8) throw invalid();
+    assisted = { date: value.date, time: value.time };
+  }
   if (type === "break") {
     if (data.breakKind !== "meal" && data.breakKind !== "rest") throw invalid();
     return { breakKind: data.breakKind };
   }
   if (type === "out") {
-    if (!Array.isArray(data.reports) || data.reports.length > 10) throw invalid();
-    const reports: BreakReport[] = data.reports.map(row => {
+    if ((!Array.isArray(data.reports) && !(data.reports === undefined && assisted)) || (Array.isArray(data.reports) && data.reports.length > 10)) throw invalid();
+    const reports: BreakReport[] | undefined = (data.reports as unknown[] | undefined)?.map(row => {
       if (!row || typeof row !== "object" || Array.isArray(row)) throw invalid();
-      exactKeys(row, ["kind", "slot", "outcome", "reason"]);
-      const { kind, slot, outcome, reason } = row;
-      if ((kind !== "meal" && kind !== "rest") || !Number.isInteger(slot) || slot < 1 || slot > 8
-        || !["missed", "unrecorded", "waived"].includes(outcome) || (reason !== undefined && (typeof reason !== "string" || reason.length > 300))
+      const fields = row as Record<string, unknown>;
+      exactKeys(fields, ["kind", "slot", "outcome", "reason"]);
+      const { kind, slot, outcome, reason } = fields;
+      if ((kind !== "meal" && kind !== "rest") || typeof slot !== "number" || !Number.isInteger(slot) || slot < 1 || slot > 8
+        || (outcome !== "missed" && outcome !== "unrecorded" && outcome !== "waived") || (reason !== undefined && (typeof reason !== "string" || reason.length > 300))
         || (outcome !== "missed" && !reason?.trim())) throw invalid();
       return { kind, slot, outcome, ...(reason?.trim() ? { reason: reason.trim() } : {}) };
     });
-    if (new Set(reports.map(report => report.kind + report.slot)).size !== reports.length) throw invalid();
-    return { reports };
+    if (reports && new Set(reports.map(report => report.kind + report.slot)).size !== reports.length) throw invalid();
+    return { ...(reports ? { reports } : {}), ...(assisted ? { assisted } : {}) };
   }
   if ((data.worked !== undefined && typeof data.worked !== "boolean") || (data.offDutyExtension !== undefined && typeof data.offDutyExtension !== "boolean")) throw invalid();
-  return { ...(data.worked ? { worked: true } : {}), ...(data.offDutyExtension ? { offDutyExtension: true } : {}) };
+  return { ...(assisted ? { assisted } : {}), ...(data.worked ? { worked: true } : {}), ...(data.offDutyExtension ? { offDutyExtension: true } : {}) };
 }
 
 export async function clockPolicy(db: KioskOperatorDatabase) {
@@ -57,10 +66,14 @@ async function breakIssues(db: KioskOperatorDatabase, employeeId: number, time: 
   const isoStart = new Date(start).toISOString();
   const [events, [employeeSetting]] = await Promise.all([
     db.all<{ event_type: ClockType; occurred_at: string; clock_details: string | null }>(sql`
-      WITH prior AS (SELECT id, event_type FROM clock_events
+      WITH effective AS (
+        SELECT c.id,c.employee_id,c.event_type,c.clock_details,
+          COALESCE(CASE WHEN a.status!='pending' OR c.event_type='in' THEN COALESCE(a.decided_time,a.requested_at) END,c.occurred_at) AS occurred_at
+        FROM clock_events c LEFT JOIN assisted_clock_reports a ON a.event_id=c.id WHERE c.employee_id=${employeeId}
+      ), prior AS (SELECT id, event_type FROM effective
         WHERE employee_id = ${employeeId} AND event_type IN ('in','out') AND julianday(occurred_at) < julianday(${isoStart})
         ORDER BY julianday(occurred_at) DESC, id DESC LIMIT 1)
-      SELECT event_type, occurred_at, clock_details FROM clock_events
+      SELECT event_type, occurred_at, clock_details FROM effective
       WHERE employee_id = ${employeeId} AND julianday(occurred_at) <= julianday(${new Date(time).toISOString()})
         AND (occurred_at >= ${isoStart} OR id >= (SELECT id FROM prior WHERE event_type = 'in'))
       ORDER BY julianday(occurred_at), id`),
@@ -106,9 +119,9 @@ export async function resolveBreakDetails(db: KioskOperatorDatabase, employeeId:
     }
     return null;
   }
-  if (draft.eventType === "out" && data?.reports) {
+  if (draft.eventType === "out" && (data?.reports || (data?.assisted && previous?.eventType !== "out"))) {
     const issues = policy.missedBreakReports ? await breakIssues(db, employeeId, time, policy) : [];
-    const reports = data.reports;
+    const reports = data.reports ?? [];
     if (reports.length !== issues.length || reports.some(report => !issues.some(issue => issue.kind === report.kind && issue.slot === report.slot
       && (report.outcome !== "waived" || issue.canWaive)))) throw new AuthError(422, "Break requirements changed. Enter your PIN again to review them.");
     return { california: true, ...(reports.length ? { reports } : {}) };

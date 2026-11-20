@@ -229,6 +229,14 @@ export const locationSettings = sqliteTable("location_settings", {
   missedBreakReports: integer("missed_break_reports", { mode: "boolean" }).notNull().default(true),
   unpaidRestOverage: integer("unpaid_rest_overage", { mode: "boolean" }).notNull().default(false),
   paidRestMinutes: integer("paid_rest_minutes").notNull().default(10),
+  lateAttendanceAlerts: integer("late_attendance_alerts", { mode: "boolean" }).notNull().default(true),
+  assistedClockIn: integer("assisted_clock_in", { mode: "boolean" }).notNull().default(true),
+  assistedClockOut: integer("assisted_clock_out", { mode: "boolean" }).notNull().default(true),
+  clockOutReminders: integer("clock_out_reminders", { mode: "boolean" }).notNull().default(true),
+  clockOutReminderEmail: integer("clock_out_reminder_email", { mode: "boolean" }).notNull().default(false),
+  clockOutReminderFirst: integer("clock_out_reminder_first").notNull().default(10),
+  clockOutReminderSecond: integer("clock_out_reminder_second").notNull().default(60),
+  clockOutReminderThird: integer("clock_out_reminder_third").notNull().default(120),
   enableTeamMessaging: integer("enable_team_messaging", { mode: "boolean" }).notNull().default(true),
   hoursRoundingMinutes: integer("hours_rounding_minutes").notNull().default(15),
   kioskIdleSeconds: integer("kiosk_idle_seconds").notNull().default(30),
@@ -466,6 +474,18 @@ export const kioskClockReplays = sqliteTable("kiosk_clock_replays", {
   index("kiosk_clock_replays_review_idx").on(table.eventId, table.reviewedAt, table.receivedAt),
   check("kiosk_clock_replays_type_check", sql`${table.eventType} IN ('in', 'out', 'break', 'break_end')`),
 ]);
+
+export const assistedClockReports = sqliteTable("assisted_clock_reports", {
+  eventId: integer("event_id").primaryKey().references(() => clockEvents.id),
+  requestId: text("request_id").notNull().unique(),
+  requestedAt: text("requested_at").notNull(),
+  submittedAt: text("submitted_at").notNull(),
+  reason: text("reason").notNull(),
+  status: text("status", { enum: ["pending", "approved", "edited"] }).notNull(),
+  decidedAt: text("decided_at"),
+  decidedByAccountId: integer("decided_by_account_id").references(() => accounts.id),
+  decidedTime: text("decided_time"),
+}, table => [index("assisted_clock_reports_pending_idx").on(table.status, table.submittedAt)]);
 
 export const authRateLimits = sqliteTable("auth_rate_limits", {
   keyHash: text("key_hash").primaryKey().notNull(),
@@ -731,11 +751,14 @@ export const notifications = sqliteTable("notifications", {
   ptoRequestId: integer("pto_request_id").references(() => ptoRequests.id),
   availabilityRequestId: integer("availability_request_id").references(() => availabilityRequests.id),
   eventTargetId: text("event_target_id"),
+  clockEmailState: text("clock_email_state", { enum: ["pending", "sending", "accepted", "uncertain", "cancelled"] }),
+  clockEmailClaimedAt: text("clock_email_claimed_at"),
   openedAt: text("opened_at"),
   dismissedAt: text("dismissed_at"),
 }, table => [
   uniqueIndex("notifications_employee_source_idx").on(table.employeeId, table.sourceKey),
   index("notifications_employee_time_idx").on(table.employeeId, table.occurredAt),
+  index("notifications_clock_email_idx").on(table.clockEmailState, table.occurredAt),
   check("notifications_kind_check", sql`${table.kind} IN ('alert', 'request', 'schedule')`),
 ]);
 

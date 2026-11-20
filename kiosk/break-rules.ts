@@ -1,8 +1,9 @@
+import type { PlannedAssistance, ReportedTime } from "./assistance";
 export type BreakKind = "rest" | "meal";
 export type BreakIssue = { kind: BreakKind; slot: number; canWaive?: boolean };
 export type BreakReport = { kind: BreakKind; slot: number; outcome: "missed" | "unrecorded" | "waived"; reason?: string };
-export type ActionDetails = { breakKind?: BreakKind; worked?: boolean; offDutyExtension?: boolean; reports?: BreakReport[] };
-export type ClockDetails = { california?: true; breakKind?: BreakKind; minimumMinutes?: number; unpaidSeconds?: number; earlyWork?: boolean; reports?: BreakReport[] };
+export type ActionDetails = { assisted?: ReportedTime; breakKind?: BreakKind; worked?: boolean; offDutyExtension?: boolean; reports?: BreakReport[] };
+export type ClockDetails = { assistance?: PlannedAssistance; california?: true; breakKind?: BreakKind; minimumMinutes?: number; unpaidSeconds?: number; earlyWork?: boolean; reports?: BreakReport[] };
 export type BreakEvent = { type: "in" | "out" | "break" | "break_end"; at: number; details?: ClockDetails | null };
 const minute = 60000;
 
