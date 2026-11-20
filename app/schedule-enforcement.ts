@@ -1,4 +1,19 @@
-export type ScheduleEnforcement = {
+export const defaultOvertimePolicy = {
+  overtimeDailyEnabled: true,
+  overtimeWeeklyEnabled: true,
+  overtimeSeventhDayEnabled: true,
+  overtimeDoubleEnabled: true,
+  overtimeDailyHours: 8,
+  overtimeWeeklyHours: 40,
+  overtimeDoubleHours: 12,
+  overtimeSeventhDoubleHours: 8,
+  overtimeMultiplier: 1.5,
+  overtimeDoubleMultiplier: 2,
+};
+
+export type OvertimePolicy = typeof defaultOvertimePolicy;
+
+export type ScheduleEnforcement = OvertimePolicy & {
   workWeekStart: number;
   minRestHours: number;
   availabilityReviewDays: number;
@@ -43,6 +58,7 @@ export type ScheduleEnforcement = {
 };
 
 export const defaultScheduleEnforcement: ScheduleEnforcement = {
+  ...defaultOvertimePolicy,
   workWeekStart: 1,
   minRestHours: 10,
   availabilityReviewDays: 90,
@@ -88,13 +104,35 @@ export const defaultScheduleEnforcement: ScheduleEnforcement = {
 
 export const alertsPermissionsFields = ["notifyScheduleChanges", "employeesOwnScheduleOnly", "requireAvailabilityApproval", "restrictManagerDepartments", "noShowAlerts", "noShowMinutes"] as const;
 export const eventsTradesFields = ["enableScheduleEvents"] as const;
-export const overtimeFields = ["workWeekStart"] as const;
+export const overtimePolicyFields = Object.keys(defaultOvertimePolicy) as (keyof OvertimePolicy)[];
+export const overtimeFields = ["workWeekStart", ...overtimePolicyFields] as const;
 export const breakPolicyFields = ["blockEarlyClockIn", "blockEarlyBreakReturn", "breakWaivers", "missedBreakReports", "unpaidRestOverage", "paidRestMinutes"] as const;
 export const breakPremiumFields = ["breakPremiums", "mealPremiumLimit", "restPremiumLimit"] as const;
 export const attendancePolicyFields = ["lateAttendanceAlerts", "assistedClockIn", "assistedClockOut", "clockOutReminders", "clockOutReminderEmail", "clockOutReminderFirst", "clockOutReminderSecond", "clockOutReminderThird"] as const;
 export const breaksComplianceFields = ["mealBreakAfterHours", "mealBreakMinutes", "mandatoryMealBreak", "blockEarlyBreakReturn", "breakWaivers", "missedBreakReports", "unpaidRestOverage", "paidRestMinutes", ...breakPremiumFields] as const;
 export const messagesSettingsFields = ["enableTeamMessaging"] as const;
 export const scheduleEnforcementFields = ["workWeekStart", "minRestHours", "availabilityReviewDays", "scheduleStartHour", "scheduleEndHour", "lateMinutes", "earlyClockInMinutes", "blockEarlyClockIn", "requireEarlyClockInExplanation", "requireLateClockInExplanation", "requireClockOutExplanation", "requireUnscheduledExplanation", "noShowAlerts", "noShowMinutes", "automaticClockOut", "automaticClockOutMinutes", ...attendancePolicyFields] as const;
+
+const overtimeNumbers = {
+  overtimeDailyHours: { min: .25, max: 24, step: .25 },
+  overtimeWeeklyHours: { min: .25, max: 168, step: .25 },
+  overtimeDoubleHours: { min: .25, max: 24, step: .25 },
+  overtimeSeventhDoubleHours: { min: .25, max: 24, step: .25 },
+  overtimeMultiplier: { min: 1.5, max: 5, step: .01 },
+  overtimeDoubleMultiplier: { min: 2, max: 5, step: .01 },
+};
+export { overtimeNumbers };
+export type OvertimeNumber = keyof typeof overtimeNumbers;
+
+export function overtimePolicyError(policy: OvertimePolicy) {
+  if (policy.overtimeDailyEnabled && policy.overtimeDoubleEnabled && policy.overtimeDoubleHours <= policy.overtimeDailyHours) {
+    return "Set double time after daily overtime begins.";
+  }
+  if (policy.overtimeDoubleEnabled && policy.overtimeDoubleMultiplier < policy.overtimeMultiplier) {
+    return "Set the double-time multiplier at least as high as the overtime multiplier.";
+  }
+  return "";
+}
 
 export function schedulingSettingsForSave(saved: ScheduleEnforcement, draft: ScheduleEnforcement, fields: readonly (keyof ScheduleEnforcement)[]) {
   return { ...saved, ...Object.fromEntries(fields.map(field => [field, draft[field]])) } as ScheduleEnforcement;
@@ -142,6 +180,15 @@ export function normalizeScheduleEnforcement(value: unknown): ScheduleEnforcemen
       if (input[key] === 1 || input[key] === 2) result[key] = input[key];
       continue;
     }
+    if (Object.hasOwn(overtimeNumbers, key)) {
+      const bounds = overtimeNumbers[key as OvertimeNumber];
+      const candidate = input[key];
+      if (typeof candidate === "number" && candidate >= bounds.min && candidate <= bounds.max &&
+        Math.abs(candidate / bounds.step - Math.round(candidate / bounds.step)) < 1e-7) {
+        Object.assign(result, { [key]: candidate });
+      }
+      continue;
+    }
     const maximum = key === "workWeekStart" ? 6 : key === "minRestHours" ? 24 : key === "availabilityReviewDays" ? 365
       : key === "scheduleStartHour" ? 23
       : key === "scheduleEndHour" ? 24
@@ -161,6 +208,7 @@ export function normalizeScheduleEnforcement(value: unknown): ScheduleEnforcemen
     result.clockOutReminderSecond = defaultScheduleEnforcement.clockOutReminderSecond;
     result.clockOutReminderThird = defaultScheduleEnforcement.clockOutReminderThird;
   }
+  if (overtimePolicyError(result)) Object.assign(result, defaultOvertimePolicy);
   return result;
 }
 

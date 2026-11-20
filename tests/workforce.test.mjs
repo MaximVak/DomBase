@@ -91,13 +91,19 @@ test("shared workforce operations persist, scope, audit and serialize actual D1 
   await t.test("settings and notification receipts are server-backed and owner identities cannot be changed through contact fields", async () => {
     const before = await snapshot(owner);
     assert.deepEqual([before.settings.breakPremiums, before.settings.mealPremiumLimit, before.settings.restPremiumLimit], [true, 1, 1]);
-    const settings = { ...before.settings, noShowMinutes: 12, restPremiumLimit: 2, hoursRoundingMinutes: 10 };
+    assert.deepEqual([before.settings.overtimeDailyHours, before.settings.overtimeWeeklyHours, before.settings.overtimeDoubleHours, before.settings.overtimeSeventhDayEnabled], [8, 40, 12, true]);
+    const settings = { ...before.settings, noShowMinutes: 12, restPremiumLimit: 2, hoursRoundingMinutes: 10,
+      overtimeDailyHours: 8.5, overtimeWeeklyHours: 38, overtimeDoubleEnabled: false, overtimeMultiplier: 1.75 };
     await ok(await call("commit", owner, saveBody(before, [{ entity: "settings", id: 1, before: { ...before.settings, hoursRoundingMinutes: before.state.hoursRoundingMinutes }, after: settings }], newToken())));
     const savedSettings = (await snapshot(second)).settings;
     assert.equal(savedSettings.noShowMinutes, 12);
     assert.equal(savedSettings.restPremiumLimit, 2);
     assert.equal(savedSettings.mealPremiumLimit, 1);
+    assert.deepEqual([savedSettings.overtimeDailyHours, savedSettings.overtimeWeeklyHours, savedSettings.overtimeDoubleEnabled, savedSettings.overtimeMultiplier], [8.5, 38, false, 1.75]);
     const current = await snapshot(owner); const changed = { ...current.basicInfo, accountOwner: "Attacker" };
+    const currentSettings = { ...current.settings, hoursRoundingMinutes: current.state.hoursRoundingMinutes };
+    const invalid = { ...currentSettings, overtimeDoubleEnabled: true, overtimeDoubleHours: 7 };
+    assert.equal((await call("commit", owner, saveBody(current, [{ entity: "settings", id: 1, before: currentSettings, after: invalid }], newToken()))).status, 400);
     assert.equal((await call("commit", owner, saveBody(current, [{ entity: "business", id: 1, before: current.basicInfo, after: changed }], newToken()))).status, 403);
     const receipts = { opened: current.opened[f.b.id] ?? [], dismissed: current.dismissed[f.b.id] ?? [] };
     await ok(await call("commit", owner, saveBody(current, [{ entity: "notifications", id: 1, before: receipts, after: { opened: ["request-123"], dismissed: ["request-123"] } }], newToken())));

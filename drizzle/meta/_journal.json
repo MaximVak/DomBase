@@ -169,6 +169,13 @@
       "when": 1795139699775,
       "tag": "0023_break_premium_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1795141272618,
+      "tag": "0024_overtime_policy",
+      "breakpoints": true
     }
   ]
 }

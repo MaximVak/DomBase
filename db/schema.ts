@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { check, foreignKey, index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { check, foreignKey, index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 import type { ActionDetails, ClockDetails } from "../kiosk/break-rules";
 
 // One database serves one company/location. Additional locations are out of scope.
@@ -201,6 +201,16 @@ export const business = sqliteTable("business", {
 export const locationSettings = sqliteTable("location_settings", {
   businessId: integer("business_id").primaryKey().references(() => business.id),
   workWeekStart: integer("work_week_start").notNull().default(1),
+  overtimeDailyEnabled: integer("overtime_daily_enabled", { mode: "boolean" }).notNull().default(true),
+  overtimeWeeklyEnabled: integer("overtime_weekly_enabled", { mode: "boolean" }).notNull().default(true),
+  overtimeSeventhDayEnabled: integer("overtime_seventh_day_enabled", { mode: "boolean" }).notNull().default(true),
+  overtimeDoubleEnabled: integer("overtime_double_enabled", { mode: "boolean" }).notNull().default(true),
+  overtimeDailyHours: real("overtime_daily_hours").notNull().default(8),
+  overtimeWeeklyHours: real("overtime_weekly_hours").notNull().default(40),
+  overtimeDoubleHours: real("overtime_double_hours").notNull().default(12),
+  overtimeSeventhDoubleHours: real("overtime_seventh_double_hours").notNull().default(8),
+  overtimeMultiplier: real("overtime_multiplier").notNull().default(1.5),
+  overtimeDoubleMultiplier: real("overtime_double_multiplier").notNull().default(2),
   minRestHours: integer("min_rest_hours").notNull().default(10),
   availabilityReviewDays: integer("availability_review_days").notNull().default(90),
   scheduleStartHour: integer("schedule_start_hour").notNull().default(7),

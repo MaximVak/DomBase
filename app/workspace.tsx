@@ -27,7 +27,7 @@ import { PrintTable } from "./print-table";
 import { rosterCopyHeaders, rosterCopyRows, rosterCsv } from "./roster-export";
 import { alertsPermissionsFields, automaticClockOutAt, canManageScheduleRole, canViewTeamSchedule, clockInTiming, defaultScheduleEnforcement, normalizeScheduleEnforcement, scheduleEnforcementFields, schedulingSettingsForSave, workWeekOffset } from "./schedule-enforcement";
 import type { ScheduleEnforcement } from "./schedule-enforcement";
-import { breaksComplianceFields, eventsTradesFields, overtimeFields, messagesSettingsFields } from "./schedule-enforcement";
+import { breaksComplianceFields, eventsTradesFields, overtimeFields, overtimePolicyError, messagesSettingsFields } from "./schedule-enforcement";
 import { normalizeScheduleEvents, scheduleEventsForDate, validEventDate } from "./schedule-events";
 import type { ScheduleEvent } from "./schedule-events";
 import { TimeClockOptionsPanel } from "./time-clock-options";
@@ -1488,7 +1488,13 @@ export default function Home({ account }: { account: DashboardAccount }) {
 
   async function saveOvertime(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const saved = normalizeScheduleEnforcement(schedulingSettingsForSave(scheduleEnforcement, scheduleEnforcementDraft, overtimeFields));
+    const candidate = schedulingSettingsForSave(scheduleEnforcement, scheduleEnforcementDraft, overtimeFields);
+    const error = overtimePolicyError(candidate);
+    if (error) { setOvertimeMessage(error); return; }
+    const saved = normalizeScheduleEnforcement(candidate);
+    if (overtimeFields.some(field => saved[field] !== candidate[field])) {
+      setOvertimeMessage("Choose valid overtime thresholds and multipliers."); return;
+    }
     const ok = await shared.save([{ entity: "settings", id: 1, before: { ...scheduleEnforcement, hoursRoundingMinutes: state.hoursRoundingMinutes }, after: { ...saved, hoursRoundingMinutes: state.hoursRoundingMinutes } }]);
     setOvertimeMessage(ok ? "Overtime settings saved." : "Settings were not confirmed. Check the shared-data message above.");
   }
@@ -3745,11 +3751,12 @@ export default function Home({ account }: { account: DashboardAccount }) {
                 <TimeClockOptionsPanel roundingMinutes={state.hoursRoundingMinutes} onLaunch={() => window.location.assign("/kiosk")} />
               ) : activeSettingsTab === "Overtime" ? (
                 <OvertimeOptionsPanel
-                  weekStart={scheduleEnforcementDraft.workWeekStart}
+                  settings={scheduleEnforcementDraft}
                   dirty={isOvertimeDirty}
                   message={overtimeMessage}
-                  onWeekStartChange={day => {
-                    setScheduleEnforcementDraft(current => ({ ...current, workWeekStart: day }));
+                  canManage={shared.data.permissions["settings.manage"] && shared.data.scheduleEstimateScopeComplete === true}
+                  onChange={changes => {
+                    setScheduleEnforcementDraft(current => ({ ...current, ...changes }));
                     setOvertimeMessage("");
                     setScheduleEnforcementMessage("");
                   }}
@@ -5386,6 +5393,8 @@ export default function Home({ account }: { account: DashboardAccount }) {
               mealBreakAfterHours={scheduleEnforcement.mealBreakAfterHours}
               mealBreakMinutes={scheduleEnforcement.mealBreakMinutes}
               timeZone={basicInfo.timeZone}
+              overtimePolicy={scheduleEnforcement}
+              overtimeScope={{ companyWide: shared.data.scheduleEstimateScopeComplete === true, dataPeriod: shared.data.period }}
               breakPremiumPolicy={scheduleEnforcement.breakPremiums ? {
                 mealLimit: scheduleEnforcement.mealPremiumLimit, restLimit: scheduleEnforcement.restPremiumLimit,
                 companyWide: shared.data.scheduleEstimateScopeComplete === true, dataPeriod: shared.data.period,

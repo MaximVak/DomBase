@@ -1,4 +1,8 @@
 import { hourlyRate, rateFor } from "../team/rules";
+import { defaultOvertimePolicy } from "./schedule-enforcement";
+import type { OvertimePolicy } from "./schedule-enforcement";
+import { priceWorkweek } from "./timesheets-overtime";
+import type { WorkweekScope } from "./timesheets-overtime";
 import type { WageRate } from "../team/rules";
 import { scheduledPaidMinutes } from "./schedule-estimates";
 import { inspectBreaks, requiredBreaks } from "../kiosk/break-rules";
@@ -62,15 +66,14 @@ export function hourlyWage(value: string): number | null {
 const overlap = (start: number, end: number, a: number, b: number) => Math.max(0, Math.min(end, b) - Math.max(start, a));
 function metrics(): Record<string, number | null> { return { scheduled: 0, actual: 0, variance: 0, paid: 0, regular: 0, breaks: 0, restBreaks: 0, mealPremium: 0, restPremium: 0, premiumPay: 0, ot: 0, doubleOt: 0, qualifiedOt: null, spread: 0, split: 0, wages: null, pto: 0 }; }
 const premiumHours = (card: TimeCard) => (card.metrics.mealPremium ?? 0) + (card.metrics.restPremium ?? 0);
-const dollars = (amount: number) => Math.round(amount * 100) / 100;
-function premiumWageRate(rates: WageRate[], card: TimeCard) {
+function cardWageRate(rates: WageRate[], card: TimeCard) {
   const ids = new Set(rates.filter(rate => rate.roleId !== null && rate.role === card.role && rate.effectiveDate <= card.date).map(rate => rate.roleId));
   return ids.size > 1 ? null : rateFor(rates, card.role, card.date);
 }
 
 function applyBreakPremiums(policy: BreakPremiumPolicy, employee: TimesheetEmployee, dayCards: TimeCard[], card: TimeCard, violations: BreakIssue[], reports: BreakReport[], uncertain: boolean) {
   if (!violations.length) return;
-  const rates = dayCards.map(row => premiumWageRate(employee.wageRates ?? [], row));
+  const rates = dayCards.map(row => cardWageRate(employee.wageRates ?? [], row));
   if (rates.every(rate => rate?.basis === "annual_salary" && rate.overtimeExempt)) return;
   if (!policy.companyWide) { card.issues.push("Review premiums in company-wide Timesheets"); return; }
   if (rates.some(rate => rate?.basis === "annual_salary") || (!employee.wageRates?.length && /salary|year|annual/i.test(employee.wage))) {
@@ -91,6 +94,7 @@ export function buildTimeCards(input: {
   employees: TimesheetEmployee[]; events: TimesheetEvent[]; shifts: TimesheetShift[]; adjustments: TimesheetAdjustment[]; pto: TimesheetPto[];
   start: string; end: string; now: number; rounding: Rounding; weekStart: number; mandatoryMealBreak: boolean; mealBreakAfterHours: number; mealBreakMinutes?: number;
   breakPremiumPolicy?: BreakPremiumPolicy; timeZone?: string;
+  overtimePolicy?: OvertimePolicy; overtimeScope?: WorkweekScope;
 }): TimeCard[] {
   const output: TimeCard[] = [];
   const contextStart = weekStartFor(input.start, input.weekStart);
@@ -225,65 +229,35 @@ export function buildTimeCards(input: {
       }
     }
     cards.sort((a, b) => a.date.localeCompare(b.date) || (a.start ?? "").localeCompare(b.start ?? ""));
-    const dailyRemaining = new Map<string, number>();
-    const weeklyRegular = new Map<string, number>();
+    const byWorkDate = new Map<string, TimeCard[]>();
     for (const card of cards) {
-      if (!dailyRemaining.has(card.date)) {
-        const dayCards = cards.filter(other => other.date === card.date);
-        const adjusted = Math.max(0, dayCards.reduce((total, other) => total + (other.metrics.actual ?? 0) + other.adjustment, 0));
-        dailyRemaining.set(card.date, adjusted);
-      }
-      const remaining = dailyRemaining.get(card.date) ?? 0;
-      const dayCards = cards.filter(other => other.date === card.date);
-      const adjustment = dayCards.reduce((total, other) => total + other.adjustment, 0);
-      const index = dayCards.indexOf(card);
-      // Apply positive adjustments once, and spread negative adjustments without losing hours or going below zero.
-      const raw = Math.min(remaining, Math.max(0, (card.metrics.actual ?? 0) + (index === 0 ? Math.max(0, adjustment) : 0)));
-      dailyRemaining.set(card.date, Math.max(0, remaining - raw));
-      card.metrics.actual = raw;
-      const hours = roundTimeHours(raw, input.rounding);
-      const priorDaily = dayCards.slice(0, index).reduce((total, other) => total + (other.metrics.regular ?? 0) + (other.metrics.ot ?? 0) + (other.metrics.doubleOt ?? 0), 0);
-      const week = weekStartFor(card.date, input.weekStart), usedWeekly = weeklyRegular.get(week) ?? 0;
-      const regular = Math.max(0, Math.min(hours, 8 - priorDaily, 40 - usedWeekly));
-      const doubleOt = Math.max(0, hours - Math.max(0, 12 - priorDaily));
-      card.metrics.regular = regular;
-      card.metrics.doubleOt = doubleOt;
-      card.metrics.ot = Math.max(0, hours - regular - doubleOt);
-      weeklyRegular.set(week, usedWeekly + regular);
-      const premium = premiumHours(card);
-      card.metrics.paid = hours + (card.metrics.pto ?? 0) + premium;
-      card.metrics.variance = raw - (card.metrics.scheduled ?? 0);
-      card.metrics.split = index === 0 ? Math.max(0, dayCards.filter(other => other.start).length - 1) : 0;
-      const wage = hourlyWage(employee.wage);
-      card.metrics.premiumPay = premium ? wage === null ? null : dollars(wage * premium) : 0;
-      card.metrics.wages = wage === null ? null : wage * (regular + (card.metrics.ot ?? 0) * 1.5 + doubleOt * 2 + (card.metrics.pto ?? 0)) + (card.metrics.premiumPay ?? 0);
+      const day = byWorkDate.get(card.date) ?? [];
+      day.push(card);
+      byWorkDate.set(card.date, day);
     }
-    if (employee.wageRates !== undefined) {
-      const weeks = new Map<string, TimeCard[]>();
-      for (const card of cards) { const week = weekStartFor(card.date, input.weekStart); weeks.set(week, [...weeks.get(week) ?? [], card]); }
-      for (const [week, group] of weeks) {
-        const rates = group.map(card => rateFor(employee.wageRates!, card.role, card.date));
-        const exempt = rates.length > 0 && rates.every(rate => rate?.basis === "annual_salary" && rate.overtimeExempt);
-        const hours = group.reduce((sum, card) => sum + (card.metrics.actual ?? 0), 0);
-        const hourly = rates.map(hourlyRate); const complete = hourly.every(rate => rate !== null);
-        const weighted = complete && hours > 0 ? group.reduce((sum, card, i) => sum + (card.metrics.actual ?? 0) * hourly[i]!, 0) / hours : 0;
-        const available = input.breakPremiumPolicy?.dataPeriod;
-        const fullWeek = !available || (available.start <= week && available.end >= addDays(week, 6));
-        const premiumRates = input.breakPremiumPolicy ? group.map(card => premiumWageRate(employee.wageRates!, card)) : [];
-        const knownHourlyWork = fullWeek && hours > 0 && group.every((card, i) => !card.metrics.actual || premiumRates[i]?.basis === "hourly");
-        const premiumRate = knownHourlyWork ? group.reduce((sum, card, i) => sum + (card.metrics.actual ?? 0) * (premiumRates[i]?.amountCents ?? 0) / 100, 0) / hours : null;
-        for (const [i, card] of group.entries()) {
-          const rate = rates[i]; card.wageLabel = rate ? `$${(rate.amountCents / 100).toFixed(2)}/${rate.basis === "annual_salary" ? "year" : "hr"}` : "—";
-          const premium = premiumHours(card);
-          if (exempt) { card.metrics.regular = card.metrics.paid! - (card.metrics.pto ?? 0) - premium; card.metrics.ot = 0; card.metrics.doubleOt = 0; }
-          const worked = (card.metrics.regular ?? 0) + (card.metrics.ot ?? 0) + (card.metrics.doubleOt ?? 0);
-          const premiumPay = premium ? premiumRate === null ? null : dollars(premium * premiumRate) : 0;
-          card.metrics.premiumPay = premiumPay;
-          if (premiumPay === null && fullWeek) card.issues.push("Review break premium wage rate");
-          card.metrics.wages = complete && premiumPay !== null ? dollars(hourly[i]! * (worked + (card.metrics.pto ?? 0))
-            + (exempt ? 0 : weighted * ((card.metrics.ot ?? 0) * .5 + (card.metrics.doubleOt ?? 0))) + premiumPay) : null;
-        }
+    const weeks = new Map<string, Parameters<typeof priceWorkweek>[0]>();
+    const legacyRate = employee.wageRates === undefined ? hourlyWage(employee.wage) : null;
+    for (const [date, day] of byWorkDate) {
+      const adjustment = day.reduce((sum, card) => sum + card.adjustment, 0);
+      let remaining = Math.max(0, day.reduce((sum, card) => sum + (card.metrics.actual ?? 0), 0) + adjustment);
+      const week = weekStartFor(date, input.weekStart);
+      const group = weeks.get(week) ?? [];
+      for (const [index, card] of day.entries()) {
+        // Apply positive adjustments once and distribute negative adjustments without going below zero.
+        const raw = Math.min(remaining, Math.max(0, (card.metrics.actual ?? 0) + (index === 0 ? Math.max(0, adjustment) : 0)));
+        remaining = Math.max(0, remaining - raw);
+        const hours = roundTimeHours(raw, input.rounding);
+        card.metrics.actual = raw;
+        card.metrics.paid = hours + (card.metrics.pto ?? 0) + premiumHours(card);
+        card.metrics.variance = raw - (card.metrics.scheduled ?? 0);
+        card.metrics.split = index === 0 ? Math.max(0, day.filter(other => other.start).length - 1) : 0;
+        const rate = employee.wageRates ? cardWageRate(employee.wageRates, card) ?? null : undefined;
+        group.push({ card, hours, rate, hourly: rate === undefined ? legacyRate : hourlyRate(rate ?? undefined) });
       }
+      weeks.set(week, group);
+    }
+    for (const [week, rows] of weeks) {
+      priceWorkweek(rows, week, input.overtimePolicy ?? defaultOvertimePolicy, input.overtimeScope ?? input.breakPremiumPolicy);
     }
     output.push(...cards.filter(card => card.date >= input.start && card.date <= input.end));
   }

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { loadServerModule } from "../scripts/server-runtime.mjs";
 const { buildTimeCards, totalMetrics, timeCardReviews, timeCardEvents, validateTimeCard, timesheetCsv, hourlyWage, weekStartFor, timeCardPreview, timeCardBreakIntervals } = await loadServerModule("app/timesheets-model.ts");
+const { defaultOvertimePolicy } = await loadServerModule("app/schedule-enforcement.ts");
 const employees = [{ id: 1, name: "Test Employee", role: "Sales", wage: "$20/hr", active: true }];
 const at = (date, time) => new Date(`${date}T${time}:00`).toISOString();
 const base = { employees, shifts: [], adjustments: [], pto: [], events: [], start: "2026-08-03", end: "2026-08-09", now: new Date("2026-08-10T12:00:00").getTime(), rounding: "actual", weekStart: 1, mandatoryMealBreak: true, mealBreakAfterHours: 5 };
@@ -44,6 +45,67 @@ test("daily and weekly overtime do not count the same hours twice, including a p
   assert.equal(long.metrics.regular, 8);
   assert.equal(long.metrics.ot, 4);
   assert.equal(long.metrics.doubleOt, 1);
+});
+
+test("seventh-day overtime resets on the configured workweek and distinguishes paid leave from work", () => {
+  const days = ["03", "04", "05", "06", "07", "08", "09"];
+  const work = days.map((day, index) => eventsFor(`2026-08-${day}`, "09:00", index === 6 ? "19:00" : "13:00", 0, index * 10 + 1));
+  const input = { ...base, start: "2026-08-09", end: "2026-08-09", events: work.flat() };
+  const totals = options => {
+    const [row] = buildTimeCards({ ...input, ...options });
+    return [row.metrics.regular, row.metrics.ot, row.metrics.doubleOt];
+  };
+  assert.deepEqual(totals({}), [0, 8, 2]);
+  assert.deepEqual(totals({ weekStart: 0 }), [8, 2, 0]);
+  assert.deepEqual(totals({ overtimePolicy: { ...defaultOvertimePolicy, overtimeSeventhDayEnabled: false } }), [8, 2, 0]);
+  assert.deepEqual(totals({ overtimePolicy: { ...defaultOvertimePolicy, overtimeDoubleEnabled: false } }), [0, 10, 0]);
+  assert.deepEqual(totals({ events: work.slice(1).flat(), pto: [
+    { employeeId: 1, startDate: "2026-08-03", endDate: "2026-08-03", compensation: "paid", status: "approved" },
+  ] }), [8, 2, 0]);
+});
+
+test("editable thresholds and multipliers apply across split cards without stacking weekly and daily premiums", () => {
+  const [first, second] = buildTimeCards({ ...base, events: [
+    ...eventsFor("2026-08-03", "06:00", "19:00"),
+    ...eventsFor("2026-08-04", "08:00", "18:00", 0, 10),
+  ], overtimePolicy: { ...defaultOvertimePolicy, overtimeWeeklyHours: 10 } });
+  assert.deepEqual([first.metrics.regular, first.metrics.ot, first.metrics.doubleOt], [8, 4, 1]);
+  assert.deepEqual([second.metrics.regular, second.metrics.ot, second.metrics.doubleOt], [2, 8, 0]);
+  const split = buildTimeCards({ ...base, events: [
+    ...eventsFor("2026-08-03", "07:00", "09:00"),
+    ...eventsFor("2026-08-03", "10:00", "17:00", 0, 10),
+  ], overtimePolicy: { ...defaultOvertimePolicy, overtimeDailyHours: 8.5, overtimeDoubleEnabled: false, overtimeMultiplier: 1.75 } });
+  assert.deepEqual([totalMetrics(split).regular, totalMetrics(split).ot, totalMetrics(split).doubleOt, totalMetrics(split).wages], [8.5, .5, 0, 187.5]);
+});
+
+test("overtime uses the weighted rate from the same workweek, even for a one-day view", () => {
+  const wageRates = [
+    { id: 1, roleId: 1, role: "Sales", basis: "hourly", amountCents: 2000, effectiveDate: "2026-01-01" },
+    { id: 2, roleId: 2, role: "Stock", basis: "hourly", amountCents: 3000, effectiveDate: "2026-01-01" },
+  ];
+  const a = eventsFor("2026-08-03", "09:00", "19:00");
+  const b = eventsFor("2026-08-04", "09:00", "19:00", 0, 10).map(event => ({ ...event, role: "Stock" }));
+  const input = { ...base, employees: [{ ...employees[0], wageRates }], events: [...a, ...b], end: "2026-08-03" };
+  const [single] = buildTimeCards(input);
+  assert.equal(single.metrics.wages, 225);
+  assert.ok(single.notes.includes("Weighted workweek rate: $25.00/hr"));
+  const [limited] = buildTimeCards({ ...input, overtimeScope: { companyWide: false } });
+  assert.equal(limited.metrics.ot, null);
+  assert.equal(limited.metrics.wages, null);
+  const [otherRoleMissing] = buildTimeCards({ ...input, employees: [{ ...employees[0], wageRates: wageRates.slice(0, 1) }] });
+  assert.equal(otherRoleMissing.metrics.ot, 2);
+  assert.equal(otherRoleMissing.metrics.wages, null);
+  assert.ok(otherRoleMissing.issues.includes("Review the workweek overtime rate"));
+});
+
+test("salaried overtime depends on the recorded exemption and pays the full multiplier for nonexempt hours", () => {
+  const wage = { id: 1, roleId: 1, role: "Sales", basis: "annual_salary", amountCents: 6240000, effectiveDate: "2026-01-01" };
+  const run = overtimeExempt => buildTimeCards({ ...base, events: eventsFor("2026-08-03", "06:00", "19:00"),
+    employees: [{ ...employees[0], wageRates: [{ ...wage, overtimeExempt }] }] })[0].metrics;
+  const hourlyEquivalent = run(false);
+  assert.deepEqual([hourlyEquivalent.regular, hourlyEquivalent.ot, hourlyEquivalent.doubleOt, hourlyEquivalent.wages], [8, 4, 1, 480]);
+  const exempt = run(true);
+  assert.deepEqual([exempt.regular, exempt.ot, exempt.doubleOt, exempt.wages], [13, 0, 0, 390]);
 });
 
 test("multiple sessions, negative adjustments, and paid PTO reconcile with daily totals", () => {

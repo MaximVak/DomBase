@@ -1,4 +1,8 @@
 import type { FormEvent, ReactNode } from "react";
+import { defaultOvertimePolicy, overtimeNumbers } from "./schedule-enforcement";
+import type { OvertimeNumber, OvertimePolicy } from "./schedule-enforcement";
+
+type Options = OvertimePolicy & { workWeekStart: number };
 
 const unavailable = "Not available yet";
 
@@ -6,79 +10,83 @@ function OvertimeCheckbox({ children, checked = true }: { children: ReactNode; c
   return <label className="enforcement-rule-line overtime-placeholder" title={unavailable}><input type="checkbox" checked={checked} disabled /><span>{children}</span></label>;
 }
 
-function OvertimeNumber({ label, value, currency = false }: { label: string; value: number; currency?: boolean }) {
+function InactiveNumber({ label, value, currency = false }: { label: string; value: number; currency?: boolean }) {
   return <input className={currency ? "overtime-money" : "overtime-number"} aria-label={label} type={currency ? "text" : "number"} value={currency ? `$${value.toFixed(2)}` : value} disabled title={unavailable} />;
 }
 
-function InactiveLink({ children }: { children: ReactNode }) {
-  return <button className="overtime-link" type="button" disabled title={unavailable}>{children}</button>;
-}
-
-export function OvertimeOptionsPanel({ weekStart, dirty, message, onWeekStartChange, onSave }: {
-  weekStart: number;
+export function OvertimeOptionsPanel({ settings, dirty, message, canManage, onChange, onSave }: {
+  settings: Options;
   dirty: boolean;
   message: string;
-  onWeekStartChange: (day: number) => void;
+  canManage: boolean;
+  onChange: (changes: Partial<Options>) => void;
   onSave: (event: FormEvent<HTMLFormElement>) => void;
 }) {
+  const threshold = (field: OvertimeNumber, label: string, enabled = true) => (
+    <label className="enforcement-field-row">
+      <span>{label}</span>
+      <input className="overtime-number" type="number" {...overtimeNumbers[field]} required
+        disabled={!canManage || !enabled} value={settings[field]} onChange={event => onChange({ [field]: Number(event.target.value) })} />
+    </label>
+  );
+  const rule = (field: "overtimeDailyEnabled" | "overtimeWeeklyEnabled" | "overtimeSeventhDayEnabled" | "overtimeDoubleEnabled", label: string) => (
+    <label className="enforcement-rule-line">
+      <input type="checkbox" checked={settings[field]} disabled={!canManage} onChange={event => onChange({ [field]: event.target.checked })} />
+      <span>{label}</span>
+    </label>
+  );
   return (
     <form className="panel settings-enforcement-panel settings-overtime-panel" onSubmit={onSave}>
-      <div className="settings-panel-heading"><h3>Overtime</h3><button type="submit" disabled={!dirty}>Save</button></div>
-      <p className="enforcement-intro">Save money and stay compliant by tracking overtime through DomBase. <InactiveLink>Learn more</InactiveLink></p>
+      <div className="settings-panel-heading"><h3>Overtime</h3><button type="submit" disabled={!canManage || !dirty}>Save</button></div>
+      <p className="enforcement-intro">Set the rules used in Timesheets. The starting values follow California’s general overtime rules.</p>
       <div className="overtime-requirements">
-        <InactiveLink>Review overtime requirements for California <span aria-hidden="true">⌄</span></InactiveLink>
+        <a className="overtime-link" href="https://www.dir.ca.gov/dlse/faq_overtime.htm" target="_blank" rel="noreferrer">California overtime guidance</a>
+        <button className="overtime-link" type="button" disabled={!canManage} onClick={() => onChange(defaultOvertimePolicy)}>Use California defaults</button>
       </div>
 
       <section className="overtime-group" aria-labelledby="daily-overtime-title">
-        <h4 id="daily-overtime-title">Daily overtime</h4>
+        <h4 id="daily-overtime-title">Overtime thresholds</h4>
         <div className="enforcement-rules">
-          <div className="enforcement-rule-line overtime-placeholder" title={unavailable}>
-            <input type="checkbox" checked disabled aria-label="Enable daily overtime" />
-            <span>After</span><OvertimeNumber label="Daily overtime threshold in hours" value={8} />
-            <span>hours per day, the base pay is</span><OvertimeNumber label="Daily overtime pay multiplier" value={1.5} /><span>× hourly</span>
+          <div className="enforcement-rule">
+            {rule("overtimeDailyEnabled", "Enable daily overtime")}
+            {threshold("overtimeDailyHours", "Daily overtime starts after (hours)", settings.overtimeDailyEnabled)}
           </div>
           <div className="enforcement-rule">
-            <OvertimeCheckbox>Double overtime requirements</OvertimeCheckbox>
-            <p>Employers must pay double time after 12 hours in a day.</p>
+            {rule("overtimeWeeklyEnabled", "Enable weekly overtime")}
+            {threshold("overtimeWeeklyHours", "Weekly overtime starts after (hours)", settings.overtimeWeeklyEnabled)}
+          </div>
+          <div className="enforcement-rule">
+            {rule("overtimeSeventhDayEnabled", "Enable seventh-day overtime")}
+            <p>Apply overtime on the seventh day when the employee worked all seven days of the same workweek.</p>
+          </div>
+          <div className="enforcement-rule">
+            {rule("overtimeDoubleEnabled", "Enable double time")}
+            {threshold("overtimeDoubleHours", "Daily double time starts after (hours)", settings.overtimeDoubleEnabled)}
+            {threshold("overtimeSeventhDoubleHours", "Seventh-day double time starts after (hours)", settings.overtimeDoubleEnabled && settings.overtimeSeventhDayEnabled)}
           </div>
         </div>
       </section>
 
-      <section className="overtime-group" aria-labelledby="weekly-overtime-title">
-        <h4 id="weekly-overtime-title">Weekly overtime</h4>
-        <div className="enforcement-rules">
-          <div className="enforcement-rule-line overtime-placeholder" title={unavailable}>
-            <input type="checkbox" checked disabled aria-label="Enable weekly overtime" />
-            <span>After</span><OvertimeNumber label="Weekly overtime threshold in hours" value={40} />
-            <span>hours per week, the base pay is</span><OvertimeNumber label="Weekly overtime pay multiplier" value={1.5} /><span>× hourly</span>
-          </div>
-          <div className="enforcement-rule-line overtime-placeholder" title={unavailable}>
-            <input type="checkbox" checked disabled aria-label="Alert managers when an employee approaches weekly overtime" />
-            <span>Alert managers when an employee approaches</span><OvertimeNumber label="Weekly overtime alert threshold in hours" value={40} /><span>hrs in a week</span>
-          </div>
-          <div className="enforcement-rule">
-            <OvertimeCheckbox>7th day overtime requirements</OvertimeCheckbox>
-            <p>Employers must pay time and a half for the first 8 hours and double time after 8 hours if it&apos;s the 7th consecutive day of work.</p>
-          </div>
+      <section className="overtime-group" aria-labelledby="overtime-rates-title">
+        <h4 id="overtime-rates-title">Pay multipliers</h4>
+        <div className="enforcement-basics">
+          {threshold("overtimeMultiplier", "Overtime multiplier")}
+          {threshold("overtimeDoubleMultiplier", "Double-time multiplier", settings.overtimeDoubleEnabled)}
         </div>
+        <p>Timesheets uses the weighted regular rate for different hourly wages in the same workweek. Salaried employees earn overtime unless their recorded wage is marked exempt.</p>
       </section>
 
       <section className="overtime-group" aria-labelledby="overtime-workweek-title">
         <h4 id="overtime-workweek-title">Workweek settings</h4>
-        <p className="overtime-workweek-description">A workweek is a period of 168 hours during 7 consecutive 24-hour periods. It may begin on any day of the week and at any hour of the day established by the employer. <InactiveLink>Learn more</InactiveLink></p>
         <div className="enforcement-basics">
           <label className="enforcement-field-row">
             <span>Start of workweek</span>
-            <select value={weekStart} onChange={event => onWeekStartChange(Number(event.target.value))}>
+            <select value={settings.workWeekStart} disabled={!canManage} onChange={event => onChange({ workWeekStart: Number(event.target.value) })}>
               {[1, 2, 3, 4, 5, 6, 0].map(day => <option value={day} key={day}>{["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][day]}</option>)}
             </select>
           </label>
-          <label className="enforcement-field-row overtime-placeholder" title={unavailable}>
-            <span>Start of workday</span>
-            <select aria-label="Start of workday" value="00:00" disabled><option value="00:00">12:00 am Midnight</option></select>
-          </label>
         </div>
-        <p className="overtime-workweek-help">The workweek start is also used for week views in Schedule and Timesheets.</p>
+        <p className="overtime-workweek-help">Workdays start at midnight in the location’s time zone. Schedule and Timesheets use the saved workweek start.</p>
       </section>
 
       <section className="overtime-group" aria-labelledby="overtime-tracking-title">
@@ -87,7 +95,7 @@ export function OvertimeOptionsPanel({ weekStart, dirty, message, onWeekStartCha
           <OvertimeCheckbox checked={false}>Track overtime across multiple locations</OvertimeCheckbox>
           <div className="enforcement-rule-line overtime-placeholder" title={unavailable}>
             <input type="checkbox" disabled aria-label="Enable split shift pay" />
-            <span>Pay my employees for any split shift requirements at</span><OvertimeNumber label="Split shift hourly pay" value={0} currency /><span>an hour</span>
+            <span>Pay my employees for any split shift requirements at</span><InactiveNumber label="Split shift hourly pay" value={0} currency /><span>an hour</span>
           </div>
           <OvertimeCheckbox>Notify managers when an employee hits overtime</OvertimeCheckbox>
         </div>
@@ -99,7 +107,7 @@ export function OvertimeOptionsPanel({ weekStart, dirty, message, onWeekStartCha
           <div className="enforcement-rule">
             <div className="enforcement-rule-line overtime-placeholder" title={unavailable}>
               <input type="checkbox" disabled aria-label="Enable holiday pay rate" />
-              <span>Enable holiday pay rate</span><OvertimeNumber label="Holiday pay multiplier" value={1.5} /><span>× regular hourly rate</span>
+              <span>Enable holiday pay rate</span><InactiveNumber label="Holiday pay multiplier" value={1.5} /><span>× regular hourly rate</span>
             </div>
             <p>Note: Any hours worked as holiday pay will not count towards overtime calculation.</p>
           </div>
