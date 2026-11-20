@@ -177,6 +177,50 @@ test("shared workforce operations persist, scope, audit and serialize actual D1 
     assert.notEqual(edit.cardId, collidingId);
     assert.deepEqual(await db.select().from(schema.timeCards).where(eq(schema.timeCards.id, collidingId)), [olderCard]);
   });
+  await t.test("time-card role changes and confirmed deletions preserve punches, notes and scoped history", async () => {
+    const employeeId = f.multi.id;
+    const date = "2026-11-06";
+    const [device] = await db.select().from(schema.kioskDevices).limit(1);
+    const deviceReceipt = { deviceId: device.id, receivedAt: `${date}T19:00:00.000Z` };
+    const raw = await db.insert(schema.clockEvents).values([
+      { ...deviceReceipt, employeeId, eventType: "in", occurredAt: `${date}T17:00:00.000Z`, roleName: f.roleA.name, source: "kiosk", explanation: "Employee arrival explanation" },
+      { ...deviceReceipt, employeeId, eventType: "out", occurredAt: `${date}T19:00:00.000Z`, roleName: f.roleA.name, source: "offline", explanation: "Employee departure explanation" },
+    ]).returning();
+    const ownEvents = view => view.state.clockEvents.filter(event => event.employeeId === employeeId);
+    const save = (actor, view, events, changes) => call("commit", actor, saveBody(view, [{
+      entity: "timecard", id: 820000 + view.revision, before: { events },
+      after: { employeeId, date, eventIds: events.map(event => event.id), ...changes },
+    }], newToken()));
+    const deletion = { operation: "delete", events: [] };
+    const original = await snapshot(owner);
+    assert.equal((await save(owner, original, ownEvents(original).slice(0, 1), deletion)).status, 409);
+    assert.equal((await save(owner, original, ownEvents(original), { ...deletion, cardId: raw[0].id + 9000 })).status, 403);
+    const scoped = await snapshot(manager);
+    assert.equal((await save(manager, scoped, ownEvents(scoped), deletion)).status, 403);
+    const corrected = await ok(await save(owner, original, ownEvents(original), { cardId: raw[0].id, events: [
+      { id: 823001, employeeId, type: "in", at: `${date}T17:10:00.000Z`, role: f.roleB.name, explanation: "Manager correction note" },
+      { id: 823002, employeeId, type: "out", at: `${date}T19:00:00.000Z` },
+    ] }));
+    const [start] = ownEvents(corrected);
+    assert.equal(start.role, f.roleB.name);
+    assert.equal(start.noteAuthor, "manager");
+    assert.deepEqual(start.carriedNotes, [
+      { author: "employee", text: "Employee arrival explanation" },
+      { author: "employee", text: "Employee departure explanation" },
+    ]);
+    assert.deepEqual(ownEvents(await snapshot(manager)), []);
+    assert.equal((await save(owner, original, ownEvents(original), deletion)).status, 409);
+    const removed = await ok(await save(owner, corrected, ownEvents(corrected), { ...deletion, cardId: start.cardId }));
+    assert.deepEqual(ownEvents(removed), []);
+    const history = removed.state.timeCardEdits.filter(edit => edit.cardId === start.cardId);
+    assert.equal(history.length, 2);
+    assert.match(history[0].after, /Job B/);
+    assert.equal(history[1].after, "Time card deleted");
+    assert.deepEqual(history[1].notes.map(note => note.text), ["Employee arrival explanation", "Employee departure explanation", "Manager correction note"]);
+    assert.equal(history[1].actor, f.owner.displayName);
+    assert.deepEqual(await db.select().from(schema.clockEvents).where(eq(schema.clockEvents.employeeId, employeeId)), raw);
+    assert.deepEqual(ownEvents(await snapshot(second)), []);
+  });
   await t.test("past schedule edits preserve raw punches; unsupported attachments still fail", async () => {
     const before = await snapshot(owner); const old = before.state.shifts.find(shift => shift.id === f.shifts[0].id);
     const draft = { upsertedShifts: [{ ...old, end: "18:00" }], deletedShiftIds: [], affectedEmployeeIds: [old.employeeId] };

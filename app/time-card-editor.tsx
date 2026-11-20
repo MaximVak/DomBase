@@ -3,6 +3,11 @@
 import type { FormEvent } from "react";
 import { timeCardBounds, timeCardPreview, validateTimeCard, workDate, workTime } from "./timesheets-model";
 import type { TimeCardBreak, TimeCardDraft, TimeCardEdit, TimesheetEmployee } from "./timesheets-model";
+import type { TimeCardNote } from "../workforce/model";
+
+export function RecordedTimeCardNotes({ notes }: { notes: TimeCardNote[] }) {
+  return <ul>{notes.map(note => <li key={`${note.author}:${note.text}`}><strong>{note.author === "employee" ? "Employee note" : note.author === "manager" ? "Manager note" : "Recorded note"}</strong><p>{note.text}</p></li>)}</ul>;
+}
 
 type Props = {
   draft: TimeCardDraft;
@@ -10,13 +15,16 @@ type Props = {
   roles: string[];
   locationName: string;
   history: TimeCardEdit[];
+  notes?: TimeCardNote[];
   today: string;
   now: number;
   error: string;
   confirmBreakRecord?: boolean;
+  pending?: boolean;
   onChange: (draft: TimeCardDraft) => void;
   onSubmit: (event: FormEvent) => void;
   onClose: () => void;
+  onDelete?: () => void;
   onBreakSettings: () => void;
   onAdjust?: () => void;
 };
@@ -35,7 +43,7 @@ export function TimeCardEditor(props: Props) {
   const { draft, onChange } = props;
   const preview = timeCardPreview(draft);
   const breaks = draft.breaks ?? [];
-  const incomplete = !draft.employeeId || !draft.date || !draft.start || !draft.end || breaks.some(entry => !entry.start || !entry.end)
+  const incomplete = !draft.employeeId || !draft.role || !draft.date || !draft.start || !draft.end || breaks.some(entry => !entry.start || !entry.end)
     || (props.confirmBreakRecord && !draft.confirmBreakRecord);
   const validation = incomplete ? "" : validateTimeCard(draft, [], props.now);
   const history = [...props.history].reverse();
@@ -58,7 +66,7 @@ export function TimeCardEditor(props: Props) {
 
   return <form className="ts-card-form" onSubmit={props.onSubmit}>
     <h2 className="sr-only" id="ts-dialog-title">{draft.eventIds.length ? "Edit time card" : "Add time card"}</h2>
-    <button className="ts-card-close" type="button" onClick={props.onClose} aria-label="Close time card editor"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 4 16 16M20 4 4 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg></button>
+    <button className="ts-card-close" type="button" disabled={props.pending} onClick={props.onClose} aria-label="Close time card editor"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 4 16 16M20 4 4 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg></button>
     <div className="ts-card-main">
       <div className="ts-card-identity">
         <label className="ts-card-date"><SectionIcon name="calendar" /><span>{draft.date ? new Date(`${draft.date}T12:00:00`).toLocaleDateString("en-US", { month: "short", day: "2-digit", year: "numeric" }) : "Select date"}</span><input type="date" aria-label="Time card date" required max={props.today} value={draft.date} onInput={event => onChange({ ...draft, date: event.currentTarget.value })} /></label>
@@ -106,10 +114,16 @@ export function TimeCardEditor(props: Props) {
         <section className="ts-card-section ts-card-history-section" aria-label="Time card edit history">
           <SectionIcon name="history" /><details className="ts-card-history ts-card-section-content"><summary><h3>Edit history ({history.length})</h3><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 9 7 7 7-7" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg></summary><div className="ts-card-history-entries">{history.length ? history.map(edit => <article key={edit.id}><strong>{edit.actor}</strong><time dateTime={edit.at}>{new Date(edit.at).toLocaleString()}</time><p>{edit.before || "New time card"} → {edit.after}</p></article>) : <p>No changes saved yet.</p>}</div></details>
         </section>
-        <details className="ts-card-note"><summary>Add a note</summary><label><span className="sr-only">Time card note</span><textarea value={draft.note} placeholder="Reason for adding or editing this card" onChange={event => onChange({ ...draft, note: event.target.value })} /></label></details>
+        <div className="ts-card-note">
+          {props.notes?.length ? <section aria-labelledby="ts-card-notes-title">
+            <h3 id="ts-card-notes-title">Time card notes</h3>
+            <RecordedTimeCardNotes notes={props.notes} />
+          </section> : null}
+          <details><summary>Add a manager note</summary><label><span className="sr-only">Time card note</span><textarea value={draft.note} maxLength={1000} placeholder="Reason for adding or editing this card" onChange={event => onChange({ ...draft, note: event.target.value })} /></label></details>
+        </div>
         {props.error || validation ? <p className="ts-form-error" role="alert">{props.error || validation}</p> : null}
       </div>
     </div>
-    <div className="ts-card-footer"><button className="ts-card-cancel" type="button" onClick={props.onClose}>Cancel</button>{props.onAdjust ? <button className="ts-text-button" type="button" onClick={props.onAdjust}>Adjust daily hours</button> : null}<button type="submit" className="ts-primary" disabled={incomplete || Boolean(validation)}>Save changes</button></div>
+    <div className="ts-card-footer"><button className="ts-card-cancel" type="button" disabled={props.pending} onClick={props.onClose}>Cancel</button>{props.onDelete ? <button className="ts-card-delete" type="button" disabled={props.pending} onClick={props.onDelete}>Delete time card</button> : null}{props.onAdjust ? <button className="ts-text-button" type="button" disabled={props.pending} onClick={props.onAdjust}>Adjust daily hours</button> : null}<button type="submit" className="ts-primary" disabled={props.pending || incomplete || Boolean(validation)}>Save changes</button></div>
   </form>;
 }

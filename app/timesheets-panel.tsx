@@ -12,11 +12,12 @@ import type { DaySort } from "./timesheets-day";
 import { calendarPresetRange, TimesheetsCalendar } from "./timesheets-calendar";
 import type { TimesheetDateRange } from "./timesheets-calendar";
 import { TimesheetsSummary } from "./timesheets-summary";
-import { TimeCardEditor } from "./time-card-editor";
+import { RecordedTimeCardNotes, TimeCardEditor } from "./time-card-editor";
 import { addDays, buildTimeCards, defaultTimesheetColumns, timesheetColumns, timesheetCsv, timeCardReviews, totalMetrics, validateTimeCard, weekStartFor, workDate, workTime, workTimestamp } from "./timesheets-model";
 import type { BreakPremiumPolicy, ColumnId, Rounding, TimeCard, TimeCardDraft, TimeCardEdit, TimesheetAdjustment, TimesheetEmployee, TimesheetEvent, TimesheetPto, TimesheetShift } from "./timesheets-model";
 import type { OvertimePolicy } from "./schedule-enforcement";
 import type { WorkweekScope } from "./timesheets-overtime";
+import { timeCardNotes } from "../workforce/timecard-notes";
 
 type Props = {
   onPeriodChange?: (period: { start: string; end: string }) => void;
@@ -28,6 +29,7 @@ type Props = {
   breakPremiumPolicy?: BreakPremiumPolicy; timeZone?: string;
   overtimePolicy?: OvertimePolicy; overtimeScope?: WorkweekScope;
   onSaveCard: (draft: TimeCardDraft) => boolean | void | Promise<boolean | void>; onAdjust: (employeeId: number, date: string, hours: number) => void;
+  onDeleteCard?: (draft: TimeCardDraft) => Promise<boolean>;
   summary?: boolean; onSummaryChange?: (summary: boolean) => void; onPayrollId?: (employeeId: number, payrollId: string) => Promise<boolean>;
   onAddTeamMember?: () => void; onSettings: () => void; onBreakSettings?: () => void; locationName?: string;
 };
@@ -74,10 +76,18 @@ export function TimesheetsPanel(props: Props) {
   const [inspectingCard, setInspectingCard] = useState<TimeCard | null>(null);
   const [draft, setDraft] = useState<TimeCardDraft | null>(null);
   const hasDraft = draft !== null;
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [cardPending, setCardPending] = useState(false);
+  const cardSaving = useRef(false);
+  const restoreDeleteFocus = useRef(false);
+  const draftEvents = draft ? props.events.filter(event => draft.eventIds.includes(event.id)) : [];
+  const deleteStart = draftEvents.find(event => event.type === "in");
+  const canDeleteCard = Boolean(canEdit && props.onDeleteCard && deleteStart && draftEvents.some(event => event.type === "out"));
   const [formError, setFormError] = useState("");
   const [headerSort, setHeaderSort] = useState<{ column: string; direction: number } | null>(null);
   const [printMode, setPrintMode] = useState("detail");
   const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const dateButtonRef = useRef<HTMLButtonElement>(null);
   const modalRef = useRef<HTMLDivElement>(null);
   const ledgerScrollRef = useRef<HTMLDivElement>(null);
   const totalsScrollRef = useRef<HTMLDivElement>(null);
@@ -148,21 +158,26 @@ export function TimesheetsPanel(props: Props) {
     if (!dialog && !hasDraft) return;
     const element = modalRef.current;
     const focusable = () => Array.from(element?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea, summary, [href]') ?? []).filter(element => element.getClientRects().length > 0);
-    focusable()[0]?.focus();
+    const first = restoreDeleteFocus.current ? element?.querySelector<HTMLButtonElement>(".ts-card-delete") : focusable()[0];
+    first?.focus();
+    restoreDeleteFocus.current = false;
     const key = (event: KeyboardEvent) => {
-      if (event.key === "Escape") { setDialog(null); setDraft(null); triggerRef.current?.focus(); }
+      if (event.key === "Escape" && !cardSaving.current) {
+        if (confirmDelete) { restoreDeleteFocus.current = true; setConfirmDelete(false); setFormError(""); }
+        else { setDialog(null); setDraft(null); triggerRef.current?.focus(); }
+      }
       if (event.key === "Tab") { const items = focusable(), first = items[0], last = items[items.length - 1]; if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); } }
     };
     document.addEventListener("keydown", key);
     return () => document.removeEventListener("keydown", key);
-  }, [dialog, hasDraft]);
+  }, [dialog, hasDraft, confirmDelete]);
 
   const onEditingChange = props.onEditingChange;
   useEffect(() => { onEditingChange?.(Boolean(draft)); return () => onEditingChange?.(false); }, [draft, onEditingChange]);
 
   function toggleMenu(value: typeof menu, button: HTMLButtonElement) { triggerRef.current = button; setMenu(menu === value ? null : value); }
   function openDialog(value: typeof dialog, button: HTMLButtonElement) { triggerRef.current = button; setMenu(null); setDialog(value); }
-  function closeDialog() { setDraft(null); setDialog(null); triggerRef.current?.focus(); }
+  function closeDialog() { setDraft(null); setDialog(null); setConfirmDelete(false); triggerRef.current?.focus(); }
   function newCard(employeeId?: number, button?: HTMLButtonElement) {
     if (!canEdit) return;
     if (button) triggerRef.current = button;
@@ -187,16 +202,31 @@ export function TimesheetsPanel(props: Props) {
     setFormError("");
   }
   async function saveCard(event: FormEvent) {
-    event.preventDefault(); if (!draft || !canEdit) return;
+    event.preventDefault(); if (!draft || !canEdit || cardSaving.current) return;
     if (props.breakPremiumPolicy && !draft.confirmBreakRecord) {
       setFormError("Confirm the worked time and breaks before saving.");
       return;
     }
     const error = validateTimeCard(draft, props.events, props.now);
     if (error) { setFormError(error); return; }
-    const saved = await props.onSaveCard(draft);
-    if (saved === false) { setFormError("The save was not confirmed. Check the shared-data message above."); return; }
-    closeDialog();
+    cardSaving.current = true;
+    setCardPending(true);
+    try {
+      const saved = await props.onSaveCard(draft);
+      if (saved === false) { setFormError("The save was not confirmed. Check the shared-data message above."); return; }
+      closeDialog();
+    } finally { cardSaving.current = false; setCardPending(false); }
+  }
+  async function deleteCard() {
+    if (!draft || !deleteStart || !canDeleteCard || !props.onDeleteCard || cardSaving.current) return;
+    cardSaving.current = true;
+    setCardPending(true);
+    try {
+      const saved = await props.onDeleteCard({ ...draft, date: workDate(deleteStart.at, props.timeZone) });
+      if (!saved) { setFormError("The deletion was not confirmed. Check the shared-data message above."); return; }
+      closeDialog();
+      requestAnimationFrame(() => { if (!triggerRef.current?.isConnected) dateButtonRef.current?.focus(); });
+    } finally { cardSaving.current = false; setCardPending(false); }
   }
   function moveColumn(from: ColumnId, to: ColumnId) { if (from === to) return; setColumnOrder(order => { const next = order.filter(id => id !== from); next.splice(next.indexOf(to), 0, from); return next; }); }
   function exportCards() {
@@ -232,7 +262,7 @@ export function TimesheetsPanel(props: Props) {
     return <span className={["ot", "doubleOt"].includes(column) && (card.metrics[column] ?? 0) > 0 ? "ts-overtime" : undefined}>{plainCell(card, column)}</span>;
   };
 
-  const dateControl = <div className="ts-menu-anchor ts-date-anchor"><button type="button" className="ts-date-button" aria-expanded={menu === "date"} onClick={event => toggleMenu("date", event.currentTarget)}><CalendarIcon />{period === "day" ? dayDateLabel(start) : dateLabel(start, true)}{start !== end ? ` – ${dateLabel(end, true)}` : ""}<Chevron /></button>
+  const dateControl = <div className="ts-menu-anchor ts-date-anchor"><button ref={dateButtonRef} type="button" className="ts-date-button" aria-expanded={menu === "date"} onClick={event => toggleMenu("date", event.currentTarget)}><CalendarIcon />{period === "day" ? dayDateLabel(start) : dateLabel(start, true)}{start !== end ? ` – ${dateLabel(end, true)}` : ""}<Chevron /></button>
           {menu === "date" ? <TimesheetsCalendar key={`${payCalendar.payPeriod}:${payCalendar.anchorDate}`} start={start} end={end} today={props.today} payCalendar={payCalendar} singleDay={period === "day"}
             onCancel={() => { setMenu(null); triggerRef.current?.focus(); }}
             onApply={(value, preset) => {
@@ -288,8 +318,17 @@ export function TimesheetsPanel(props: Props) {
     <table className="ts-print-summary"><caption>Timesheet summary · {dateLabel(start, true)} – {dateLabel(end, true)}</caption><thead><tr><th>Team member</th>{printMetrics.map(id => <th key={id}>{timesheetColumns.find(column => column.id === id)?.label}</th>)}</tr></thead><tbody>{members.filter(member => visibleCards.some(card => card.employeeId === member.id)).map(member => { const total = totalMetrics(visibleCards.filter(card => card.employeeId === member.id)); return <tr key={member.id}><th>{member.name}</th>{printMetrics.map(id => <td key={id}>{metricLabel(id, total[id])}</td>)}</tr>; })}</tbody></table>
     <div className="ts-table-footnote">{showRoundedClock && <p>Rounded hours compare closed time cards. Payroll estimates use the recorded times.</p>}{props.breakPremiumPolicy && <p>{showBreakPremiums ? "Break premium estimates use recorded hourly wages. Review other regular-rate compensation before payroll." : "Company-wide Timesheets combines each employee’s work across departments to calculate premiums."}</p>}{period === "day" ? "Total spans clock-in to clock-out. Meal breaks are shown separately." : "Hours shown in decimals · Wage and overtime estimates"} <button type="button" onClick={event => openDialog("help", event.currentTarget)} aria-label="About timesheet estimates">ⓘ</button></div>
     {period === "period" ? <div className="ts-totals-ribbon" tabIndex={0} role="region" aria-label="Timesheet totals ribbon" ref={totalsScrollRef} onScroll={event => syncLedgerScroll(event.currentTarget, ledgerScrollRef.current)}><table className="ts-table ts-period-ledger ts-totals-table" style={{ minWidth: ledgerMinWidth }} aria-label="Combined timesheet totals">{ledgerColumns}<tbody><tr><th scope="row">{roles.length || search ? "Filtered totals" : "Totals"}</th>{activeColumns.map(id => <td key={id} data-column={id} aria-label={`${timesheetColumns.find(column => column.id === id)?.label}: ${id === "role" ? `${roleAssignments} roles` : id === "card" ? `${cardCount(visibleCards)} time cards` : id === "issues" || id === "wage" ? "" : metricLabel(id, totals[id])}`}>{id === "role" ? <span title="Role assignments on worked time cards">{roleAssignments} {roleAssignments === 1 ? "Role" : "Roles"}</span> : id === "card" ? `${cardCount(visibleCards)} ${cardCount(visibleCards) === 1 ? "Time Card" : "Time Cards"}` : id === "issues" || id === "wage" ? null : metricLabel(id, totals[id])}</td>)}<td /></tr></tbody></table></div> : null}
-    {(dialog || draft) ? <div className="ts-modal-backdrop"><div className={draft ? "ts-modal ts-card-modal" : "ts-modal"} role="dialog" aria-modal="true" aria-labelledby="ts-dialog-title" ref={modalRef}>{!draft ? <div className="ts-modal-heading"><div><p>{dateLabel(start, true)}{end !== start ? ` – ${dateLabel(end, true)}` : ""}</p><h2 id="ts-dialog-title">{dialog === "history" ? "Time card edit history" : dialog === "card" ? "Time card details" : "About Timesheets"}</h2></div><button type="button" onClick={closeDialog} aria-label="Close timesheet dialog">×</button></div> : null}
-      {draft ? <TimeCardEditor
+    {(dialog || draft) ? <div className="ts-modal-backdrop"><div className={draft && !confirmDelete ? "ts-modal ts-card-modal" : "ts-modal"} role="dialog" aria-modal="true" aria-labelledby="ts-dialog-title" ref={modalRef}>{!draft ? <div className="ts-modal-heading"><div><p>{dateLabel(start, true)}{end !== start ? ` – ${dateLabel(end, true)}` : ""}</p><h2 id="ts-dialog-title">{dialog === "history" ? "Time card edit history" : dialog === "card" ? "Time card details" : "About Timesheets"}</h2></div><button type="button" onClick={closeDialog} aria-label="Close timesheet dialog">×</button></div> : null}
+      {draft && confirmDelete ? <div className="ts-help ts-card-delete-confirmation">
+        <h2 id="ts-dialog-title">Delete this time card?</h2>
+        <p>{memberById.get(draft.employeeId)?.name} · {dateLabel(deleteStart ? workDate(deleteStart.at, props.timeZone) : draft.date, true)}</p>
+        <p>Its hours will be removed from Timesheets. The original punches and deletion history will be kept.</p>
+        {formError ? <p className="ts-form-error" role="alert">{formError}</p> : null}
+        <div className="ts-modal-actions">
+          <button type="button" disabled={cardPending} onClick={() => { restoreDeleteFocus.current = true; setConfirmDelete(false); setFormError(""); }}>Keep time card</button>
+          <button type="button" className="ts-card-delete" disabled={cardPending} onClick={() => void deleteCard()}>Confirm deletion</button>
+        </div>
+      </div> : draft ? <TimeCardEditor
         draft={draft}
         employees={members}
         roles={allRoles}
@@ -297,18 +336,21 @@ export function TimesheetsPanel(props: Props) {
         today={props.today}
         now={props.now}
         error={formError}
+        pending={cardPending}
+        notes={timeCardNotes(draftEvents)}
         confirmBreakRecord={Boolean(props.breakPremiumPolicy)}
         history={draft.eventIds.length ? props.history.filter(edit => edit.employeeId === draft.employeeId && (edit.cardId !== undefined ? edit.cardId === draft.cardId : edit.date === draft.date)) : []}
         onChange={value => { setDraft(value); setFormError(""); }}
         onSubmit={saveCard}
         onClose={closeDialog}
+        onDelete={canDeleteCard ? () => { setFormError(""); setConfirmDelete(true); } : undefined}
         onBreakSettings={() => { closeDialog(); (props.onBreakSettings ?? props.onSettings)(); }}
         onAdjust={draft.eventIds.length ? () => {
           const hours = cards.filter(card => card.employeeId === draft.employeeId && card.date === draft.date).reduce((total, card) => total + (card.metrics.actual ?? 0), 0);
           props.onAdjust(draft.employeeId, draft.date, hours);
           closeDialog();
         } : undefined}
-      /> : dialog === "card" && inspectingCard ? <div className="ts-help"><h3>{dateLabel(inspectingCard.date)} · {inspectingCard.role}</h3><p>{plainCell(inspectingCard, "card")}</p><div className="ts-summary-metrics"><div><span>Actual hours</span><strong>{metricLabel("actual", inspectingCard.metrics.actual)}</strong></div><div><span>Meal breaks</span><strong>{metricLabel("breaks", inspectingCard.metrics.breaks)}</strong></div><div><span>Paid hours</span><strong>{metricLabel("paid", inspectingCard.metrics.paid)}</strong></div></div>{inspectingCard.issues.map(issue => <p key={issue}>{issue}</p>)}{inspectingCard.notes.map((note, index) => <p key={index}>{note}</p>)}<div className="ts-modal-actions"><button type="button" className="ts-primary" onClick={closeDialog}>Done</button></div></div> : dialog === "history" ? <><p className="ts-form-note">Saved additions and edits in this period. Email delivery is not connected; download the history to share it.</p><div className="ts-edit-history">{[...history].reverse().map(edit => <article key={edit.id}><strong>{memberById.get(edit.employeeId)?.name} · {dateLabel(edit.date)}</strong><small>{new Date(edit.at).toLocaleString()} · {edit.actor}</small><p>{edit.before || "New time card"} → {edit.after}</p></article>)}{!history.length ? <p>No time card edits recorded in this period.</p> : null}</div><div className="ts-modal-actions"><button type="button" disabled={!canExport || !history.length} onClick={() => download(`time-card-history-${start}-${end}.csv`, [["Team member", "Date", "Edited at", "Edited by", "Before", "After"], ...history.map(edit => [memberById.get(edit.employeeId)?.name ?? "", edit.date, edit.at, edit.actor, edit.before, edit.after])])}>Download edit history</button><button type="button" className="ts-primary" onClick={closeDialog}>Done</button></div></> : <div className="ts-help"><p>Review hours by day or select your pay-period dates. Expand a team member to see clock times, breaks, issues, and paid time off. Filters select roles; View changes the team search, grouping, and columns.</p><p>Clock rounding previews clock-ins and clock-outs at the saved 5-, 10-, or 15-minute increment. Pay and break checks use the exact times.</p><p>Overtime estimates use the saved rules and the entire workweek. Multi-rate overtime uses a workweek weighted rate from recorded wages. Salaried estimates allocate wages to the recorded time cards. Scheduled hours show the full scheduled interval.</p><p>Qualified OT, tips, special pay, and FFCRA columns display a dash because these amounts are not recorded. Estimates do not include payroll deductions or special pay rules.</p><p>To fix a missing clock-out or break, open the card and update its times. Employee accounts can view only their own cards. Tools provides printing, CSV downloads, edit history, and time-clock settings.</p><div className="ts-modal-actions"><button type="button" className="ts-primary" onClick={closeDialog}>Got it</button></div></div>}
+      /> : dialog === "card" && inspectingCard ? <div className="ts-help"><h3>{dateLabel(inspectingCard.date)} · {inspectingCard.role}</h3><p>{plainCell(inspectingCard, "card")}</p><div className="ts-summary-metrics"><div><span>Actual hours</span><strong>{metricLabel("actual", inspectingCard.metrics.actual)}</strong></div><div><span>Meal breaks</span><strong>{metricLabel("breaks", inspectingCard.metrics.breaks)}</strong></div><div><span>Paid hours</span><strong>{metricLabel("paid", inspectingCard.metrics.paid)}</strong></div></div>{inspectingCard.issues.map(issue => <p key={issue}>{issue}</p>)}{inspectingCard.notes.map((note, index) => <p key={index}>{note}</p>)}<div className="ts-modal-actions"><button type="button" className="ts-primary" onClick={closeDialog}>Done</button></div></div> : dialog === "history" ? <><p className="ts-form-note">Saved additions and edits in this period. Email delivery is not connected; download the history to share it.</p><div className="ts-edit-history">{[...history].reverse().map(edit => <article key={edit.id}><strong>{memberById.get(edit.employeeId)?.name} · {dateLabel(edit.date)}</strong><small>{new Date(edit.at).toLocaleString()} · {edit.actor}</small><p>{edit.before || "New time card"} → {edit.after}</p>{edit.notes?.length ? <RecordedTimeCardNotes notes={edit.notes} /> : null}</article>)}{!history.length ? <p>No time card edits recorded in this period.</p> : null}</div><div className="ts-modal-actions"><button type="button" disabled={!canExport || !history.length} onClick={() => download(`time-card-history-${start}-${end}.csv`, [["Team member", "Date", "Edited at", "Edited by", "Before", "After"], ...history.map(edit => [memberById.get(edit.employeeId)?.name ?? "", edit.date, edit.at, edit.actor, edit.before, edit.after])])}>Download edit history</button><button type="button" className="ts-primary" onClick={closeDialog}>Done</button></div></> : <div className="ts-help"><p>Review hours by day or select your pay-period dates. Expand a team member to see clock times, breaks, issues, and paid time off. Filters select roles; View changes the team search, grouping, and columns.</p><p>Clock rounding previews clock-ins and clock-outs at the saved 5-, 10-, or 15-minute increment. Pay and break checks use the exact times.</p><p>Overtime estimates use the saved rules and the entire workweek. Multi-rate overtime uses a workweek weighted rate from recorded wages. Salaried estimates allocate wages to the recorded time cards. Scheduled hours show the full scheduled interval.</p><p>Qualified OT, tips, special pay, and FFCRA columns display a dash because these amounts are not recorded. Estimates do not include payroll deductions or special pay rules.</p><p>To fix a missing clock-out or break, open the card and update its times. Employee accounts can view only their own cards. Tools provides printing, CSV downloads, edit history, and time-clock settings.</p><div className="ts-modal-actions"><button type="button" className="ts-primary" onClick={closeDialog}>Got it</button></div></div>}
     </div></div> : null}
   </section>;
 }

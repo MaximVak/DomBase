@@ -8,6 +8,7 @@ import { defaultInfo, emptyState } from "./contract";
 import type { WorkspaceData, StaffState } from "./contract";
 import type { Context, Database } from "./context";
 import { decryptSsn } from "./private";
+import { timeCardNotes } from "./timecard-notes";
 const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 import { workspacePeriod, offsetDate } from "./period";
 import type { WorkspacePeriod } from "./period";
@@ -47,6 +48,10 @@ export async function workspaceSnapshot(db: Database, ctx: Context, fieldKey: st
   const memberConversation = db.select({ id: s.conversations.id }).from(s.conversations).where(and(member, isNull(s.conversations.archivedAt), allowed(p["messages.read"])));
   const clockScope = ctx.allDepartments ? sql`1 = 1` : sql`EXISTS (SELECT 1 FROM roles r JOIN departments d ON d.id = r.department_id
     WHERE r.name = ${s.clockEvents.roleName} AND r.archived = 0 AND d.archived = 0 AND ${deptScope(sql`d.id`)})`;
+  // Superseded punches never reappear when a correction changes department scope.
+  const currentPunch = sql`NOT EXISTS (SELECT 1 FROM time_cards tc JOIN time_card_edits ed ON ed.card_id = tc.id
+    JOIN json_each(ed.before, '$.eventIds') removed
+    WHERE tc.employee_id = ${s.clockEvents.employeeId} AND removed.value = ${s.clockEvents.id})`;
   const ownEmployee = ctx.account.employeeId ?? -1;
   const privateScope = (column: SQLWrapper) => and(canEmployee(column), or(allowed(p["team.read"] && p["team.private.read"]), sql`${column} = ${ownEmployee}`));
   // Unique SQL names keep D1's positional result mapping intact when several
@@ -78,9 +83,9 @@ export async function workspaceSnapshot(db: Database, ctx: Context, fieldKey: st
     db.select().from(s.scheduleDraftChanges).where(sql`${allowed(p["schedule.manage"])} AND EXISTS (SELECT 1 FROM schedule_drafts sd WHERE sd.id = ${s.scheduleDraftChanges.draftId} AND sd.owner_account_id = ${ctx.account.id}) AND ${ctx.roleFilter(s.scheduleDraftChanges.roleId)}`),
     db.select().from(s.scheduleDraftEmployees).where(sql`EXISTS (SELECT 1 FROM schedule_drafts sd WHERE sd.id = ${s.scheduleDraftEmployees.draftId} AND sd.owner_account_id = ${ctx.account.id}) AND ${employeeScope(s.scheduleDraftEmployees.employeeId)}`),
     db.select().from(s.scheduleEvents).where(and(allowed(p["schedule.read"]), dates(s.scheduleEvents.date))).orderBy(s.scheduleEvents.date),
-    db.select({ event: s.clockEvents, assistance: s.assistedClockReports }).from(s.clockEvents).leftJoin(s.assistedClockReports, eq(s.assistedClockReports.eventId, s.clockEvents.id)).where(and(allowed(p["timesheets.read"]), employeeScope(s.clockEvents.employeeId), clockScope, clockIds)).orderBy(s.clockEvents.id),
+    db.select({ event: s.clockEvents, assistance: s.assistedClockReports }).from(s.clockEvents).leftJoin(s.assistedClockReports, eq(s.assistedClockReports.eventId, s.clockEvents.id)).where(and(allowed(p["timesheets.read"]), employeeScope(s.clockEvents.employeeId), clockScope, clockIds, currentPunch)).orderBy(s.clockEvents.id),
     db.select().from(s.timeCards).where(and(allowed(p["timesheets.read"]), employeeScope(s.timeCards.employeeId), cardDates(s.timeCards.workDate), ctx.allDepartments ? sql`1 = 1` : ctx.roleFilter(s.timeCards.roleId))),
-    db.select().from(s.timeCardEdits).where(sql`${allowed(p["timesheets.read"])} AND ${employeeScope(s.timeCardEdits.employeeId)} AND EXISTS (SELECT 1 FROM time_cards tc WHERE tc.id = ${s.timeCardEdits.cardId} AND ${cardDates(sql`tc.work_date`)} AND ${ctx.allDepartments ? sql`1 = 1` : ctx.roleFilter(sql`tc.role_id`)})`).orderBy(s.timeCardEdits.createdAt, s.timeCardEdits.id),
+    db.select().from(s.timeCardEdits).where(sql`${allowed(p["timesheets.read"])} AND ${employeeScope(s.timeCardEdits.employeeId)} AND EXISTS (SELECT 1 FROM time_cards tc WHERE tc.id = ${s.timeCardEdits.cardId} AND ${cardDates(sql`tc.work_date`)} AND ${ctx.allDepartments ? sql`1 = 1` : ctx.roleFilter(sql`tc.role_id`)})`).orderBy(s.timeCardEdits.cardId, s.timeCardEdits.revision),
     db.select().from(s.hoursAdjustments).where(and(allowed(p["timesheets.read"] && ctx.allDepartments), employeeScope(s.hoursAdjustments.employeeId), dates(s.hoursAdjustments.date))).orderBy(s.hoursAdjustments.id),
     db.select().from(s.ptoPolicies).where(and(allowed(p["time_off.read"]), eq(s.ptoPolicies.archived, false))).orderBy(s.ptoPolicies.id),
     db.select().from(s.ptoAssignments).where(and(allowed(p["time_off.read"]), employeeScope(s.ptoAssignments.employeeId))),
@@ -137,19 +142,33 @@ export async function workspaceSnapshot(db: Database, ctx: Context, fieldKey: st
   state.clockEvents = rawClocks.map(({ event: row, assistance }) => {
     const resolved = assistance && (assistance.status !== "pending" || row.eventType === "in");
     const clockAt = resolved ? assistance.decidedTime ?? assistance.requestedAt : row.occurredAt;
+    const explanation = assistance?.reason ?? row.explanation;
     return { id: row.id, employeeId: row.employeeId, type: row.eventType, at: timestamp(clockAt),
-      role: row.roleName || undefined, explanation: assistance?.reason ?? (row.explanation || undefined), automatic: row.automatic,
+      role: row.roleName || undefined, explanation: explanation || undefined, automatic: row.automatic,
+      ...(explanation && (assistance || row.source === "kiosk" || row.source === "offline") ? { noteAuthor: "employee" as const } : {}),
       cardId: row.cardId ?? undefined, ...(row.clockDetails ? { clockDetails: row.clockDetails } : {}),
       ...(assistance ? { assistedStatus: assistance.status } : {}) };
   });
+  const revisedCards = new Map<number, StaffState["clockEvents"]>();
   for (const edit of edits) {
-    if (Array.isArray(edit.before.eventIds) && Array.isArray(edit.after.events)) {
-      const removed = new Set(edit.before.eventIds as number[]);
-      state.clockEvents = [...state.clockEvents.filter(event => !removed.has(event.id)), ...edit.after.events as StaffState["clockEvents"]];
+    if (!Array.isArray(edit.before.eventIds) || !Array.isArray(edit.after.events)) continue;
+    const events = edit.after.events as StaffState["clockEvents"];
+    if (events.length && !events[0].carriedNotes) {
+      const before = Array.isArray(edit.before.events) ? edit.before.events as StaffState["clockEvents"] : [];
+      const notes = timeCardNotes([...(revisedCards.get(edit.cardId) ?? []), ...before]);
+      if (notes.length) events[0] = { ...events[0], carriedNotes: notes };
     }
+    revisedCards.set(edit.cardId, events);
   }
+  for (const events of revisedCards.values()) state.clockEvents.push(...events);
   state.clockEvents.sort((a, b) => a.at.localeCompare(b.at) || a.id - b.id);
-  state.timeCardEdits = edits.map(row => ({ id: row.id, employeeId: row.employeeId, date: cards.find(card => card.id === row.cardId)?.workDate ?? "", at: timestamp(row.createdAt), actor: accounts.find(account => account.id === row.actorAccountId)?.name ?? "Manager", before: typeof row.before.description === "string" ? row.before.description : "Original time card", after: typeof row.after.description === "string" ? row.after.description : "Corrected time card", cardId: row.cardId }));
+  state.timeCardEdits = edits.toSorted((a, b) => a.createdAt.localeCompare(b.createdAt)).map(row => ({
+    id: row.id, employeeId: row.employeeId, date: cards.find(card => card.id === row.cardId)?.workDate ?? "",
+    at: timestamp(row.createdAt), actor: accounts.find(account => account.id === row.actorAccountId)?.name ?? "Manager",
+    before: typeof row.before.description === "string" ? row.before.description : "Original time card",
+    after: typeof row.after.description === "string" ? row.after.description : "Corrected time card", cardId: row.cardId,
+    ...(row.after.deleted === true && Array.isArray(row.before.events) ? { notes: timeCardNotes(row.before.events) } : {}),
+  }));
   state.hoursAdjustments = adjustments.map(row => ({ id: row.id, employeeId: row.employeeId, date: row.date, hours: row.adjustmentSeconds / 3600 }));
   state.ptoPolicies = policies.filter(policy => ctx.allDepartments || policyAssignments.some(a => a.policyId === policy.id)).map(row => { const own = policyAssignments.filter(a => a.policyId === row.id); return { id: row.id, name: row.name, method: row.method, fixedHours: row.fixedAllowanceSeconds / 3600, earnedHours: row.earnedSeconds / 3600, workedHours: row.perWorkedSeconds / 3600, employeeIds: own.map(a => a.employeeId), startingBalances: Object.fromEntries(own.map(a => [a.employeeId, { startDate: a.startDate, balance: a.openingBalanceSeconds / 3600 }])) }; });
   state.ptoRequests = pto.map(row => ({ id: row.id, employeeId: row.employeeId, compensation: row.compensation, startDate: row.startDate, endDate: row.endDate, startTime: row.startTime ?? undefined, endTime: row.endTime ?? undefined, reason: row.reason, explanation: p["team.read"] && p["team.private.read"] || row.employeeId === ownEmployee ? row.explanation : "", status: row.status, requestedAt: timestamp(row.requestedAt), decidedAt: row.decidedAt ? timestamp(row.decidedAt) : undefined, decidedByEmployeeId: accounts.find(a => a.id === row.decidedByAccountId)?.employeeId ?? undefined }));

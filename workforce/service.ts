@@ -123,6 +123,7 @@ export function createWorkforceService(db: Database, access: ReturnType<typeof c
         return { entity: v.oneOf(op.entity, entities), id: v.integer(op.id), before: op.before ?? null, after: op.after ?? null } satisfies Change;
       });
       if (!changes.length) throw new AuthError(400, "No changes to save.");
+      if (changes.filter(change => change.entity === "timecard").length > 1) throw new AuthError(400, "Save one time card at a time.");
       if (new Set(changes.map(change => `${change.entity}:${change.id}`)).size !== changes.length) throw new AuthError(400, "Duplicate save operation.");
       const hash = rateKey(options.secret, canonical(body));
       const minimal = request.headers.get("prefer") === "return=minimal";

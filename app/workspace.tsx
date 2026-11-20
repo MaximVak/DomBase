@@ -2346,7 +2346,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
       if (validateTimeCard(draft, current.clockEvents, Date.now())) return current;
       const originalEvents = current.clockEvents.filter((event) => draft.eventIds.includes(event.id));
       const description = (events: ClockEvent[]) => events.map((event) => `${event.type}: ${formatDateTime(event.at)}${event.explanation ? ` (${event.explanation})` : ""}`).join("; ");
-      const updatedEvents = timeCardEvents({ ...draft, note: draft.note || originalEvents.find((event) => event.explanation)?.explanation || "" }, nextId(current.clockEvents));
+      const updatedEvents = timeCardEvents(draft, nextId(current.clockEvents));
       return {
         ...current,
         clockEvents: [...current.clockEvents.filter((event) => !draft.eventIds.includes(event.id)), ...updatedEvents],
@@ -2357,6 +2357,16 @@ export default function Home({ account }: { account: DashboardAccount }) {
         }],
       };
     });
+  }
+
+  async function deleteTimeCard(draft: TimeCardDraft) {
+    if (mode !== "manager" || !shared.data.permissions["timesheets.manage"]) return false;
+    const events = shared.data.state.clockEvents.filter(event => draft.eventIds.includes(event.id));
+    if (events.length !== draft.eventIds.length || !events.length) return false;
+    return shared.save([{
+      entity: "timecard", id: newRecordId(), before: { events },
+      after: { operation: "delete", employeeId: draft.employeeId, date: draft.date, cardId: draft.cardId, eventIds: draft.eventIds, events: [] },
+    }]);
   }
 
   function editWorkedHours(employee: Employee, displayedHours: number) {
@@ -5396,6 +5406,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
               ) : null}
               onAddTeamMember={() => { navigateToView("employees"); openAddEmployeeModal(); }}
               onSaveCard={saveTimeCard}
+              onDeleteCard={deleteTimeCard}
               onAdjust={(employeeId, date, hours) => {
                 const employee = state.employees.find((member) => member.id === employeeId);
                 if (!employee || mode !== "manager") return;

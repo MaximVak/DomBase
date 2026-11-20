@@ -10534,11 +10534,17 @@ button[aria-label^="Remove"]:focus-visible,
 .ts-card-history-entries p { line-height: 1.55; margin: 5px 0 0; overflow-wrap: anywhere; }
 .ts-card-note { margin: 0 0 18px 50px; color: #6c7c90; font-size: .78rem; }
 .ts-card-note summary { cursor: pointer; width: fit-content; }
+.ts-card-note ul { margin: 8px 0 12px; padding-left: 18px; }
+.ts-card-note li p { margin: 2px 0 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .ts-card-note textarea { display: block; width: 100%; min-height: 66px; border: 1px solid #cdd8e4; border-radius: 9px; padding: 12px; margin-top: 10px; resize: vertical; }
 .ts-card-footer { display: flex; align-items: center; justify-content: space-between; gap: 15px; padding: 22px 36px; border-top: 1px solid #e2e8ef; background: #fff; border-radius: 0 0 12px 12px; box-shadow: 0 -4px 8px #142d4910; }
 .ts-card-cancel { border: 0; background: none; color: #2d3c50; padding: 0; font-weight: 650; }
 .ts-card-footer .ts-primary { padding: 13px 21px; border-radius: 13px; font-size: .98rem; }
 .ts-card-footer .ts-primary:disabled { background: #eff2f6; color: #a3afbf; opacity: 1; }
+.ts-card-footer > .ts-card-delete, .ts-card-delete-confirmation .ts-modal-actions > .ts-card-delete { border: 1px solid #b54a40; border-radius: 8px; color: #9a241a; background: #fff; padding: 10px 14px; }
+.ts-card-delete-confirmation .ts-modal-actions > .ts-card-delete { color: #fff; background: #9a241a; }
+.ts-card-delete:disabled { opacity: .55; cursor: wait; }
+.ts-card-delete-confirmation h2 { font-size: 1.2rem; }
 .ts-card-footer > .ts-text-button { margin-left: auto; font-size: .8rem; }
 @media (max-height: 1000px) and (min-width: 701px) {
   .ts-card-identity { padding: 22px 36px 26px; gap: 16px 14px; }

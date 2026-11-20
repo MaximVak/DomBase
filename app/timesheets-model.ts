@@ -8,15 +8,16 @@ import { scheduledPaidMinutes } from "./schedule-estimates";
 import { inspectBreaks, requiredBreaks } from "../kiosk/break-rules";
 import type { BreakIssue, BreakKind, BreakReport, ClockDetails } from "../kiosk/break-rules";
 import { zonedTimestamp } from "../workforce/time";
-import type { HoursRounding, HoursRoundingMinutes } from "../workforce/model";
+import type { ClockEvent, HoursRounding, HoursRoundingMinutes, TimeCardNote } from "../workforce/model";
+import { timeCardNotes } from "../workforce/timecard-notes";
 export type TimesheetEmployee = { id: number; name: string; role: string; wage: string; active: boolean; terminated?: boolean; terminationDate?: string; wageRates?: WageRate[]; jobs?: { id: number; name: string }[]; payrollId?: string; legalFirstName?: string; legalMiddleName?: string; legalLastName?: string };
-export type TimesheetEvent = { id: number; employeeId: number; type: "in" | "out" | "break" | "break_end"; at: string; explanation?: string; automatic?: boolean; role?: string; cardId?: number; clockDetails?: ClockDetails; assistedStatus?: "pending" | "approved" | "edited" };
+export type TimesheetEvent = Pick<ClockEvent, "id" | "employeeId" | "type" | "at" | "explanation" | "automatic" | "role" | "cardId" | "clockDetails" | "assistedStatus" | "noteAuthor" | "carriedNotes">;
 export type TimesheetShift = { shiftType?: "work" | "day_off"; employeeId: number; date: string; start: string; end: string; role: string };
 export type TimesheetAdjustment = { id: number; employeeId: number; date: string; hours: number };
 export type TimesheetPto = { employeeId: number; startDate: string; endDate: string; compensation: string; status: string };
 export type TimeCardBreak = { id: number; start: string; end: string; nextDay: boolean; kind?: BreakKind; confirmEnd?: boolean };
 export type TimeCardDraft = { employeeId: number; date: string; start: string; end: string; nextDay: boolean; breakMinutes: number; role: string; note: string; eventIds: number[]; breaks?: TimeCardBreak[]; cardId?: number; timeZone?: string; confirmBreakRecord?: boolean };
-export type TimeCardEdit = { id: number; employeeId: number; date: string; at: string; actor: string; before: string; after: string; cardId?: number };
+export type TimeCardEdit = { id: number; employeeId: number; date: string; at: string; actor: string; before: string; after: string; cardId?: number; notes?: TimeCardNote[] };
 export type Rounding = HoursRounding;
 export const timesheetColumns = [
   { id: "role", label: "Role" }, { id: "wage", label: "Wage rate" }, { id: "card", label: "Time card" },
@@ -146,7 +147,7 @@ export function buildTimeCards(input: {
         if (!elapsed) continue;
         const breakMs = breaks.reduce((total, item) => total + overlap(Math.max(item.start, start), Math.min(item.end, end), dayStart, dayEnd), 0);
         const shift = input.shifts.find(shift => shift.shiftType !== "day_off" && shift.employeeId === employee.id && shift.date === date);
-        const card: TimeCard = { id: `clock-${session[0].id}-${date}`, employeeId: employee.id, date, role: session[0].role || shift?.role || employee.role || "Unassigned", start: session[0].at, end: closed ? session[session.length - 1].at : undefined, eventIds: session.map(event => event.id), issues: [], notes: session.flatMap(event => event.explanation ? [event.explanation] : []), adjustment: 0, metrics: metrics() };
+        const card: TimeCard = { id: `clock-${session[0].id}-${date}`, employeeId: employee.id, date, role: session[0].role || shift?.role || employee.role || "Unassigned", start: session[0].at, end: closed ? session[session.length - 1].at : undefined, eventIds: session.map(event => event.id), issues: [], notes: timeCardNotes(session).map(note => note.text), adjustment: 0, metrics: metrics() };
         card.metrics.actual = Math.max(0, elapsed - breakMs) / HOUR;
         if (roundedStart !== undefined) card.roundedStart = new Date(roundedStart).toISOString();
         if (roundedStart !== undefined && roundedEnd !== undefined) {

@@ -153,6 +153,8 @@ export type Shift = {
   notes?: string;
 };
 
+export type TimeCardNote = { author: "employee" | "manager" | "recorded"; text: string };
+
 export type ClockEvent = {
   id: number;
   employeeId: number;
@@ -163,6 +165,8 @@ export type ClockEvent = {
   durationMinutes?: 30 | 45;
   durationSeconds?: 5;
   explanation?: string;
+  noteAuthor?: TimeCardNote["author"];
+  carriedNotes?: TimeCardNote[];
   automatic?: boolean;
   role?: string;
   cardId?: number;
