@@ -2,7 +2,7 @@ export const kioskCopy = {
   en: {
     assistedIn: "Report a missed clock-in", assistedOut: "Report a missed clock-out", actualDate: "Actual date", actualTime: "Actual time",
     assistanceReason: "Reason for the correction", submitTime: "Submit actual time", assistancePending: "Time reported. A manager can review it.",
-    assistanceApproved: "Corrected clock-out recorded and approved.", clockOutReminder: "Your shift has ended. Clock out or report the time you finished.",
+    assistanceApproved: "Corrected clock-out recorded and approved.", clockOutReminder: "Your shift has ended. Please clock out.",
     assistanceUnavailable: "This correction is unavailable for your current shift.", assistanceTime: "Enter a valid recent time that follows your other clock entries.",
     rest: "Paid rest break", meal: "Unpaid meal break", startRest: "Start paid rest break", startMeal: "Start unpaid meal break",
     onRest: "You are on a paid rest break.", onMeal: "You are on an unpaid meal break.", remaining: "Break time remaining",
@@ -35,7 +35,7 @@ export const kioskCopy = {
   es: {
     assistedIn: "Reportar entrada olvidada", assistedOut: "Reportar salida olvidada", actualDate: "Fecha real", actualTime: "Hora real",
     assistanceReason: "Motivo de la corrección", submitTime: "Enviar hora real", assistancePending: "Se registró la hora. Un gerente puede revisarla.",
-    assistanceApproved: "Salida corregida y aprobada.", clockOutReminder: "Tu turno terminó. Registra tu salida o reporta la hora en que terminaste.",
+    assistanceApproved: "Salida corregida y aprobada.", clockOutReminder: "Tu turno terminó. Registra tu salida.",
     assistanceUnavailable: "Esta corrección no está disponible para tu turno actual.", assistanceTime: "Ingresa una hora reciente y válida que siga el orden de tus registros.",
     rest: "Descanso pagado", meal: "Comida no pagada", startRest: "Iniciar descanso pagado", startMeal: "Iniciar comida no pagada",
     onRest: "Estás en un descanso pagado.", onMeal: "Estás en una pausa para comer no pagada.", remaining: "Tiempo restante de descanso",

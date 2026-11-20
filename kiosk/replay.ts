@@ -11,7 +11,7 @@ import type { RegisteredDevice } from "./device";
 import { exactKeys, positiveId } from "./security";
 import { parseActionDetails } from "./break-actions";
 import type { ActionDetails, ClockDetails } from "./break-rules";
-import { insertAssistance } from "./assistance";
+import { assistedOutPolicyGuard, insertAssistance } from "./assistance";
 
 export type ClockType = typeof schema.clockEvents.$inferSelect.eventType;
 export type ClockDraft = { eventType: ClockType; roleId: number | null; explanation: string; details?: ActionDetails };
@@ -93,7 +93,7 @@ export async function syncClock(
   if (target && previousId === target && attempted >= now - 72 * 3600000) {
     await atomicBatch(db, [
       insertAssistance(assistance, interactionId, attemptedAt, draft.explanation, sql`id=${target} AND employee_id=${interaction.employeeId} AND event_type='out' AND automatic=1`,
-        sql`${unsettled} AND (SELECT MAX(id) FROM clock_events WHERE employee_id=${interaction.employeeId})=${target}
+        sql`${unsettled} AND ${assistedOutPolicyGuard} AND (SELECT MAX(id) FROM clock_events WHERE employee_id=${interaction.employeeId})=${target}
           AND EXISTS (SELECT 1 FROM kiosk_interactions ki JOIN employees e ON e.id=ki.employee_id WHERE ki.id=${interactionId}
             AND ki.pin_version=e.pin_version AND e.active=1 AND e.terminated=0 AND e.pin_lookup IS NOT NULL
             AND (ki.ended_at IS NULL OR julianday(ki.ended_at)>=julianday(${attemptedAt})))`),
@@ -110,6 +110,7 @@ export async function syncClock(
       SELECT ${interaction.employeeId}, ${draft.eventType}, ${attemptedAt}, ${shift?.id ?? (draft.eventType === "in" ? null : previous?.shiftId ?? null)},
         ${plan?.roleName ?? ""}, ${draft.explanation}, 'offline', ${device.device.id}, ${time}, ${interactionId}, ${plan?.details ? JSON.stringify(plan.details) : null}
       WHERE ${canAutoSave ? 1 : 0} = 1 AND ${unsettled} AND ${roleScope} AND ${shiftScope}
+      AND ${assistance && draft.eventType === "out" ? assistedOutPolicyGuard : sql`1=1`}
       AND EXISTS (SELECT 1 FROM kiosk_interactions ki JOIN employees e ON e.id = ki.employee_id WHERE ki.id = ${interactionId}
         AND ki.pin_version = e.pin_version AND e.active = 1 AND e.terminated = 0 AND e.pin_lookup IS NOT NULL
         AND (ki.ended_at IS NULL OR julianday(ki.ended_at) >= julianday(${attemptedAt})))

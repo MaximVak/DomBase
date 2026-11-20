@@ -30,7 +30,7 @@ export async function dispatchClockReminderEmails(db: Database, env: InvitationE
         const delivered = await Promise.race([
           env.INVITATION_EMAIL!.send({ to: recipient.email, from: { email: config.sender!, name: "DomBase time clock" },
             replyTo: config.replyTo!, subject: "DomBase clock-out reminder",
-            text: `Your scheduled shift has ended. Use the time clock to record or report when you finished.\n\n${config.origin}/me/schedule\n` }),
+            text: `Your scheduled shift has ended. Use the time clock to clock out.\n\n${config.origin}/me/schedule\n` }),
           new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("Email provider timeout")), 10000); }),
         ]);
         if (delivered?.messageId) state = "accepted";

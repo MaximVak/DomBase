@@ -343,6 +343,10 @@ test("California timesheets keep paid rest paid and recheck waivers against the 
   const rows = buildTimeCards({ ...base, events: extension });
   assert.ok(rows.at(-1).issues.includes("Missing or noncompliant meal"));
   assert.ok(rows.at(-1).issues.includes("Missing or short paid rest break"));
+  const laterAutomatic = [...extension.slice(0, -1), { ...extension.at(-1), automatic: true }];
+  const autoClosedRows = buildTimeCards({ ...base, events: laterAutomatic });
+  assert.ok(autoClosedRows[0].notes.includes("Meal 1 waiver: Voluntary"));
+  assert.ok(autoClosedRows.at(-1).issues.includes("Missing or noncompliant meal"));
 });
 
 test("California meal checks use exact timing and only allow the second waiver after a compliant first meal", async () => {
@@ -360,4 +364,30 @@ test("California meal checks use exact timing and only allow the second waiver a
   assert.deepEqual(assess(12 * hour, 5 * hour), [{ kind: "meal", slot: 2, canWaive: true }]);
   assert.deepEqual(assess(12 * hour + 1, 5 * hour), [{ kind: "meal", slot: 2, canWaive: false }]);
   assert.deepEqual(assess(11 * hour, 5 * hour + 1).map(issue => issue.canWaive), [false, false]);
+});
+
+test("automatic clock-out leaves unfinished breaks for review without assuming unpaid time or a waiver", () => {
+  const date = "2026-08-03";
+  const make = (id, type, wall, extra = {}) => ({ id, employeeId: 1, type, at: at(date, wall), ...extra });
+  const start = make(1, "in", "09:00", { clockDetails: { california: true } });
+  const end = make(3, "out", "14:45", { automatic: true });
+  const meal = make(2, "break", "13:45", { clockDetails: { breakKind: "meal" } });
+  const rest = { ...meal, clockDetails: { breakKind: "rest" } };
+  for (const pause of [meal, rest]) {
+    const [card] = buildTimeCards({ ...base, events: [start, pause, end] });
+    assert.equal(card.metrics.actual, 5.75);
+    assert.equal(card.metrics.breaks, 0);
+    assert.ok(card.issues.includes("Confirm unfinished break"));
+    assert.ok(card.issues.includes("Missing or noncompliant meal"));
+    assert.ok(card.issues.includes("Missing or short paid rest break"));
+  }
+  const confirmed = make(4, "break_end", "14:15");
+  const [card] = buildTimeCards({ ...base, events: [start, meal, confirmed, end] });
+  assert.equal(card.metrics.actual, 5.25);
+  assert.equal(card.metrics.breaks, 0.5);
+  assert.deepEqual(card.issues, ["Automatic clock-out", "Missing or short paid rest break"]);
+  const shifted = { ...end, at: at(date, "14:00") };
+  const [atLimit] = buildTimeCards({ ...base, events: [start, meal, shifted] });
+  assert.ok(atLimit.issues.includes("Confirm unfinished break"));
+  assert.ok(!atLimit.issues.includes("Missing or noncompliant meal"));
 });

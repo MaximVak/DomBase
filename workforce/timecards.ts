@@ -50,7 +50,8 @@ export async function timecardChange(r: RecordContext, change: Change) {
   let previous = -Infinity; let breaking = false;
   for (let index = 0; index < events.length; index++) {
     const event = events[index]; const at = Date.parse(event.at);
-    if (at <= previous || (index > 0 && event.type === "in") || (index < events.length - 1 && event.type === "out")) throw new AuthError(400, "Time-card events must follow their actual order.");
+    const immediateExit = event.type === "out" && events[index - 1]?.type === "break_end" && at === previous;
+    if (at < previous || (at === previous && !immediateExit) || (index > 0 && event.type === "in") || (index < events.length - 1 && event.type === "out")) throw new AuthError(400, "Time-card events must follow their actual order.");
     if (event.type === "break") { if (breaking) throw new AuthError(400, "Breaks cannot overlap."); breaking = true; }
     if (event.type === "break_end") { if (!breaking) throw new AuthError(400, "A break end needs a break start."); breaking = false; }
     previous = at;
@@ -83,11 +84,11 @@ export async function timecardChange(r: RecordContext, change: Change) {
     if (event.type === "out" && start !== null) { if (Math.max(a, start) < Math.min(b, Date.parse(event.at))) throw new AuthError(409, "This time card overlaps another recorded card."); start = null; }
   }
   if (start !== null && Math.max(a, start) < Math.min(b, Date.parse(r.tx.stamp))) throw new AuthError(409, "This time card overlaps an active recorded card.");
-  let existing: typeof s.timeCards.$inferSelect | undefined = data.cardId ? ( await r.db.select().from(s.timeCards).where(eq(s.timeCards.id, v.integer(data.cardId))))[0] : undefined;
-  if (existing && existing.employeeId !== employeeId) {
-    if (beforeEvents.some(event => event.id === data.cardId && !event.cardId)) existing = undefined;
-    else throw new AuthError(403, "Time-card identity is outside your access.");
-  }
+  const requestedCardId = data.cardId ? v.integer(data.cardId) : undefined;
+  // The clock-in ID is a client placeholder until its raw session has a time card.
+  const unlinkedSession = beforeEvents.some(event => event.type === "in" && event.id === requestedCardId && !event.cardId);
+  const [existing] = requestedCardId && !unlinkedSession ? await r.db.select().from(s.timeCards).where(eq(s.timeCards.id, requestedCardId)) : [];
+  if (existing && existing.employeeId !== employeeId) throw new AuthError(403, "Time-card identity is outside your access.");
   if (existing && existing.workDate !== date) throw new AuthError(400, "Keep the original time-card date. Add a separate card for another date.");
   const cardId = existing?.id ?? newRecordId(); const revision = (existing?.version ?? 0) + 1;
   const lastPunch = await r.db.get<{ id: number }>(sql`SELECT COALESCE(MAX(id),0) AS id FROM clock_events WHERE employee_id = ${employeeId}`);

@@ -13,7 +13,7 @@ import type { ClockDraft } from "./replay";
 import { clockIdleSeconds } from "./idle";
 import { clockPolicy, kioskBreakView, resolveBreakDetails, workplaceDate } from "./break-actions";
 import { nextDate, zonedTimestamp } from "../workforce/time";
-import { insertAssistance, isAutomaticRecovery, planAssistance, shiftBounds } from "./assistance";
+import { assistedOutPolicyGuard, insertAssistance, isAutomaticRecovery, planAssistance, shiftBounds } from "./assistance";
 import type { ClockDetails } from "./break-rules";
 
 type Person = { interaction: typeof schema.kioskInteractions.$inferSelect; employee: typeof schema.employees.$inferSelect };
@@ -100,7 +100,8 @@ export function createKioskService(db: KioskOperatorDatabase, options: { secret:
     const time = now();
     const policy = await clockPolicy(db);
     const active = event && event.eventType !== "out";
-    const recovery = event?.automatic && event.eventType === "out" && time - Date.parse(event.occurredAt) <= 36 * 3600000
+    const assistedOut = policy.assistedClockOut && !policy.breakWaivers;
+    const recovery = assistedOut && event?.automatic && event.eventType === "out" && time - Date.parse(event.occurredAt) <= 36 * 3600000
       && !await db.get(sql`SELECT 1 FROM assisted_clock_reports WHERE event_id=${event.id}`);
     const reminder = active && (await db.get<{ id: string }>(sql`SELECT id FROM notifications WHERE employee_id=${employeeId}
       AND source_key LIKE 'clock-out-%' AND event_target_id=${event.shiftId ? "clock-attendance-" + event.shiftId : ""} AND occurred_at >= COALESCE((
@@ -113,7 +114,7 @@ export function createKioskService(db: KioskOperatorDatabase, options: { secret:
       try { const window = shiftBounds(shift, policy.zone); return time >= window.start + policy.lateMinutes * 60000 && time < window.end; }
       catch { return false; }
     });
-    return { in: eligible, out: policy.assistedClockOut && (!!active || !!recovery),
+    return { in: eligible, out: assistedOut && (!!active || !!recovery),
       recovery: !!recovery, reminder: !!reminder, date };
   }
   function approvalActor(approval: Approval, roleId: number | null): SQL {
@@ -128,6 +129,7 @@ export function createKioskService(db: KioskOperatorDatabase, options: { secret:
   }
   async function commitClock(device: RegisteredDevice, person: Person, pending: typeof schema.kioskClockRequests.$inferSelect, approval?: Approval) {
     const time = stamp();
+    const assistance = pending.clockDetails?.assistance;
     const guard = sql`${activePerson(device, person)} AND EXISTS (SELECT 1 FROM kiosk_clock_requests cr
       WHERE cr.id = ${pending.id} AND cr.interaction_id = ${person.interaction.id} AND cr.completed_at IS NULL
       AND cr.cancelled_at IS NULL AND cr.expires_at > ${time})
@@ -139,8 +141,8 @@ export function createKioskService(db: KioskOperatorDatabase, options: { secret:
       AND (${pending.eventType !== "in" || pending.requiresApproval ? 1 : 0} = 1 OR EXISTS (SELECT 1 FROM shifts s
         WHERE s.shift_type = 'work' AND s.id = ${pending.shiftId} AND s.employee_id = ${person.employee.id} AND s.role_id = ${pending.roleId}
         AND s.publication_id IS NOT NULL AND s.archived_at IS NULL))
-      AND ${pending.requiresApproval ? (approval ? approvalActor(approval, pending.roleId) : sql`0 = 1`) : sql`1 = 1`}`;
-    const assistance = pending.clockDetails?.assistance;
+      AND ${pending.requiresApproval ? (approval ? approvalActor(approval, pending.roleId) : sql`0 = 1`) : sql`1 = 1`}
+      AND ${assistance && pending.eventType === "out" ? assistedOutPolicyGuard : sql`1 = 1`}`;
     if (assistance?.targetEventId) {
       const [saved] = await atomicBatch(db, [
         insertAssistance(assistance, pending.id, pending.createdAt, pending.explanation,

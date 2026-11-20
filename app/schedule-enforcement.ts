@@ -160,7 +160,7 @@ export function clockInTiming(currentTime: number, scheduledTime: number, settin
 }
 
 export function automaticClockOutAt(scheduledEnd: number, settings: ScheduleEnforcement): number | null {
-  return settings.automaticClockOut ? scheduledEnd + settings.automaticClockOutMinutes * 60000 : null;
+  return settings.automaticClockOut && !settings.breakWaivers ? scheduledEnd + settings.automaticClockOutMinutes * 60000 : null;
 }
 
 export function workWeekOffset(day: number, weekStart: number) {

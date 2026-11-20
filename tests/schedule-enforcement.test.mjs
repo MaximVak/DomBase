@@ -87,6 +87,7 @@ test("automatic clock-outs use configured delay, can be disabled, and never dupl
   const due = scheduledEnd + 30 * 60000;
   assert.equal(app.applyAutomaticClockOuts(state, due - 1, settings), state);
   assert.equal(app.applyAutomaticClockOuts(state, due, { ...settings, automaticClockOut: false }), state);
+  assert.equal(app.applyAutomaticClockOuts(state, due, { ...settings, breakWaivers: true }), state);
   const updated = app.applyAutomaticClockOuts(state, due, settings);
   assert.equal(updated.clockEvents.length, 2);
   assert.equal(updated.clockEvents[0].at, new Date(due).toISOString());

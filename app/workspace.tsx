@@ -8398,8 +8398,8 @@ function ScheduleEnforcementPanel({ settings, dirty, message, onChange, onSave }
       onChange={(event) => onChange({ [field]: Number(event.target.value) })}
     />
   );
-  const checkbox = (field: "blockEarlyClockIn" | "requireEarlyClockInExplanation" | "requireLateClockInExplanation" | "requireClockOutExplanation" | "requireUnscheduledExplanation" | "noShowAlerts" | "automaticClockOut" | "lateAttendanceAlerts" | "assistedClockIn" | "assistedClockOut" | "clockOutReminders" | "clockOutReminderEmail", label: string) => (
-    <input type="checkbox" aria-label={label} checked={settings[field]} onChange={(event) => onChange({ [field]: event.target.checked })} />
+  const checkbox = (field: "blockEarlyClockIn" | "requireEarlyClockInExplanation" | "requireLateClockInExplanation" | "requireClockOutExplanation" | "requireUnscheduledExplanation" | "noShowAlerts" | "automaticClockOut" | "lateAttendanceAlerts" | "assistedClockIn" | "assistedClockOut" | "clockOutReminders" | "clockOutReminderEmail", label: string, paused = false) => (
+    <input type="checkbox" aria-label={label} checked={settings[field] && !paused} disabled={paused} onChange={(event) => onChange({ [field]: event.target.checked })} />
   );
   return (
     <form className="panel settings-enforcement-panel" onSubmit={onSave}>
@@ -8475,8 +8475,9 @@ function ScheduleEnforcementPanel({ settings, dirty, message, onChange, onSave }
         <div className="enforcement-rule">
           <label className="enforcement-rule-line">{checkbox("assistedClockIn", "Allow missed clock-in reports")}<span>Allow missed clock-in reports</span></label>
           <p>Employees can report when they started after the late threshold. The reported start counts while a manager reviews it.</p>
-          <label className="enforcement-rule-line">{checkbox("assistedClockOut", "Allow missed clock-out reports")}<span>Allow missed clock-out reports</span></label>
-          <p>Reports submitted within 15 minutes after the scheduled end are approved automatically. Other reports go to a manager.</p>
+          <label className="enforcement-rule-line">{checkbox("assistedClockOut", "Allow missed clock-out reports", settings.breakWaivers)}<span>Allow missed clock-out reports</span></label>
+          <p>{settings.breakWaivers ? "Paused while meal break waivers are enabled. Managers can correct clock-out times in Timesheets."
+            : "Reports submitted within 15 minutes after the scheduled end are approved automatically. Other reports go to a manager."}</p>
         </div>
         <div className="enforcement-rule">
           <label className="enforcement-rule-line">{checkbox("clockOutReminders", "Send clock-out reminders")}<span>Send clock-out reminders</span></label>
@@ -8497,11 +8498,12 @@ function ScheduleEnforcementPanel({ settings, dirty, message, onChange, onSave }
         </div>
         <div className="enforcement-rule">
           <div className="enforcement-rule-line">
-            <label>{checkbox("automaticClockOut", "Automatically clock out team members")}<span>Automatically clock out team members</span></label>
-            {minuteInput("automaticClockOutMinutes", "Automatic clock-out delay in minutes", !settings.automaticClockOut)}
+            <label>{checkbox("automaticClockOut", "Automatically clock out team members", settings.breakWaivers)}<span>Automatically clock out team members</span></label>
+            {minuteInput("automaticClockOutMinutes", "Automatic clock-out delay in minutes", !settings.automaticClockOut || settings.breakWaivers)}
             <span>minutes after their scheduled shift ends</span>
           </div>
-          <p>Records the automatic clock-out time in Timesheets and flags the entry in Events for manager review.</p>
+          <p>{settings.breakWaivers ? "Paused while meal break waivers are enabled."
+            : "Records the automatic clock-out time in Timesheets and flags the entry in Events for manager review."}</p>
         </div>
       </div>
       {message ? <p className="enforcement-save-message" role="status">{message}</p> : null}

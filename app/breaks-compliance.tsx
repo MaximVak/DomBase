@@ -72,7 +72,7 @@ export function BreaksCompliancePanel({ afterHours, minutes, mandatory, controls
           <BreakOption label="Missed break reports" checked={controls.missedBreakReports} onToggle={missedBreakReports => onChange({ missedBreakReports })}
             description="Ask employees at clock-out to report required breaks they missed or took without recording." />
           <BreakOption label="Meal break waivers" checked={controls.breakWaivers} onToggle={breakWaivers => onChange({ breakWaivers })}
-            description="Offer voluntary waivers to eligible employees with waiver access enabled in their profiles. The clock checks the hours worked and any earlier meal." />
+            description="Offer voluntary waivers to eligible employees when they clock out. Automatic clock-out and missed clock-out reports are paused while waivers are enabled." />
           <BreakOption label="Prevent early return from breaks" checked={controls.blockEarlyBreakReturn} onToggle={blockEarlyBreakReturn => onChange({ blockEarlyBreakReturn })}
             description="Wait until the break is complete. Employees who already resumed work can record the actual return." />
 

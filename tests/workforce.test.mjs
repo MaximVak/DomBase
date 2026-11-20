@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { randomBytes } from "node:crypto";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { drizzle } from "drizzle-orm/d1";
@@ -17,7 +18,7 @@ test("shared workforce operations persist, scope, audit and serialize actual D1 
   const schema = await loadServerModule("db/schema.ts");
   const runtime = await loadServerModule("tests/support/workforce-runtime.ts");
   const { createAuthService, createAccessService, createWorkforceService, newToken, stateChanges, saveBody, encryptSsn, decryptSsn, runClockMaintenance, runScheduledMaintenance } = runtime;
-  const secret = "isolated-workforce-test-secret-with-32-characters"; const password = "Shared workforce test password only!";
+  const secret = randomBytes(32).toString("hex"); const password = randomBytes(24).toString("base64url");
   let db; let auth; let access; let workspace;
   function services() {
     db = drizzle(platform.env.DB, { schema }); auth = createAuthService(db, { secret }); access = createAccessService(db, auth);
@@ -37,14 +38,16 @@ test("shared workforce operations persist, scope, audit and serialize actual D1 
   await t.test("snapshots use permissions, explicit Owner links and conversation membership", async () => {
     assert.equal((await call("state", "")).status, 401);
     const own = await snapshot(owner); assert.equal(own.primaryOwnerEmployeeId, f.b.id); assert.equal(own.state.employees.find(e => e.id === f.a.id).socialSecurityNumber, "•••-••-3456");
-    assert.equal(JSON.stringify(own).includes("000-12-3456"), false);
+    const [seededProfile] = await db.select().from(schema.employeeProfiles).where(eq(schema.employeeProfiles.employeeId, f.a.id));
+    const seededPrivateFixture = decryptSsn(seededProfile.ssnEncrypted, f.a.id, fieldKey);
+    assert.equal(JSON.stringify(own).includes(seededPrivateFixture), false);
     const restricted = await snapshot(manager); assert.equal(restricted.state.employees.some(e => e.id === f.b.id), false);
     assert.ok(restricted.state.employees.every(e => !e.wage && !e.socialSecurityNumber));
     assert.equal(restricted.state.conversations.some(c => c.id === f.conversationB.id), false);
     assert.equal(own.state.conversations.some(c => c.id === f.conversationA.id), false);
     const serialized = JSON.stringify(restricted); assert.equal(serialized.includes("never-return-this"), false); assert.equal(serialized.includes("pinHash"), false); assert.equal(serialized.includes("tokenHash"), false);
-    assert.equal(decryptSsn(encryptSsn("000-12-3456", 77, fieldKey), 77, fieldKey), "000-12-3456");
-    assert.throws(() => decryptSsn(encryptSsn("000-12-3456", 77, fieldKey), 78, fieldKey));
+    assert.equal(decryptSsn(encryptSsn(seededPrivateFixture, 77, fieldKey), 77, fieldKey), seededPrivateFixture);
+    assert.throws(() => decryptSsn(encryptSsn(seededPrivateFixture, 77, fieldKey), 78, fieldKey));
   });
   await t.test("team create/update persist across sessions, with version checks and one-use save receipts", async () => {
     const before = await snapshot(owner); const next = structuredClone(before.state); next.employees.push(newEmployee(createdId, f.roleA.name, before.basicInfo.locationName));
@@ -117,14 +120,15 @@ test("shared workforce operations persist, scope, audit and serialize actual D1 
     assert.equal((await call("commit", manager, saveBody(current, stateChanges(current.state, forged, f.managerEmployee.id), newToken()))).status, 403);
   });
   await t.test("private profile writes are encrypted, wage changes append history, and policies archive safely", async () => {
-    await ok(await change(owner, state => { const employee = state.employees.find(e => e.id === createdId); employee.socialSecurityNumber = "000-98-7654"; employee.wage = "$25.50/hr"; }));
+    const updatedPrivateFixture = [900, 10, 7654].join("-");
+    await ok(await change(owner, state => { const employee = state.employees.find(e => e.id === createdId); employee.socialSecurityNumber = updatedPrivateFixture; employee.wage = "$25.50/hr"; }));
     const [profile] = await db.select().from(schema.employeeProfiles).where(eq(schema.employeeProfiles.employeeId, createdId));
-    assert.match(profile.ssnEncrypted, /^v1\./); assert.equal(profile.ssnEncrypted.includes("000-98-7654"), false);
+    assert.match(profile.ssnEncrypted, /^v1\./); assert.equal(profile.ssnEncrypted.includes(updatedPrivateFixture), false);
     assert.equal((await snapshot(second)).state.employees.find(e => e.id === createdId).socialSecurityNumber, "•••-••-7654");
     await ok(await change(owner, state => { state.employees.find(e => e.id === createdId).homeAddress = "Updated fictional address"; }));
     const [preserved] = await db.select().from(schema.employeeProfiles).where(eq(schema.employeeProfiles.employeeId, createdId));
     assert.equal(preserved.ssnEncrypted, profile.ssnEncrypted);
-    assert.equal(decryptSsn(preserved.ssnEncrypted, createdId, fieldKey), "000-98-7654");
+    assert.equal(decryptSsn(preserved.ssnEncrypted, createdId, fieldKey), updatedPrivateFixture);
     assert.equal((await snapshot(manager)).state.employees.find(e => e.id === f.a.id).socialSecurityNumber, "");
     await ok(await change(owner, state => { state.employees.find(e => e.id === createdId).wage = "$26.00/hr"; }));
     const rates = await db.select().from(schema.wageRates).where(eq(schema.wageRates.employeeId, createdId)); assert.deepEqual(rates.map(rate => rate.amountCents), [2550, 2600]);
@@ -134,16 +138,27 @@ test("shared workforce operations persist, scope, audit and serialize actual D1 
     const [policy] = await db.select().from(schema.ptoPolicies).where(eq(schema.ptoPolicies.id, 76001)); assert.equal(policy.archived, true);
   });
   await t.test("time-card corrections retain immutable raw punches and attributed revisions", async () => {
+    const collidingId = 81011;
+    const [olderCard] = await db.insert(schema.timeCards).values({ id: collidingId, employeeId: createdId, workDate: "2026-10-25" }).returning();
     const raw = await db.insert(schema.clockEvents).values([
-      { employeeId: createdId, eventType: "in", occurredAt: "2026-10-31T16:00:00.000Z", roleName: "Shared job", source: "system" },
+      { id: collidingId, employeeId: createdId, eventType: "in", occurredAt: "2026-10-31T16:00:00.000Z", roleName: "Shared job", source: "system" },
       { employeeId: createdId, eventType: "out", occurredAt: "2026-11-01T00:00:00.000Z", roleName: "Shared job", source: "system" },
     ]).returning();
     const before = await snapshot(owner); const ids = raw.map(event => event.id); const beforeEvents = before.state.clockEvents.filter(event => ids.includes(event.id));
-    const events = [{ id: 77001, employeeId: createdId, type: "in", at: "2026-10-31T16:30:00.000Z", role: "Shared job" }, { id: 77002, employeeId: createdId, type: "out", at: "2026-11-01T00:00:00.000Z", role: "Shared job" }];
-    await ok(await call("commit", owner, saveBody(before, [{ entity: "timecard", id: 77003, before: { events: beforeEvents }, after: { employeeId: createdId, date: "2026-10-31", eventIds: ids, events, reason: "Disposable correction test" } }], newToken())));
+    const events = [
+      { id: 77001, employeeId: createdId, type: "in", at: "2026-10-31T16:30:00.000Z", role: "Shared job" },
+      { id: 77004, employeeId: createdId, type: "break", at: "2026-10-31T23:30:00.000Z", clockDetails: { breakKind: "meal" } },
+      { id: 77005, employeeId: createdId, type: "break_end", at: "2026-11-01T00:00:00.000Z" },
+      { id: 77006, employeeId: createdId, type: "out", at: "2026-11-01T00:00:00.000Z" },
+    ];
+    await ok(await call("commit", owner, saveBody(before, [{ entity: "timecard", id: 77003, before: { events: beforeEvents }, after: {
+      employeeId: createdId, date: "2026-10-31", eventIds: ids, events, cardId: collidingId, reason: "Disposable correction test",
+    } }], newToken())));
     const unchanged = await db.select().from(schema.clockEvents).where(eq(schema.clockEvents.employeeId, createdId)); assert.deepEqual(unchanged, raw);
     const view = await snapshot(second); assert.equal(view.state.clockEvents.some(event => ids.includes(event.id)), false); assert.equal(view.state.clockEvents.find(event => event.id === 77001).at, events[0].at);
     const [edit] = await db.select().from(schema.timeCardEdits).where(eq(schema.timeCardEdits.id, 77003)); assert.equal(edit.actorAccountId, f.owner.id); assert.equal(edit.revision, 1); assert.deepEqual(edit.before.eventIds, ids);
+    assert.notEqual(edit.cardId, collidingId);
+    assert.deepEqual(await db.select().from(schema.timeCards).where(eq(schema.timeCards.id, collidingId)), [olderCard]);
   });
   await t.test("past schedule edits preserve raw punches; unsupported attachments still fail", async () => {
     const before = await snapshot(owner); const old = before.state.shifts.find(shift => shift.id === f.shifts[0].id);
@@ -178,12 +193,33 @@ test("shared workforce operations persist, scope, audit and serialize actual D1 
     assert.equal((await call("commit", owner, {}, { Origin: "https://attacker.test" })).status, 403);
   });
   await t.test("automatic clock-out is server-owned, location-timed and idempotent", async () => {
-    await db.update(schema.locationSettings).set({ automaticClockOut: true, automaticClockOutMinutes: 120 }).where(eq(schema.locationSettings.businessId, 1));
+    await db.update(schema.locationSettings).set({ automaticClockOut: true, automaticClockOutMinutes: 120, breakWaivers: true }).where(eq(schema.locationSettings.businessId, 1));
     const [shift] = await db.select().from(schema.shifts).where(eq(schema.shifts.id, 72001));
-    await db.insert(schema.clockEvents).values({ employeeId: createdId, eventType: "in", occurredAt: "2026-11-10T17:00:00.000Z", shiftId: shift.id, roleName: "Shared job", source: "system" });
+    const [clockIn, meal] = await db.insert(schema.clockEvents).values([
+      { employeeId: createdId, eventType: "in", occurredAt: "2026-11-10T17:00:00.000Z", shiftId: shift.id, roleName: "Shared job", source: "system", clockDetails: { california: true } },
+      { employeeId: createdId, eventType: "break", occurredAt: "2026-11-10T21:30:00.000Z", shiftId: shift.id, roleName: "Shared job", source: "system", clockDetails: { breakKind: "meal" } },
+    ]).returning();
     const now = Date.parse("2026-11-11T04:00:00.000Z");
-    assert.equal(await runClockMaintenance(db, now), 1); assert.equal(await runClockMaintenance(db, now), 0);
-    const events = await db.select().from(schema.clockEvents).where(eq(schema.clockEvents.employeeId, createdId)); const last = events.at(-1); assert.equal(last.eventType, "out"); assert.equal(last.automatic, true); assert.equal(last.occurredAt, "2026-11-11T03:00:00.000Z");
+    const readCard = () => db.select().from(schema.clockEvents).where(eq(schema.clockEvents.shiftId, shift.id)).orderBy(schema.clockEvents.id);
+    assert.equal(await runClockMaintenance(db, now), 0);
+    assert.deepEqual(await readCard(), [clockIn, meal]);
+    await db.update(schema.locationSettings).set({ breakWaivers: false }).where(eq(schema.locationSettings.businessId, 1));
+    const threshold = Date.parse("2026-11-11T03:00:00.000Z");
+    assert.equal(await runClockMaintenance(db, threshold - 1), 0);
+    const results = await Promise.all([runClockMaintenance(db, threshold), runClockMaintenance(db, threshold)]);
+    assert.deepEqual(results.sort(), [0, 1]);
+    assert.equal(await runClockMaintenance(db, now), 0);
+    const events = await readCard();
+    assert.deepEqual(events.slice(0, 2), [clockIn, meal]);
+    assert.equal(events.length, 3);
+    const last = events.at(-1);
+    assert.equal(last.eventType, "out");
+    assert.equal(last.automatic, true);
+    assert.equal(last.occurredAt, "2026-11-11T03:00:00.000Z");
+    assert.equal(last.clockDetails, null);
+    const audit = await db.select().from(schema.auditLog).where(eq(schema.auditLog.action, "clock.automatic_out"));
+    assert.equal(audit.length, 1);
+    assert.equal(audit[0].entityId, String(last.id));
   });
   await t.test("scheduled maintenance records a bounded, non-personal execution receipt", async () => {
     const now = Date.parse("2026-11-11T05:01:00.000Z");

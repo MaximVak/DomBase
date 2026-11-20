@@ -86,6 +86,7 @@ export function TimeCardEditor(props: Props) {
             <h3 id="ts-card-breaks-title">Breaks ({breaks.length})</h3>
             <h4>Paid rest breaks ({Math.round(preview.restMinutes)} min)</h4>
             <div className="ts-card-break-notice"><span className="ts-card-info" aria-hidden="true">i</span><span>Edit paid rest and unpaid meal intervals below.</span><button type="button" onClick={props.onBreakSettings}>Go to Settings</button></div>
+            {breaks.some(entry => entry.confirmEnd) && <p>Automatic clock-out left a break open. Enter when the break actually ended, or remove the break if it did not occur.</p>}
             <h4>Meal breaks ({Math.round(preview.breakMinutes)} min)</h4>
             <div className="ts-card-break-list">{breaks.map((entry, index) => <div className="ts-card-break-entry" key={entry.id}>
               <label>Break type<select value={entry.kind ?? "meal"} onChange={event => updateBreak(entry.id, { kind: event.target.value === "rest" ? "rest" : "meal" })}><option value="meal">Unpaid meal</option><option value="rest">Paid rest</option></select></label>

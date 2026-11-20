@@ -270,6 +270,9 @@ test("registered tablets, PIN sessions and action-scoped approvals use isolated 
       await ok(await send("clock", actor.cookie, { eventType: "break_end", explanation: "", details: { offDutyExtension: true } }));
       at = fixed("14:20");
       actor = await sign();
+      assert.equal(actor.data.assist.out, false);
+      assert.equal((await send("clock", actor.cookie, { eventType: "out", explanation: "I forgot to sign out.",
+        details: { assisted: { date, time: "14:15" } } })).status, 422);
       assert.deepEqual(actor.data.breakView.issues, [{ kind: "meal", slot: 1, canWaive: true }]);
       const waiver = { kind: "meal", slot: 1, outcome: "waived", reason: "Voluntarily elected to waive the first meal." };
       const exit = reports => ({ eventType: "out", explanation: "", details: { reports } });
@@ -405,6 +408,15 @@ test("registered tablets, PIN sessions and action-scoped approvals use isolated 
     assert.ok(emails.every(message => message.to === f.multi.email && message.subject === "DomBase clock-out reminder"));
     assert.equal((await reminders()).filter(row => row.email === "accepted").length, 3);
     at = fixed("17:01");
+    await db.update(schema.locationSettings).set({ breakWaivers: true });
+    const paused = await sign();
+    assert.equal(paused.data.assist.out, false);
+    assert.equal(paused.data.assist.recovery, false);
+    assert.equal((await send("clock", paused.cookie, report("out", "15:01"))).status, 422);
+    const blockedReplay = { ...report("out", "15:01"), ticket: paused.data.replay.ticket, attemptedAt: at };
+    assert.deepEqual(await ok(await send("sync", deviceCookie, blockedReplay)), { outcome: "review" });
+    assert.deepEqual(await db.select().from(schema.clockEvents).where(eq(schema.clockEvents.shiftId, afternoon.id)), automatic);
+    await db.update(schema.locationSettings).set({ breakWaivers: false });
     const recover = await sign();
     assert.equal(recover.data.assist.recovery, true);
     const submission = { ...report("out", "15:01"), ticket: recover.data.replay.ticket, attemptedAt: at };

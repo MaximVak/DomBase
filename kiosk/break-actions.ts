@@ -65,22 +65,23 @@ async function breakIssues(db: KioskOperatorDatabase, employeeId: number, time: 
   const start = zonedTimestamp(workplaceDate(time, policy.zone), "00:00", policy.zone);
   const isoStart = new Date(start).toISOString();
   const [events, [employeeSetting]] = await Promise.all([
-    db.all<{ event_type: ClockType; occurred_at: string; clock_details: string | null }>(sql`
+    db.all<{ event_type: ClockType; occurred_at: string; automatic: number; clock_details: string | null }>(sql`
       WITH effective AS (
-        SELECT c.id,c.employee_id,c.event_type,c.clock_details,
+        SELECT c.id,c.employee_id,c.event_type,c.automatic,c.clock_details,
           COALESCE(CASE WHEN a.status!='pending' OR c.event_type='in' THEN COALESCE(a.decided_time,a.requested_at) END,c.occurred_at) AS occurred_at
         FROM clock_events c LEFT JOIN assisted_clock_reports a ON a.event_id=c.id WHERE c.employee_id=${employeeId}
       ), prior AS (SELECT id, event_type FROM effective
         WHERE employee_id = ${employeeId} AND event_type IN ('in','out') AND julianday(occurred_at) < julianday(${isoStart})
         ORDER BY julianday(occurred_at) DESC, id DESC LIMIT 1)
-      SELECT event_type, occurred_at, clock_details FROM effective
+      SELECT event_type, occurred_at, automatic, clock_details FROM effective
       WHERE employee_id = ${employeeId} AND julianday(occurred_at) <= julianday(${new Date(time).toISOString()})
         AND (occurred_at >= ${isoStart} OR id >= (SELECT id FROM prior WHERE event_type = 'in'))
       ORDER BY julianday(occurred_at), id`),
     db.select({ canWaive: schema.employeeSettings.canWaiveMissedBreaks }).from(schema.employeeSettings).where(eq(schema.employeeSettings.employeeId, employeeId)),
   ]);
   const converted = events.map(event => ({
-    type: event.event_type, at: Date.parse(event.occurred_at), details: event.clock_details ? JSON.parse(event.clock_details) as ClockDetails : undefined,
+    type: event.event_type, at: Date.parse(event.occurred_at), automatic: !!event.automatic,
+    details: event.clock_details ? JSON.parse(event.clock_details) as ClockDetails : undefined,
   }));
   const reported = converted.flatMap(event => event.type === "out" ? event.details?.reports ?? [] : []);
   const missing = requiredBreaks(inspectBreaks(converted, start, time), policy, policy.breakWaivers && employeeSetting?.canWaive === true);

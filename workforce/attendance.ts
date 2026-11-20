@@ -123,7 +123,7 @@ export async function createAttendanceNotices(db: Database, now = Date.now()) {
         for (const [slot, delay] of intervals.entries()) {
           const due = current.end + delay * minute;
           if (now < due || now > due + 24 * 3600000) continue;
-          queue(`clock-out-${row.sessionInId}-${slot}`, "Clock-out reminder", "Your scheduled shift has ended. Use the clock to record or report when you finished.", policy.clockOutReminderEmail,
+          queue(`clock-out-${row.sessionInId}-${slot}`, "Clock-out reminder", "Your scheduled shift has ended. Use the time clock to clock out.", policy.clockOutReminderEmail,
             sql`EXISTS(SELECT 1 FROM location_settings WHERE clock_out_reminders=1)
               AND NOT EXISTS(SELECT 1 FROM employee_settings WHERE employee_id=${row.employeeId} AND send_location_alerts=0)`);
         }

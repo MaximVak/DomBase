@@ -8,7 +8,7 @@ export type TimesheetEvent = { id: number; employeeId: number; type: "in" | "out
 export type TimesheetShift = { shiftType?: "work" | "day_off"; employeeId: number; date: string; start: string; end: string; role: string };
 export type TimesheetAdjustment = { id: number; employeeId: number; date: string; hours: number };
 export type TimesheetPto = { employeeId: number; startDate: string; endDate: string; compensation: string; status: string };
-export type TimeCardBreak = { id: number; start: string; end: string; nextDay: boolean; kind?: BreakKind };
+export type TimeCardBreak = { id: number; start: string; end: string; nextDay: boolean; kind?: BreakKind; confirmEnd?: boolean };
 export type TimeCardDraft = { employeeId: number; date: string; start: string; end: string; nextDay: boolean; breakMinutes: number; role: string; note: string; eventIds: number[]; breaks?: TimeCardBreak[]; cardId?: number };
 export type TimeCardEdit = { id: number; employeeId: number; date: string; at: string; actor: string; before: string; after: string; cardId?: number };
 export type Rounding = "actual" | 5 | 10 | 15;
@@ -70,7 +70,8 @@ export function buildTimeCards(input: {
         if (event.type === "break" && !breakStart) breakStart = event;
         if (event.type === "break_end") closeBreak(Date.parse(event.at), event.clockDetails);
       }
-      closeBreak(end);
+      const unconfirmedBreak = !!breakStart && closed && session.at(-1)?.automatic === true;
+      if (!unconfirmedBreak) closeBreak(end);
       const california = session.some(event => event.clockDetails?.california || event.clockDetails?.breakKind);
       for (let date = localDate(new Date(start)) < contextStart ? contextStart : localDate(new Date(start)); date <= contextEnd && date <= localDate(new Date(end)); date = addDays(date, 1)) {
         if (date < contextStart) continue;
@@ -85,6 +86,7 @@ export function buildTimeCards(input: {
         card.metrics.spread = elapsed / HOUR;
         if (!closed) card.issues.push("Missing clock-out");
         if (session.some(event => event.automatic)) card.issues.push("Automatic clock-out");
+        if (unconfirmedBreak) card.issues.push("Confirm unfinished break");
         if (!california && input.mandatoryMealBreak && elapsed / HOUR >= input.mealBreakAfterHours && breakMs < 30 * 60000) card.issues.push("Missing breaks");
         if (session.some(event => event.clockDetails?.earlyWork)) card.issues.push("Early work reported");
         if (session.some(event => event.assistedStatus === "pending")) card.issues.push("Clock time needs review");
@@ -106,7 +108,7 @@ export function buildTimeCards(input: {
     flush(false);
     const typed = events.filter(event => event.clockDetails?.california || event.clockDetails?.breakKind);
     if (typed.length) {
-      const history = events.map(event => ({ type: event.type, at: Date.parse(event.at), details: event.clockDetails }));
+      const history = events.map(event => ({ type: event.type, at: Date.parse(event.at), automatic: event.automatic, details: event.clockDetails }));
       const typedIds = new Set(typed.map(event => event.id));
       const byDate = new Map<string, TimeCard>();
       for (const card of cards) if (card.end && card.eventIds.some(id => typedIds.has(id))) byDate.set(card.date, card);

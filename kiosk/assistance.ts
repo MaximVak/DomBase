@@ -30,6 +30,7 @@ export function shiftBounds(shift: Pick<Shift, "date" | "startTime" | "endTime">
 }
 
 export const isAutomaticRecovery = (previous: Event | null, draft: ClockDraft) => previous?.eventType === "out" && previous.automatic && draft.eventType === "out" && !!draft.details?.assisted;
+export const assistedOutPolicyGuard = sql`NOT EXISTS (SELECT 1 FROM location_settings WHERE business_id=1 AND (assisted_clock_out=0 OR break_waivers=1))`;
 
 export async function planAssistance(db: KioskOperatorDatabase, employeeId: number, previous: Event | null, draft: ClockDraft, at: number, policy: ClockPolicy, shift: Shift | null): Promise<PlannedAssistance | undefined> {
   const submitted = draft.details?.assisted;
@@ -49,7 +50,7 @@ export async function planAssistance(db: KioskOperatorDatabase, employeeId: numb
     }
     return { requestedAt: new Date(when).toISOString(), status: "pending" };
   }
-  if (!policy.assistedClockOut || !previous) throw new AuthError(422, "Assisted clock-out is unavailable.");
+  if (!policy.assistedClockOut || policy.breakWaivers || !previous) throw new AuthError(422, "Assisted clock-out is unavailable.");
   const recovery = isAutomaticRecovery(previous, draft);
   const [prior, work] = await Promise.all([
     recovery ? db.get<{ at: string }>(sql`SELECT COALESCE(CASE WHEN a.status != 'pending' OR e.event_type='in' THEN COALESCE(a.decided_time,a.requested_at) END,e.occurred_at) AS at
