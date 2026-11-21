@@ -17,6 +17,7 @@ import { publicationPreview } from "./schedule-publication";
 import { scheduleTools } from "./schedule-tools";
 import { readScheduleConflicts } from "./conflicts";
 import { readSchedulePrint } from "./schedule-print";
+import { readAccountantReport } from "./accountant-export";
 import { timeOffChange } from "./time-off";
 import { conversationChange } from "./messages";
 import { timecardChange } from "./timecards";
@@ -66,6 +67,10 @@ export function createWorkforceService(db: Database, access: ReturnType<typeof c
       if (action === "schedule-print") {
         if (request.method !== "GET") return json({ error: "Method not allowed." }, 405, { Allow: "GET" });
         return json(await readSchedulePrint(db, ctx, url, options.fieldKey, now()));
+      }
+      if (action === "accountant-export") {
+        if (request.method !== "GET") return json({ error: "Method not allowed." }, 405, { Allow: "GET" });
+        return json(await readAccountantReport(db, ctx, url, options.fieldKey, now()));
       }
       if (action === "shift-exchanges") {
         if (request.method === "GET") return json(await readManagerExchanges(db, ctx, url, options));

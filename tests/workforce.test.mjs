@@ -425,6 +425,71 @@ test("shared workforce operations persist, scope, audit and serialize actual D1 
     await ok(await call("commit", manager, saveBody(view, [{ entity: "schedule-publish", id: 1, before: view.state.scheduleDraftsByManager[f.managerEmployee.id], after: { publish: true } }], newToken())));
     const saved = (await snapshot(owner)).state.shifts.find(shift => shift.id === 79001); assert.equal(saved.end, "18:00"); assert.equal(saved.notes, "Preserve this private shift note");
   });
+  await t.test("accountant report uses full workweeks and paid PTO with company and export grants", async () => {
+    const period = { start: "2026-10-12", end: "2026-10-18" };
+    const saturday = { start: "2026-10-17", end: "2026-10-17" };
+    await db.update(schema.locationSettings).set({ workWeekStart: 1, overtimeDailyHours: 8, overtimeWeeklyHours: 40,
+      overtimeDoubleEnabled: true, overtimeDoubleHours: 12 }).where(eq(schema.locationSettings.businessId, 1));
+    const baseAt = date => Date.parse(`${date}T16:00:00.000Z`);
+    const punches = (employeeId, roleName, date, duration, automatic = false) => [
+      { employeeId, roleName, eventType: "in", occurredAt: new Date(baseAt(date)).toISOString(), source: "system", clockDetails: { california: true } },
+      { employeeId, roleName, eventType: "out", occurredAt: new Date(baseAt(date) + duration * 3600000).toISOString(), source: "system", automatic },
+    ];
+    await db.update(schema.employees).set({ payrollId: "00127" }).where(eq(schema.employees.id, f.a.id));
+    await db.insert(schema.wageRates).values({ employeeId: f.b.id, roleId: f.roleB.id, amountCents: 7800000, basis: "annual_salary",
+      overtimeExempt: true, effectiveDate: period.start, recordedByAccountId: f.owner.id });
+    for (const date of ["2026-10-12", "2026-10-13", "2026-10-14", "2026-10-15", "2026-10-16"]) {
+      await db.insert(schema.clockEvents).values(punches(f.a.id, f.roleA.name, date, 8));
+    }
+    await db.insert(schema.clockEvents).values([
+      ...punches(f.a.id, f.roleA.name, saturday.start, 10),
+      ...punches(f.b.id, f.roleB.name, saturday.start, 14),
+      ...punches(f.multi.id, f.roleB.name, saturday.start, 14),
+      ...punches(f.managerEmployee.id, f.roleA.name, saturday.start, 2, true),
+    ]);
+    const leave = { employeeId: f.a.id, compensation: "paid", startDate: saturday.start, endDate: saturday.end, reason: "vacation", explanation: "Private test explanation" };
+    await db.insert(schema.ptoRequests).values([
+      { ...leave, status: "approved", startTime: "17:00", endTime: "19:00" },
+      { ...leave, status: "approved", startTime: "18:00", endTime: "20:00" },
+      { ...leave, status: "approved", compensation: "unpaid" },
+      { ...leave, status: "pending" },
+    ]);
+    const route = "accountant-export?" + new URLSearchParams(period);
+    assert.equal((await call(route, "")).status, 401);
+    assert.equal((await call(route, manager)).status, 403);
+    const accountant = await login(f.generalManager.email);
+    assert.equal((await call(route, accountant)).status, 403);
+    await db.insert(schema.accountPermissions).values([
+      { accountId: f.manager.id, permission: "exports.timesheets", allowed: true },
+      { accountId: f.generalManager.id, permission: "exports.timesheets", allowed: true },
+      { accountId: f.generalManager.id, permission: "time_off.read", allowed: false },
+    ]);
+    try {
+      assert.equal((await call(route, manager)).status, 403);
+      assert.equal((await call(route + "&employee=1", owner)).status, 400);
+      const response = await call(route, accountant);
+      assert.equal(response.headers.get("cache-control"), "no-store");
+      const report = await ok(response);
+      assert.deepEqual(report, await ok(await call(route, owner)));
+      assert.equal(report.periodsPerYear, 52);
+      const rowFor = (data, employee) => data.rows.find(row => row.employeeId === employee.id);
+      const hours = row => [row.regular, row.overtime, row.doubleTime, row.pto, row.total];
+      assert.deepEqual(hours(rowFor(report, f.a)), [40, 10, 0, 3, 53]);
+      assert.equal(rowFor(report, f.a).payrollId, "00127");
+      assert.deepEqual(hours(rowFor(report, f.b)), [14, 0, 0, 0, 14]);
+      assert.equal(rowFor(report, f.b).salaryEligible, true);
+      assert.deepEqual(hours(rowFor(report, f.multi)), [8, 4, 2, 0, 14]);
+      assert.deepEqual(hours(rowFor(report, f.managerEmployee)), [null, null, null, 0, null]);
+      const day = await ok(await call("accountant-export?" + new URLSearchParams(saturday), accountant));
+      assert.equal(day.periodsPerYear, null);
+      assert.deepEqual(hours(rowFor(day, f.a)), [0, 10, 0, 3, 13]);
+      assert.equal(rowFor(day, f.b).salaryEligible, false);
+      assert.doesNotMatch(JSON.stringify(report), /7800000|Private test explanation|wageRates|shiftId|\btips\b/i);
+    } finally {
+      await db.delete(schema.accountPermissions).where(sql`(account_id = ${f.manager.id} AND permission = 'exports.timesheets')
+        OR (account_id = ${f.generalManager.id} AND permission IN ('exports.timesheets', 'time_off.read'))`);
+    }
+  });
   await t.test("restarting the local runtime preserves records and FK integrity", async () => {
     await platform.dispose(); platform = await open(); services(); owner = await login(f.owner.email); second = await login(f.secondOwner.email); manager = await login(f.manager.email);
     const view = await snapshot(second); assert.ok(view.state.employees.some(e => e.id === createdId)); assert.ok(view.state.shifts.some(s => s.id === 72001));

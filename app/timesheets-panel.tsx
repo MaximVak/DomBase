@@ -113,6 +113,8 @@ export function TimesheetsPanel(props: Props) {
   const ledgerScrollRef = useRef<HTMLDivElement>(null);
   const totalsScrollRef = useRef<HTMLDivElement>(null);
   const start = period === "day" ? day : range.start, end = period === "day" ? day : range.end;
+  const accountantExport = canExport && props.overtimeScope?.companyWide ? <a className="ts-text-button" target="_blank" rel="noopener noreferrer"
+    href={`/timesheets/accountant-export?${new URLSearchParams({ start, end })}`}>Accountant export</a> : null;
   const locks = useTimesheetLocks(props.manager && props.workspaceRevision !== undefined, start, end, props.workspaceRevision, props.onLocksSaved);
   const periodLocks = locks.data?.active.filter(lock => lock.employeeId === null) ?? [];
   const lockedKeys = new Set(locks.data?.active.filter(lock => lock.employeeId !== null).map(lock => lock.targetKey));
@@ -384,7 +386,7 @@ export function TimesheetsPanel(props: Props) {
   if (summary) return <TimesheetsSummary
     employees={members.filter(member => visibleCards.some(card => card.employeeId === member.id) || (showEmpty && (!roles.length || roles.includes(member.role)) && member.name.toLowerCase().includes(search.toLowerCase())))}
     canExport={canExport} showBreakPremiums={showBreakPremiums} cards={visibleCards} dateControl={dateControl} start={start} end={end}
-    rounding={props.rounding} clockDisplay={preference.clock} hoursDisplay={preference.hours} displayControl={displayControls} filtered={Boolean(roles.length || search)}
+    rounding={props.rounding} clockDisplay={preference.clock} hoursDisplay={preference.hours} displayControl={displayControls} accountantExport={accountantExport} filtered={Boolean(roles.length || search)}
     onBack={() => { setSummary(false); setMenu(null); props.onSummaryChange?.(false); setTimeout(() => triggerRef.current?.focus(), 0); }}
     onEditingChange={onEditingChange}
     onPayrollId={props.manager && props.canManagePayrollIds !== false ? props.onPayrollId : undefined}
@@ -410,7 +412,7 @@ export function TimesheetsPanel(props: Props) {
       </div>{canAdd ? <button className="ts-add-button" type="button" onClick={event => newCard(undefined, event.currentTarget)}>Add time card</button> : null}<button type="button" className="ts-primary" onClick={event => { triggerRef.current = event.currentTarget; setMenu(null); setSummary(true); props.onSummaryChange?.(true); }}>View summary</button></div></>}
 
     </div>
-    <div className="ts-display-strip">{displayControls}</div>
+    <div className="ts-display-strip">{displayControls}{accountantExport}</div>
     {(displayedPeriodLocks.length || period === "period" && locks.data?.canLockPeriod || locks.loadError || locks.feedback) ? <div className="ts-lock-bar">
       {displayedPeriodLocks.map(lock => <div key={lock.id} className="ts-lock-group">
         <span className="ts-lock-label"><TimesheetLockIcon />Pay period locked · {dateLabel(lock.startDate, true)} – {dateLabel(lock.endDate, true)}</span>

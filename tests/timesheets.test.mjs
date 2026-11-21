@@ -8,6 +8,39 @@ const at = (date, time) => new Date(`${date}T${time}:00`).toISOString();
 const base = { employees, shifts: [], adjustments: [], pto: [], events: [], start: "2026-08-03", end: "2026-08-09", now: new Date("2026-08-10T12:00:00").getTime(), rounding: "actual", weekStart: 1, mandatoryMealBreak: true, mealBreakAfterHours: 5 };
 function eventsFor(date, start, end, breakMinutes = 0, id = 1, nextDay = false) { return timeCardEvents({ employeeId: 1, date, start, end, nextDay, breakMinutes, role: "Sales", note: "", eventIds: [] }, id); }
 
+test("accountant CSV and native Excel preserve fixed columns, text IDs and editable salaried references", async () => {
+  const { accountantCells, accountantColumns } = await loadServerModule("workforce/accountant-report.ts");
+  const { accountantCsv, accountantWorkbook } = await loadServerModule("app/timesheets/accountant-export/files.ts");
+  const { read } = await import("xlsx");
+  const report = { period: { start: "2026-11-01", end: "2026-11-15" }, location: "Synthetic office", periodsPerYear: 24,
+    rows: [
+      { employeeId: 1, name: "Zoë Example", payrollId: "00007", regular: 80, overtime: 1.25, doubleTime: 0.5, pto: 2, total: 83.75, salaryEligible: true },
+      { employeeId: 2, name: "=Example", payrollId: "+123", regular: null, overtime: null, doubleTime: null, pto: 0, total: null, salaryEligible: false },
+    ] };
+  const recorded = accountantCells(report);
+  assert.deepEqual(recorded[0], accountantColumns);
+  assert.equal(accountantCells(report, new Map())[1][8], 86.67);
+  const revised = accountantCells(report, new Map([[1, 35]]));
+  assert.deepEqual(revised[1], [...recorded[1], 75.83]);
+  assert.equal(revised[2][7], "Review required");
+  assert.equal(revised[2][8], "");
+  assert.deepEqual(accountantCells({ ...report, periodsPerYear: null }, new Map([[1, 35]])), recorded);
+  const csv = accountantCsv(revised);
+  assert.match(csv, /^\uFEFF"Employee name","Payroll ID","Pay period"/);
+  assert.match(csv, /"Zoë Example","00007","2026-11-01 to 2026-11-15","80\.00","1\.25","0\.50","2\.00","83\.75","75\.83"/);
+  assert.match(csv, /"'=Example","'\+123"/);
+  const bytes = Buffer.from(await accountantWorkbook(revised));
+  assert.equal(bytes.subarray(0, 8).toString("hex"), "d0cf11e0a1b11ae1");
+  const sheet = read(bytes, { cellNF: true }).Sheets["Accountant timesheets"];
+  assert.equal(sheet.B2.t, "s");
+  assert.equal(sheet.B2.v, "00007");
+  assert.equal(sheet.A2.v, "Zoë Example");
+  assert.equal(sheet.J1, undefined);
+  assert.deepEqual([sheet.H2.t, sheet.H2.v, sheet.H2.z, sheet.I2.v], ["n", 83.75, "0.00", 75.83]);
+  assert.equal(sheet.A3.v, "=Example");
+  assert.equal(sheet.A3.f, undefined);
+});
+
 test("time cards deduct meal breaks, preserve raw hours, and round the preview", () => {
   const events = eventsFor("2026-08-03", "09:00", "17:07", 30);
   const actual = buildTimeCards({ ...base, events });
