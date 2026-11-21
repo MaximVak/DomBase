@@ -125,8 +125,9 @@ export function TimesheetsSummary(props: Props) {
   const ledgerColumns = <colgroup>{ledgerWidths.map((width, index) => <col key={index} style={{ width }} />)}</colgroup>;
   function syncLedgerScroll(source: HTMLDivElement, target: HTMLDivElement | null) { if (target && target.scrollLeft !== source.scrollLeft) target.scrollLeft = source.scrollLeft; }
   function reorder(from: string, to: string) {
+    if (from === to) return;
     setColumnOrder(current => moveColumn(current, from, to));
-    setAnnouncement(`${summaryColumns.find(column => column.id === from)?.label} moved to position ${columnOrder.indexOf(to) + 1}`);
+    setAnnouncement(`${summaryColumns.find(column => column.id === from)?.label} moved to position ${orderedColumns.findIndex(column => column.id === to) + 1}`);
   }
   const rows = summaryRows(props.employees, props.cards).sort((a, b) => {
     const key = displayMetricKey(sort.id, clockDisplay);
@@ -169,8 +170,10 @@ export function TimesheetsSummary(props: Props) {
           <div className="ts-option-list ts-summary-column-list">{orderedColumns.map((column, index) => <div className="ts-summary-column-option" key={column.id} onDragOver={event => { if (dragColumn.current) event.preventDefault(); }} onDrop={event => { event.preventDefault(); if (dragColumn.current) reorder(dragColumn.current, column.id); dragColumn.current = null; }}>
             <label><input type="checkbox" checked={columns.includes(column.id)} disabled={columns.length === 1 && columns.includes(column.id)} onChange={() => setColumns(current => current.includes(column.id) ? current.filter(id => id !== column.id) : [...current, column.id])} /><span>{columnLabel(column)}</span></label>
             <button type="button" className="ts-summary-column-handle" draggable aria-label={`Reorder ${column.label} column`} title="Drag to reorder, or use the arrow keys" onDragStart={event => { dragColumn.current = column.id; event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", column.id); }} onDragEnd={() => { dragColumn.current = null; }} onKeyDown={event => {
-              const target = event.key === "ArrowUp" ? index - 1 : event.key === "ArrowDown" ? index + 1 : event.key === "Home" ? 0 : event.key === "End" ? columnOrder.length - 1 : -1;
-              if (["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) { event.preventDefault(); if (columnOrder[target]) reorder(column.id, columnOrder[target]); }
+              if (!["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
+              event.preventDefault();
+              const target = event.key === "ArrowUp" ? index - 1 : event.key === "ArrowDown" ? index + 1 : event.key === "Home" ? 0 : orderedColumns.length - 1;
+              if (orderedColumns[target]) reorder(column.id, orderedColumns[target].id);
             }}><svg width="18" height="28" viewBox="0 0 18 28" aria-hidden="true" fill="currentColor">{[5, 14, 23].map(y => <g key={y}><circle cx="4" cy={y} r="3" /><circle cx="14" cy={y} r="3" /></g>)}</svg></button>
           </div>)}<button type="button" className="ts-text-button ts-summary-reset-columns" onClick={() => { setColumns(defaultColumns); setColumnOrder(summaryColumns.map(column => column.id)); setAnnouncement("Column visibility and order reset"); }}>Reset columns</button></div>
         </details><span className="sr-only" role="status">{announcement}</span></div></div>
