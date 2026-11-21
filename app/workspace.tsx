@@ -5368,6 +5368,9 @@ export default function Home({ account }: { account: DashboardAccount }) {
               <TimesheetsPanel
               onPeriodChange={setWorkspacePeriod}
               workspaceRevision={shared.data.revision}
+              displayAccountId={account.id}
+              publishedSchedule={shared.data.timesheetSchedule}
+              scheduleRoundingMinutes={state.hoursRoundingMinutes}
               payCalendar={shared.data.teamPeriod}
               canEdit={shared.data.permissions["timesheets.manage"]}
               canLockCards={shared.data.permissions["timesheets.manage"] && shared.data.permissions["timesheets.lock"]}

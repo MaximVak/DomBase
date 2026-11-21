@@ -308,6 +308,26 @@ test("shared workforce operations persist, scope, audit and serialize actual D1 
       await db.delete(schema.accountPermissions).where(sql`account_id = ${f.manager.id} AND permission = 'timesheets.manage'`);
     }
   });
+  await t.test("schedule rounding receives only published scoped shifts and the original punch link", async () => {
+    const date = "2026-11-06";
+    const [publication] = await db.insert(schema.schedulePublications).values({ version: 191, publishedByAccountId: f.owner.id }).returning();
+    const [visible, other, draft] = await db.insert(schema.shifts).values([
+      { employeeId: f.a.id, roleId: f.roleA.id, date, startTime: "09:00", endTime: "10:00", publicationId: publication.id },
+      { employeeId: f.b.id, roleId: f.roleB.id, date, startTime: "09:00", endTime: "10:00", publicationId: publication.id },
+      { employeeId: f.a.id, roleId: f.roleA.id, date, startTime: "11:00", endTime: "12:00" },
+    ]).returning();
+    const [punch] = await db.insert(schema.clockEvents).values([
+      { employeeId: f.a.id, shiftId: visible.id, roleName: f.roleA.name, eventType: "in", occurredAt: `${date}T16:58:00.000Z`, source: "system" },
+      { employeeId: f.a.id, shiftId: visible.id, roleName: f.roleA.name, eventType: "out", occurredAt: `${date}T18:00:00.000Z`, source: "system" },
+    ]).returning();
+    const full = await snapshot(owner);
+    const scoped = await snapshot(manager);
+    assert.ok(full.timesheetSchedule.some(shift => shift.id === other.id));
+    assert.ok(!full.timesheetSchedule.some(shift => shift.id === draft.id));
+    assert.deepEqual(scoped.timesheetSchedule.filter(shift => shift.date === date).map(shift => shift.id), [visible.id]);
+    assert.equal(scoped.state.clockEvents.find(event => event.id === punch.id).shiftId, visible.id);
+    assert.equal(scoped.state.clockEvents.find(event => event.id === punch.id).at, punch.occurredAt);
+  });
   await t.test("card locks, bulk locks and pay-period locks protect hours and retain scoped history", async () => {
     const range = { start: "2026-10-26", end: "2026-11-01" };
     const day = { start: "2026-10-28", end: "2026-10-28" };

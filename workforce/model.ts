@@ -154,6 +154,7 @@ export type Shift = {
 };
 
 export type TimeCardNote = { author: "employee" | "manager" | "recorded"; text: string };
+export type PublishedTimesheetShift = Pick<Shift, "id" | "employeeId" | "date" | "start" | "end" | "role">;
 
 export type ClockEvent = {
   id: number;
@@ -170,6 +171,7 @@ export type ClockEvent = {
   automatic?: boolean;
   role?: string;
   cardId?: number;
+  shiftId?: number;
 };
 
 export type OperationalAlert = {

@@ -1,4 +1,4 @@
-import type { BasicInfo, StaffState } from "./model";
+import type { BasicInfo, PublishedTimesheetShift, StaffState } from "./model";
 import type { ScheduleEnforcement } from "../app/schedule-enforcement";
 import type { PermissionMap } from "../access/policy";
 export type { BasicInfo, StaffState };
@@ -22,6 +22,7 @@ export type WorkspaceData = {
   dismissed: Record<number, string[]>;
   employeeVersions: Record<number, number>;
   teamPeriod?: import("../team/rules").PayCalendar;
+  timesheetSchedule?: PublishedTimesheetShift[];
 };
 export const defaultInfo: BasicInfo = { companyName: "Molding Mart", locationName: "Molding Mart", locationPhone: "", companyPhone: "", accountOwner: "", address1: "", address2: "", city: "Sacramento", stateProvince: "California", postalCode: "", country: "United States", timeZone: "America/Los_Angeles", businessType: "", businessCategory: "", website: "" };
 export const emptyState = (): StaffState => ({ employees: [], departments: [], shifts: [], scheduleEvents: [], clockEvents: [], hoursAdjustments: [], timeCardEdits: [], ptoRequests: [], ptoPolicies: [], conversations: [], scheduleUpdates: [], scheduleHasBeenPublished: false, pendingScheduleUpdateEmployeeIds: [], scheduleDraftsByManager: {}, availabilityRequests: [], hoursRoundingMinutes: 15 });

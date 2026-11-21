@@ -8,10 +8,11 @@ import { scheduledPaidMinutes } from "./schedule-estimates";
 import { inspectBreaks, requiredBreaks } from "../kiosk/break-rules";
 import type { BreakIssue, BreakKind, BreakReport, ClockDetails } from "../kiosk/break-rules";
 import { zonedTimestamp } from "../workforce/time";
-import type { ClockEvent, HoursRounding, HoursRoundingMinutes, TimeCardNote } from "../workforce/model";
+import type { ClockEvent, HoursRounding, HoursRoundingMinutes, PublishedTimesheetShift, TimeCardNote } from "../workforce/model";
 import { timeCardNotes } from "../workforce/timecard-notes";
+import { scheduleClockPreview, scheduleShiftBounds } from "./timesheets-display";
 export type TimesheetEmployee = { id: number; name: string; role: string; wage: string; active: boolean; terminated?: boolean; terminationDate?: string; wageRates?: WageRate[]; jobs?: { id: number; name: string }[]; payrollId?: string; legalFirstName?: string; legalMiddleName?: string; legalLastName?: string };
-export type TimesheetEvent = Pick<ClockEvent, "id" | "employeeId" | "type" | "at" | "explanation" | "automatic" | "role" | "cardId" | "clockDetails" | "assistedStatus" | "noteAuthor" | "carriedNotes">;
+export type TimesheetEvent = Pick<ClockEvent, "id" | "employeeId" | "type" | "at" | "explanation" | "automatic" | "role" | "cardId" | "shiftId" | "clockDetails" | "assistedStatus" | "noteAuthor" | "carriedNotes">;
 export type TimesheetShift = { shiftType?: "work" | "day_off"; employeeId: number; date: string; start: string; end: string; role: string };
 export type TimesheetAdjustment = { id: number; employeeId: number; date: string; hours: number };
 export type TimesheetPto = { employeeId: number; startDate: string; endDate: string; compensation: string; status: string };
@@ -36,6 +37,7 @@ export const defaultTimesheetColumns: ColumnId[] = ["role", "card", "roundedCard
 export type TimeCard = {
   id: string; employeeId: number; date: string; role: string; start?: string; end?: string; eventIds: number[];
   roundedStart?: string; roundedEnd?: string;
+  scheduleStart?: string; scheduleEnd?: string;
   issues: string[]; notes: string[]; adjustment: number; metrics: Record<string, number | null>;
   wageLabel?: string;
 };
@@ -71,7 +73,7 @@ export function hourlyWage(value: string): number | null {
   return Number.isFinite(amount) && amount > 0 ? amount : null;
 }
 const overlap = (start: number, end: number, a: number, b: number) => Math.max(0, Math.min(end, b) - Math.max(start, a));
-function metrics(): Record<string, number | null> { return { scheduled: 0, actual: 0, roundedHours: 0, variance: 0, paid: 0, regular: 0, breaks: 0, restBreaks: 0, mealPremium: 0, restPremium: 0, premiumPay: 0, ot: 0, doubleOt: 0, qualifiedOt: null, spread: 0, split: 0, wages: null, pto: 0 }; }
+function metrics(): Record<string, number | null> { return { scheduled: 0, actual: 0, roundedHours: 0, scheduleHours: 0, variance: 0, paid: 0, regular: 0, breaks: 0, restBreaks: 0, mealPremium: 0, restPremium: 0, premiumPay: 0, ot: 0, doubleOt: 0, qualifiedOt: null, spread: 0, split: 0, wages: null, pto: 0 }; }
 const premiumHours = (card: TimeCard) => (card.metrics.mealPremium ?? 0) + (card.metrics.restPremium ?? 0);
 function cardWageRate(rates: WageRate[], card: TimeCard) {
   const ids = new Set(rates.filter(rate => rate.roleId !== null && rate.role === card.role && rate.effectiveDate <= card.date).map(rate => rate.roleId));
@@ -102,6 +104,7 @@ export function buildTimeCards(input: {
   start: string; end: string; now: number; rounding: Rounding; weekStart: number; mandatoryMealBreak: boolean; mealBreakAfterHours: number; mealBreakMinutes?: number;
   breakPremiumPolicy?: BreakPremiumPolicy; timeZone?: string;
   overtimePolicy?: OvertimePolicy; overtimeScope?: WorkweekScope;
+  schedulePreview?: { shifts: PublishedTimesheetShift[]; minutes: HoursRoundingMinutes };
 }): TimeCard[] {
   const output: TimeCard[] = [];
   const contextStart = weekStartFor(input.start, input.weekStart);
@@ -112,8 +115,11 @@ export function buildTimeCards(input: {
     const cards: TimeCard[] = [];
     const uncertainCards = new Set<TimeCard>();
     const events = input.events.filter(event => event.employeeId === employee.id).sort((a, b) => Date.parse(a.at) - Date.parse(b.at) || a.id - b.id);
+    const preview = input.schedulePreview;
+    const publishedShifts = preview ? scheduleShiftBounds(preview.shifts.filter(shift => shift.employeeId === employee.id), stamp, date => addDays(date, 1)) : [];
+    let previousEnd = -Infinity;
     let session: TimesheetEvent[] = [];
-    const flush = (closed: boolean, boundary?: number) => {
+    const flush = (closed: boolean, boundary?: number, nextStart = Infinity) => {
       if (!session.length) return;
       const start = Date.parse(session[0].at);
       const end = closed ? Date.parse(session[session.length - 1].at) : boundary ?? input.now;
@@ -140,6 +146,13 @@ export function buildTimeCards(input: {
       const california = session.some(event => event.clockDetails?.california || event.clockDetails?.breakKind);
       const unconfirmedClock = !closed || session.some(event => event.assistedStatus === "pending"
         || (event.automatic && !event.assistedStatus));
+      // Neighboring sessions divide the gap so a preview cannot overlap them.
+      const projected = preview && !unconfirmedClock && !unconfirmedBreak && end > start ? scheduleClockPreview(publishedShifts,
+        { start, end, shiftId: session[0].shiftId, role: session[0].role }, preview.minutes, clockDate, {
+          earliestStart: (previousEnd + start) / 2, latestEnd: (end + nextStart) / 2,
+          firstBreak: session.length > 2 ? Date.parse(session[1].at) : Infinity,
+          lastBreak: session.length > 2 ? Date.parse(session[session.length - 2].at) : -Infinity,
+        }) : undefined;
       for (let date = clockDate(start) < contextStart ? contextStart : clockDate(start), endDate = clockDate(end); date <= contextEnd && date <= endDate; date = addDays(date, 1)) {
         if (date < contextStart) continue;
         const dayStart = stamp(date), dayEnd = stamp(addDays(date, 1));
@@ -155,6 +168,13 @@ export function buildTimeCards(input: {
           const previewUnpaid = breaks.reduce((total, item) => total
             + overlap(Math.max(item.start, roundedStart), Math.min(item.end, roundedEnd), dayStart, dayEnd), 0);
           card.metrics.roundedHours = Math.max(0, overlap(roundedStart, roundedEnd, dayStart, dayEnd) - previewUnpaid) / HOUR;
+        }
+        if (projected) {
+          card.scheduleStart = new Date(projected.start).toISOString();
+          card.scheduleEnd = new Date(projected.end).toISOString();
+          const projectedBreaks = breaks.reduce((total, item) => total
+            + overlap(Math.max(item.start, projected.start), Math.min(item.end, projected.end), dayStart, dayEnd), 0);
+          card.metrics.scheduleHours = Math.max(0, overlap(projected.start, projected.end, dayStart, dayEnd) - projectedBreaks) / HOUR;
         }
         card.metrics.breaks = breaks.reduce((total, item) => total + (item.meal ? overlap(Math.max(item.start, start), Math.min(item.end, end), dayStart, dayEnd) : 0), 0) / HOUR;
         card.metrics.restBreaks = rests.reduce((total, item) => total + overlap(item.start, item.end, dayStart, dayEnd), 0) / HOUR;
@@ -175,11 +195,15 @@ export function buildTimeCards(input: {
         if (unconfirmedBreak || unconfirmedClock || !california) uncertainCards.add(card);
         cards.push(card);
       }
+      previousEnd = end;
       session = [];
     };
-    for (const event of events) {
+    for (const [index, event] of events.entries()) {
       if (event.type === "in") { flush(false, Date.parse(event.at)); session = [event]; }
-      else if (session.length) { session.push(event); if (event.type === "out") flush(true); }
+      else if (session.length) {
+        session.push(event);
+        if (event.type === "out") flush(true, undefined, events[index + 1]?.type === "in" ? Date.parse(events[index + 1].at) : Infinity);
+      }
     }
     flush(false);
     const typed = events.filter(event => event.clockDetails?.california || event.clockDetails?.breakKind);

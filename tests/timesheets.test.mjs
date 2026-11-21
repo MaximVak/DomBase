@@ -42,6 +42,53 @@ test("rounding previews both timestamps independently and leaves worked hours an
   }
 });
 
+test("schedule display aligns nearby recorded punches with their published shift and leaves the exact ledger intact", async () => {
+  const date = "2026-08-03";
+  const shift = { id: 91, employeeId: 1, role: "Sales", date, start: "09:00", end: "17:00" };
+  const events = eventsFor(date, "08:58", "17:04", 30);
+  const exact = buildTimeCards({ ...base, events, shifts: [shift] })[0];
+  const input = { ...base, events, shifts: [shift], schedulePreview: { shifts: [shift], minutes: 15 } };
+  const [card] = buildTimeCards(input);
+  assert.deepEqual([card.start, card.end], [at(date, "08:58"), at(date, "17:04")]);
+  assert.deepEqual([card.scheduleStart, card.scheduleEnd, card.metrics.scheduleHours], [at(date, "09:00"), at(date, "17:00"), 7.5]);
+  assert.deepEqual({ ...card.metrics, scheduleHours: 0 }, exact.metrics);
+  assert.deepEqual(card.issues, exact.issues);
+  const { dayClockLabel } = await loadServerModule("app/timesheets-day.tsx");
+  assert.equal(dayClockLabel(card, date, base.now, undefined, "schedule"), "9:00 am – 5:00 pm");
+  assert.equal(dayClockLabel(card, date, base.now), "8:58 am – 5:04 pm");
+  const { formatHours, formatTimesheetMetric } = await loadServerModule("app/timesheets-display.ts");
+  assert.equal(formatHours(card.metrics.scheduleHours, "decimal"), "7.50");
+  assert.equal(formatHours(card.metrics.scheduleHours, "minutes"), "7 hr 30 min");
+  assert.equal(formatHours(-1.5, "minutes"), "−1 hr 30 min");
+  assert.equal(formatTimesheetMetric("wages", 123.45, "minutes"), "$123.45");
+  assert.equal(formatTimesheetMetric("split", 2, "minutes"), "2.00");
+});
+
+test("schedule display preserves ambiguous, distant, unconfirmed, and overnight punches outside their rounding bounds", () => {
+  const date = "2026-08-03";
+  const shift = { id: 91, employeeId: 1, role: "Sales", date, start: "09:00", end: "17:00" };
+  const duplicate = { ...shift, id: 92, start: "09:01" };
+  const events = eventsFor(date, "08:58", "17:06");
+  const read = (shifts, records = events, minutes = 15) => buildTimeCards({ ...base, events: records, schedulePreview: { shifts, minutes } })[0];
+  assert.equal(read([shift, duplicate]).scheduleStart, events[0].at);
+  assert.equal(read([shift, duplicate], [{ ...events[0], shiftId: 91 }, events[1]]).scheduleStart, at(date, "09:00"));
+  assert.equal(read([shift], [{ ...events[0], shiftId: 92 }, events[1]]).scheduleStart, events[0].at);
+  assert.equal(read([{ ...shift, role: "Warehouse" }]).scheduleStart, events[0].at);
+  assert.equal(read([{ ...shift, employeeId: 2 }]).scheduleStart, events[0].at);
+  assert.equal(read([shift], events, 5).scheduleEnd, events[1].at);
+  assert.equal(read([shift], [events[0], { ...events[1], assistedStatus: "pending" }]).scheduleEnd, undefined);
+  assert.equal(read([shift], [events[0], { ...events[1], automatic: true }]).scheduleEnd, undefined);
+  assert.equal(read([shift], [events[0]]).scheduleEnd, undefined);
+  const overnight = eventsFor(date, "21:58", "06:02", 30, 1, true);
+  const cards = buildTimeCards({ ...base, events: overnight, schedulePreview: { shifts: [{ ...shift, start: "22:00", end: "06:00" }], minutes: 15 } });
+  assert.deepEqual(cards.map(card => [card.scheduleStart, card.scheduleEnd]), Array(2).fill([at(date, "22:00"), at("2026-08-04", "06:00")]));
+  assert.equal(totalMetrics(cards).scheduleHours, 7.5);
+  const beforeMidnight = eventsFor(date, "23:58", "06:00", 0, 1, true);
+  assert.equal(read([{ ...shift, date: "2026-08-04", start: "00:00", end: "06:00" }], beforeMidnight).scheduleStart, beforeMidnight[0].at);
+  const adjacent = [...eventsFor(date, "08:00", "08:58"), ...eventsFor(date, "08:59", "17:00", 0, 11)];
+  assert.equal(read([{ ...shift, start: "08:00", end: "09:00" }], adjacent).scheduleEnd, adjacent[1].at);
+});
+
 test("short, overnight and open sessions keep their original work date and exact paid time", () => {
   const [short] = buildTimeCards({ ...base, events: eventsFor("2026-08-03", "09:01", "09:02"), rounding: 5 });
   assert.equal(short.roundedEnd, short.roundedStart);

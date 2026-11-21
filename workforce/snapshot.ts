@@ -62,7 +62,7 @@ export async function workspaceSnapshot(db: Database, ctx: Context, fieldKey: st
     terminationNote: p["team.read"] && p["team.private.read"] ? s.employees.terminationNote : sql<string | null>`NULL`.as("termination_note"), eligibleForRehire: p["team.read"] && p["team.private.read"] ? s.employees.eligibleForRehire : sql<boolean | null>`NULL`.as("eligible_for_rehire"), version: s.employees.version };
   // D1's read batch provides one transactionally consistent multi-table snapshot.
   const [revision, businesses, settingsRows, accounts, employees, departments, roles, assignments, managers, employeeSettings, profiles, wages, notes, history, certificates, labels,
-    shifts, publications, drafts, draftChanges, draftEmployees, events, rawClocks, cards, edits, adjustments, policies, policyAssignments, pto, availability, slots, conversations, members, messages, reads, notices, receipts, photos, teamConfig, openRows, openDraftRows, openRequestRows, exchangeRequestRows] = await db.batch([
+    shifts, publications, drafts, draftChanges, draftEmployees, events, rawClocks, cards, edits, adjustments, policies, policyAssignments, pto, availability, slots, conversations, members, messages, reads, notices, receipts, photos, teamConfig, openRows, openDraftRows, openRequestRows, exchangeRequestRows, timesheetSchedule] = await db.batch([
     db.select().from(s.workforceState), db.select().from(s.business), db.select().from(s.locationSettings),
     db.select({ id: s.accounts.id, employeeId: s.accounts.employeeId, name: s.accounts.displayName, level: s.accounts.accessLevel, disabledAt: s.accounts.disabledAt, loginEnabled: s.accounts.loginEnabled }).from(s.accounts),
     db.select(employeeFields).from(s.employees).where(and(canEmployee(s.employees.id), or(allowed(hasTeam), eq(s.employees.id, ownEmployee)))).orderBy(s.employees.id),
@@ -102,6 +102,12 @@ export async function workspaceSnapshot(db: Database, ctx: Context, fieldKey: st
     db.select().from(s.teamSettings).limit(1),
     ...openScheduleQueries(db, ctx, period),
     exchangeHeaderQuery(db, ctx),
+    db.select({ id: s.shifts.id, employeeId: s.shifts.employeeId, date: s.shifts.date, start: s.shifts.startTime, end: s.shifts.endTime,
+      role: sql<string>`COALESCE(NULLIF(${s.shifts.roleName}, ''), ${s.roles.name}, '')`.as("timesheet_role") })
+      .from(s.shifts).leftJoin(s.roles, eq(s.shifts.roleId, s.roles.id))
+      .where(and(allowed(p["timesheets.read"] && p["schedule.read"]), employeeScope(s.shifts.employeeId), ctx.roleFilter(s.shifts.roleId),
+        eq(s.shifts.shiftType, "work"), isNull(s.shifts.archivedAt), sql`${s.shifts.publicationId} IS NOT NULL
+          AND ${s.shifts.date} BETWEEN ${offsetDate(period.start, -1)} AND ${offsetDate(period.end, 1)}`)),
   ]);
   const business = businesses[0]; const settings = normalizeScheduleEnforcement(settingsRows[0]);
   const owner = accounts.find(row => row.id === business?.primaryOwnerAccountId);
@@ -146,7 +152,7 @@ export async function workspaceSnapshot(db: Database, ctx: Context, fieldKey: st
     return { id: row.id, employeeId: row.employeeId, type: row.eventType, at: timestamp(clockAt),
       role: row.roleName || undefined, explanation: explanation || undefined, automatic: row.automatic,
       ...(explanation && (assistance || row.source === "kiosk" || row.source === "offline") ? { noteAuthor: "employee" as const } : {}),
-      cardId: row.cardId ?? undefined, ...(row.clockDetails ? { clockDetails: row.clockDetails } : {}),
+      cardId: row.cardId ?? undefined, ...(p["schedule.read"] && row.shiftId !== null ? { shiftId: row.shiftId } : {}), ...(row.clockDetails ? { clockDetails: row.clockDetails } : {}),
       ...(assistance ? { assistedStatus: assistance.status } : {}) };
   });
   const revisedCards = new Map<number, StaffState["clockEvents"]>();
@@ -180,5 +186,5 @@ export async function workspaceSnapshot(db: Database, ctx: Context, fieldKey: st
     const account = accounts.find(a => a.id === link.accountId);
     return account?.level === "manager" ? [{ accountId: account.id, departmentId: link.departmentId, name: account.name, disabled: Boolean(account.disabledAt), setupPending: !account.loginEnabled }] : [];
   });
-  return { exchangeRequests: exchangeRequestRows, openRequests: openRequestRows, openSchedule: projectOpenSchedule(openRows, openDraftRows, p["schedule.read"] ? roles.filter(role => !role.archived).map(role => ({ id: role.id, name: role.name, departmentId: role.departmentId })) : [], p["schedule.manage"]), departmentManagers, period, scheduleEstimateScopeComplete: ctx.allDepartments, revision: revision[0]?.revision ?? 0, state, settings, basicInfo, teamPeriod: { payPeriod: teamConfig[0]?.payPeriod ?? "weekly", anchorDate: teamConfig[0]?.anchorDate ?? "2026-11-02" }, primaryOwnerEmployeeId: owner?.employeeId ?? null, permissions: p, employeeVersions: Object.fromEntries(employees.map(e => [e.id, e.version])), opened: { [draftKey]: receipts.filter(row => row.openedAt).map(row => row.sourceKey) }, dismissed: { [draftKey]: receipts.filter(row => row.dismissedAt).map(row => row.sourceKey) } };
+  return { exchangeRequests: exchangeRequestRows, openRequests: openRequestRows, openSchedule: projectOpenSchedule(openRows, openDraftRows, p["schedule.read"] ? roles.filter(role => !role.archived).map(role => ({ id: role.id, name: role.name, departmentId: role.departmentId })) : [], p["schedule.manage"]), departmentManagers, period, scheduleEstimateScopeComplete: ctx.allDepartments, revision: revision[0]?.revision ?? 0, state, settings, basicInfo, timesheetSchedule, teamPeriod: { payPeriod: teamConfig[0]?.payPeriod ?? "weekly", anchorDate: teamConfig[0]?.anchorDate ?? "2026-11-02" }, primaryOwnerEmployeeId: owner?.employeeId ?? null, permissions: p, employeeVersions: Object.fromEntries(employees.map(e => [e.id, e.version])), opened: { [draftKey]: receipts.filter(row => row.openedAt).map(row => row.sourceKey) }, dismissed: { [draftKey]: receipts.filter(row => row.dismissedAt).map(row => row.sourceKey) } };
 }

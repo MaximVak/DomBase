@@ -3,12 +3,14 @@
 import { addDays, totalMetrics, workDate, workTimestamp } from "./timesheets-model";
 import type { TimeCard, TimesheetEmployee, TimesheetPto, TimesheetShift } from "./timesheets-model";
 import type { ReactNode } from "react";
+import { formatHours } from "./timesheets-display";
+import type { ClockDisplay, HoursDisplay } from "./timesheets-display";
 
 export type DayRow = {
   employee: TimesheetEmployee; cards: TimeCard[]; scheduled: TimesheetShift[];
   elapsedMinutes: number; mealMinutes: number; restMinutes: number; mealPremium: number; restPremium: number;
   overtimeMinutes: number; doubleTimeMinutes: number;
-  varianceMinutes: number | null; issues: string[]; notes: string[];
+  varianceMinutes: number | null; issues: string[]; notes: string[]; hours: ReturnType<typeof totalMetrics>;
 };
 export function buildDayRows(input: {
   employees: TimesheetEmployee[]; cards: TimeCard[]; shifts: TimesheetShift[]; pto: TimesheetPto[];
@@ -35,7 +37,7 @@ export function buildDayRows(input: {
       return end <= input.now;
     });
     const elapsedMinutes = Math.round((clocked ? totals.spread ?? 0 : totals.actual ?? 0) * 60);
-    return [{ employee, cards, scheduled, elapsedMinutes, mealMinutes: Math.round((totals.breaks ?? 0) * 60),
+    return [{ employee, cards, scheduled, elapsedMinutes, hours: totals, mealMinutes: Math.round((totals.breaks ?? 0) * 60),
       restMinutes: Math.round((totals.restBreaks ?? 0) * 60), mealPremium: totals.mealPremium ?? 0, restPremium: totals.restPremium ?? 0,
       overtimeMinutes: Math.round((totals.ot ?? 0) * 60), doubleTimeMinutes: Math.round((totals.doubleOt ?? 0) * 60),
       varianceMinutes: clocked && scheduled.length && cards.filter(card => card.start).every(card => card.end) ? Math.round(((totals.actual ?? 0) - (totals.scheduled ?? 0)) * 60) : null,
@@ -72,11 +74,14 @@ export function roundedClockLabel(card: TimeCard, timeZone?: string) {
   };
   return `${label(card.roundedStart)} – ${card.roundedEnd ? label(card.roundedEnd) : "Open"}`;
 }
-export function dayClockLabel(card: TimeCard, date: string, now: number, timeZone?: string) {
-  if (!card.start) return "--:-- – --:--";
+export function dayClockLabel(card: TimeCard, date: string, now: number, timeZone?: string, mode: ClockDisplay = "actual") {
+  const from = mode === "schedule" ? card.scheduleStart ?? card.start : card.start;
+  const to = mode === "schedule" ? card.scheduleEnd ?? card.end : card.end;
+  if (!from) return "--:-- – --:--";
   const dayStart = workTimestamp(date, "00:00", timeZone), dayEnd = workTimestamp(addDays(date, 1), "00:00", timeZone);
-  const start = Math.max(Date.parse(card.start), dayStart), end = Math.min(card.end ? Date.parse(card.end) : now, dayEnd);
-  return `${clock(new Date(start).toISOString(), timeZone)} – ${!card.end && end < dayEnd ? "Open" : end === dayEnd ? "12:00 am (+1)" : clock(new Date(end).toISOString(), timeZone)}`;
+  const start = Math.max(Date.parse(from), dayStart), end = Math.min(to ? Date.parse(to) : now, dayEnd);
+  if (to && end <= start) return "—";
+  return `${clock(new Date(start).toISOString(), timeZone)} – ${!to && end < dayEnd ? "Open" : end === dayEnd ? "12:00 am (+1)" : clock(new Date(end).toISOString(), timeZone)}`;
 }
 function scheduledLabel(shifts: TimesheetShift[]) {
   return shifts.map(shift => `${clock(`${shift.date}T${shift.start}`)} – ${clock(`${shift.date}T${shift.end}`)}${shift.end <= shift.start ? " (+1)" : ""}`).join(", ");
@@ -86,6 +91,8 @@ type Props = {
   rows: DayRow[]; date: string; now: number; manager: boolean;
   groups?: { label: string; rows: DayRow[] }[];
   timeZone?: string;
+  clockDisplay?: ClockDisplay;
+  hoursDisplay?: HoursDisplay;
   lockControl?: (card: TimeCard) => ReactNode;
   groupLockControl?: (name: string, cards: TimeCard[]) => ReactNode;
   onOpenCard: (card: TimeCard, button: HTMLButtonElement) => void;
@@ -93,12 +100,17 @@ type Props = {
 };
 export function TimesheetsDay(props: Props) {
   const groups = props.groups ?? [{ label: "", rows: props.rows }];
+  const duration = (hours: number) => props.hoursDisplay === undefined ? dayDuration(Math.round(hours * 60))
+    : props.hoursDisplay === "decimal" ? `${formatHours(hours, "decimal")} hr` : formatHours(hours, "minutes");
+  const clockLabel = (card: TimeCard) => dayClockLabel(card, props.date, props.now, props.timeZone, props.clockDisplay);
   return <div className="ts-day-ledger-scroll"><table className="ts-day-ledger"><thead><tr><th scope="col">Team member</th><th scope="col">Worked</th><th scope="col">Rest breaks</th><th scope="col">Meal breaks</th><th scope="col">Issues</th></tr></thead>{groups.map(group => <tbody key={group.label}>
     {group.label ? <tr className="ts-day-group"><th scope="rowgroup" colSpan={5}><div className="ts-lock-group">{group.label}{props.groupLockControl?.(group.label, group.rows.flatMap(row => row.cards))}</div></th></tr> :
       <tr className="ts-day-group ts-day-lock-row"><td colSpan={5}>{props.groupLockControl?.("this day", group.rows.flatMap(row => row.cards))}</td></tr>}{group.rows.map(row => <tr key={row.employee.id}>
     <th scope="row"><div className="ts-day-member"><span className="ts-day-avatar" aria-hidden="true">{row.employee.name[0]}</span><div><strong>{row.employee.name}</strong><span>{[...new Set(row.cards.map(card => card.role))].join(", ") || row.employee.role}</span></div>{row.notes.length ? <span className="ts-day-note" title={row.notes.join("\n")} aria-label={`${row.notes.length} notes`}><svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11a9 8 0 0 1-9 8H8l-5 3 1-6a8 8 0 0 1-1-5 9 8 0 1 1 18 0Z" fill="currentColor" /></svg>{row.notes.length}</span> : null}</div></th>
-    <td><div className="ts-day-worked">{row.cards.some(card => card.start) ? row.cards.filter(card => card.start).map(card => <div className="ts-lock-group" key={card.id}><button type="button" className="ts-day-clock" aria-label={`Open ${row.employee.name} time card ${dayClockLabel(card, props.date, props.now, props.timeZone)}`} onClick={event => props.onOpenCard(card, event.currentTarget)}>{dayClockLabel(card, props.date, props.now, props.timeZone)}</button>{props.lockControl?.(card)}</div>) : props.manager ? <button type="button" className="ts-day-clock" aria-label={`Add time card for ${row.employee.name}`} onClick={event => props.onAdd(row.employee.id, event.currentTarget)}>--:-- – --:--</button> : <span>--:-- – --:--</span>}
-      {row.cards.some(card => card.start || card.adjustment) ? <small>Total: {dayDuration(row.elapsedMinutes)}{row.varianceMinutes ? <span className={row.varianceMinutes > 0 ? "ts-day-over" : "ts-day-under"}>{row.varianceMinutes > 0 ? "↑" : "↓"} {Math.abs(row.varianceMinutes)} min {row.varianceMinutes > 0 ? "over" : "under"}</span> : null}</small> : row.scheduled.length ? <small>Scheduled: {scheduledLabel(row.scheduled)}</small> : <small>{row.cards.some(card => (card.metrics.pto ?? 0) > 0) ? "Paid time off" : "No time card"}</small>}{row.cards.filter(card => card.roundedStart).map(card => <small key={card.id}>Rounded preview: {roundedClockLabel(card, props.timeZone)}{card.roundedEnd ? ` · ${(card.metrics.roundedHours ?? 0).toFixed(2)} hr` : ""}</small>)}{row.overtimeMinutes > 0 && <small>Overtime: {dayDuration(row.overtimeMinutes)}</small>}{row.doubleTimeMinutes > 0 && <small>Double time: {dayDuration(row.doubleTimeMinutes)}</small>}{row.mealPremium || row.restPremium ? <small>Break premium hours: {row.mealPremium} meal · {row.restPremium} rest</small> : null}</div></td>
-    <td>{row.restMinutes} min</td><td>{row.mealMinutes} min</td><td><div className="ts-issues">{row.issues.map(issue => props.manager ? <button type="button" className="ts-day-issue" key={issue} onClick={event => { const card = row.cards.find(card => card.issues.includes(issue)) ?? row.cards[0]; if (card) props.onOpenCard(card, event.currentTarget); else props.onAdd(row.employee.id, event.currentTarget); }} aria-label={`Resolve ${issue} for ${row.employee.name}`}>{issue}</button> : <span key={issue}>{issue}</span>)}</div></td>
+    <td><div className="ts-day-worked">{row.cards.some(card => card.start) ? row.cards.filter(card => card.start).map(card => <div className="ts-lock-group" key={card.id}><button type="button" className="ts-day-clock" aria-label={`Open ${row.employee.name} time card ${clockLabel(card)}`} onClick={event => props.onOpenCard(card, event.currentTarget)}>{clockLabel(card)}</button>{props.lockControl?.(card)}</div>) : props.manager ? <button type="button" className="ts-day-clock" aria-label={`Add time card for ${row.employee.name}`} onClick={event => props.onAdd(row.employee.id, event.currentTarget)}>--:-- – --:--</button> : <span>--:-- – --:--</span>}
+      {row.cards.some(card => card.start || card.adjustment) ? <small>{props.clockDisplay === "schedule" ? "Recorded total" : "Total"}: {duration((row.cards.some(card => card.start) ? row.hours.spread : row.hours.actual) ?? 0)}{row.varianceMinutes ? <span className={row.varianceMinutes > 0 ? "ts-day-over" : "ts-day-under"}>{row.varianceMinutes > 0 ? "↑" : "↓"} {Math.abs(row.varianceMinutes)} min {row.varianceMinutes > 0 ? "over" : "under"}</span> : null}</small> : row.scheduled.length ? <small>Scheduled: {scheduledLabel(row.scheduled)}</small> : <small>{row.cards.some(card => (card.metrics.pto ?? 0) > 0) ? "Paid time off" : "No time card"}</small>}{props.clockDisplay === "schedule" ?
+        (row.cards.some(card => card.scheduleEnd) ? <small>Rounded hours (preview): {duration(row.hours.scheduleHours ?? 0)}</small> : null)
+        : row.cards.filter(card => card.roundedStart).map(card => <small key={card.id}>Rounded preview: {roundedClockLabel(card, props.timeZone)}{card.roundedEnd ? ` · ${duration(card.metrics.roundedHours ?? 0)}` : ""}</small>)}{row.overtimeMinutes > 0 && <small>Overtime: {duration(row.hours.ot ?? 0)}</small>}{row.doubleTimeMinutes > 0 && <small>Double time: {duration(row.hours.doubleOt ?? 0)}</small>}{row.mealPremium || row.restPremium ? <small>Break premium hours: {duration(row.mealPremium)} meal · {duration(row.restPremium)} rest</small> : null}</div></td>
+    <td>{props.hoursDisplay ? duration(row.hours.restBreaks ?? 0) : `${row.restMinutes} min`}</td><td>{props.hoursDisplay ? duration(row.hours.breaks ?? 0) : `${row.mealMinutes} min`}</td><td><div className="ts-issues">{row.issues.map(issue => props.manager ? <button type="button" className="ts-day-issue" key={issue} onClick={event => { const card = row.cards.find(card => card.issues.includes(issue)) ?? row.cards[0]; if (card) props.onOpenCard(card, event.currentTarget); else props.onAdd(row.employee.id, event.currentTarget); }} aria-label={`Resolve ${issue} for ${row.employee.name}`}>{issue}</button> : <span key={issue}>{issue}</span>)}</div></td>
   </tr>)}</tbody>)}{props.manager ? <tfoot><tr><td colSpan={5}><button type="button" className="ts-day-add" onClick={event => props.onAdd(undefined, event.currentTarget)}><span aria-hidden="true">＋</span>Add time card</button></td></tr></tfoot> : null}</table>{!props.rows.length ? <div className="ts-empty-state"><h3>No time cards or scheduled shifts for this day</h3><p>Choose another day to see time cards and scheduled shifts.</p></div> : null}</div>;
 }
