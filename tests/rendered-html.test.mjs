@@ -637,7 +637,7 @@ test("manager PTO view supports configurable fixed and rate policies", async () 
   assert.match(page, /onClick=\{\(\) => navigateToView\("time_off"\)\}>View PTO<\/button>/);
   assert.match(page, /useLeaveBalances\(mode === "manager"/);
   assert.match(page, /summary\.verifiedWorkedSeconds \/ 3600/);
-  assert.match(options, /Paid sick leave/);
+  assert.match(page, /<option value="sick">Paid sick leave<\/option>/);
   assert.match(options, /Each completed pay period/);
   assert.match(options, /Add anniversary bonus/);
   assert.match(page, /function formatPtoChartHours/);
@@ -649,7 +649,8 @@ test("manager PTO view supports configurable fixed and rate policies", async () 
   assert.match(page, /"Starting balances"/);
   assert.match(page, />Starting balance \(hours\)</);
   assert.match(page, /startingBalances:/);
-  assert.match(page, /earnedHours: "1",[^]*workedHours: "30"/);
+  assert.match(page, /setPtoPolicyForm\(leavePolicyDefaults\("pto"\)\)/);
+  assert.match(page, /fixedFrequency: sick \? "annual" : "pay_period",\s*fixedHours: sick \? "40" : "80",\s*earnedHours: "1",\s*workedHours: sick \? "30" : "26"/);
   assert.match(page, />Fixed <small>/);
   assert.match(page, />Rate <small>/);
   assert.match(page, /className="pto-policy-primary-fields"/);
@@ -668,6 +669,7 @@ test("manager PTO view supports configurable fixed and rate policies", async () 
   assert.match(page, /className="pto-policy-edit-button"/);
   assert.match(page, /className="pto-policy-delete-button"/);
   assert.match(page, /"Edit leave policy"/);
+  assert.match(page, /onClick=\{\(\) => setIsViewingPtoPolicies\(true\)\}>\s*\{canManageLeavePolicies \? "Manage leave policies" : "View leave policies"\}/);
   assert.doesNotMatch(page, /className="pto-policy-delete-link"/);
   assert.match(page, />No saved policies\.</);
   assert.doesNotMatch(page, /formatDecimalHours/);

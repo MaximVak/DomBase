@@ -2358,16 +2358,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
   function openPtoPolicy() {
     shared.setError("");
     setEditingPtoPolicyId(null);
-    setPtoPolicyForm({
-      name: "",
-      method: "rate",
-      category: "pto", fixedFrequency: "annual", maxBalanceHours: "", carryoverHours: "", waitingDays: "0", tenureBonuses: [],
-      fixedHours: "120",
-      earnedHours: "1",
-      workedHours: "30",
-      employeeIds: [],
-      startingBalances: {},
-    });
+    setPtoPolicyForm(leavePolicyDefaults("pto"));
     setPtoPolicyStep("details");
     setPtoPolicyError("");
   }
@@ -2375,15 +2366,16 @@ export default function Home({ account }: { account: DashboardAccount }) {
   function editPtoPolicy(policy: PtoPolicy) {
     shared.setError("");
     setEditingPtoPolicyId(policy.id);
+    const defaults = leavePolicyDefaults(policy.category ?? "pto");
     setPtoPolicyForm({
       name: policy.name,
       method: policy.method,
       category: policy.category ?? "pto", fixedFrequency: policy.fixedFrequency ?? "annual",
       maxBalanceHours: String(policy.maxBalanceHours ?? ""), carryoverHours: String(policy.carryoverHours ?? ""),
       waitingDays: String(policy.waitingDays ?? 0), tenureBonuses: (policy.tenureBonuses ?? []).map(item => ({ years: String(item.years), hours: String(item.hours) })),
-      fixedHours: String(policy.fixedHours || 120),
-      earnedHours: String(policy.earnedHours || 1),
-      workedHours: String(policy.workedHours || 30),
+      fixedHours: String(policy.fixedHours || defaults.fixedHours),
+      earnedHours: String(policy.earnedHours || defaults.earnedHours),
+      workedHours: String(policy.workedHours || defaults.workedHours),
       employeeIds: [...policy.employeeIds],
       startingBalances: Object.fromEntries(policy.employeeIds.map((employeeId) => [
         employeeId,
@@ -3803,9 +3795,13 @@ export default function Home({ account }: { account: DashboardAccount }) {
                 <section className="panel settings-enforcement-panel settings-time-off-panel">
                   <div className="settings-panel-heading">
                     <h3>Time off</h3>
-                    <button type="button" disabled>Save</button>
                   </div>
-                  <h4>Time off policy</h4>
+                  {shared.data.permissions["time_off.read"] || canManageLeavePolicies ? (
+                    <button type="button" className="pto-policies-button" onClick={() => setIsViewingPtoPolicies(true)}>
+                      {canManageLeavePolicies ? "Manage leave policies" : "View leave policies"}
+                    </button>
+                  ) : null}
+                  <h4>Request limits</h4>
                   <div className="enforcement-rules">
                     <div className="enforcement-rule-line" title="Not available yet">
                       <label>
@@ -3824,10 +3820,6 @@ export default function Home({ account }: { account: DashboardAccount }) {
                       <span>days in advance</span>
                     </div>
                   </div>
-                  <button type="button" className="time-off-manage-policies" onClick={() => {
-                    navigateToView("time_off");
-                    setIsViewingPtoPolicies(true);
-                  }}>Manage PTO policies in the Time off dashboard</button>
                 </section>
               ) : activeSettingsTab === "Messages" ? (
                 <MessagesSettingsPanel
@@ -6067,6 +6059,16 @@ export default function Home({ account }: { account: DashboardAccount }) {
               <div className="pto-policy-details">
                 <div className="pto-policy-primary-fields">
                   <div className="pto-policy-name-field">
+                    <label htmlFor="pto-policy-category">Leave category</label>
+                    <select id="pto-policy-category" value={ptoPolicyForm.category} disabled={editingPtoPolicyId !== null}
+                      onChange={event => {
+                        const category = event.target.value === "sick" ? "sick" : "pto";
+                        setPtoPolicyForm(leavePolicyDefaults(category));
+                        setPtoPolicyError("");
+                      }}>
+                      <option value="pto">Paid time off</option>
+                      <option value="sick">Paid sick leave</option>
+                    </select>
                     <div className="pto-policy-name-heading">
                       <label htmlFor="pto-policy-name">Name</label>
                     </div>
@@ -6076,6 +6078,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                       onChange={(event) => setPtoPolicyForm((form) => form ? { ...form, name: event.target.value } : form)}
                       autoFocus
                     />
+                    {editingPtoPolicyId === null ? <small>Changing category loads its starting values.</small> : null}
                   </div>
 
                   <fieldset className="pto-policy-methods">
@@ -6087,7 +6090,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                         checked={ptoPolicyForm.method === "fixed"}
                         onChange={() => setPtoPolicyForm((form) => form ? { ...form, method: "fixed" } : form)}
                       />
-                      <span>Fixed <small>(example: 120 hours per year)</small></span>
+                      <span>Fixed <small>(hours per year)</small></span>
                     </label>
                     <label>
                       <input
@@ -6096,7 +6099,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                         checked={ptoPolicyForm.method === "rate"}
                         onChange={() => setPtoPolicyForm((form) => form ? { ...form, method: "rate", carryoverHours: "" } : form)}
                       />
-                      <span>Rate <small>(example: 1 hour per 30 hours worked)</small></span>
+                      <span>Rate <small>(based on hours worked)</small></span>
                     </label>
                   </fieldset>
                 </div>
@@ -6146,12 +6149,12 @@ export default function Home({ account }: { account: DashboardAccount }) {
                     </div>
                   </div>
                 )}
-                <LeavePolicyOptions form={ptoPolicyForm} editing={editingPtoPolicyId !== null}
+                <LeavePolicyOptions form={ptoPolicyForm}
                   change={next => setPtoPolicyForm(form => form ? { ...form, ...next } : form)} />
               </div>
             ) : ptoPolicyStep === "employees" ? (
               <div className="pto-policy-employee-step">
-                <p>Select everyone who should earn PTO through this policy. Managers can be included.</p>
+                <p>Select the employees who should earn this leave.</p>
                 <div className="pto-policy-employee-list">
                   {activeEmployees.map((employee) => (
                     <label key={employee.id}>
@@ -6171,7 +6174,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
               </div>
             ) : (
               <div className="pto-policy-balance-step">
-                <p>Enter each employee’s existing balance and the date this policy starts.</p>
+                <p>Enter each employee’s existing hours and the date this policy starts. Use zero for a new balance.</p>
                 <div className="pto-policy-balance-table">
                   <div className="pto-policy-balance-header" aria-hidden="true">
                     <span>Employee</span>
@@ -8151,6 +8154,25 @@ function formatWorkedHours(hours: number) {
   const displayMinutes = totalMinutes % 60;
 
   return `${displayHours} hrs ${displayMinutes} mins`;
+}
+
+function leavePolicyDefaults(category: PtoPolicyForm["category"]): PtoPolicyForm {
+  const sick = category === "sick";
+  return {
+    category,
+    name: leaveCategories[category],
+    method: sick ? "rate" : "fixed",
+    fixedFrequency: sick ? "annual" : "pay_period",
+    fixedHours: sick ? "40" : "80",
+    earnedHours: "1",
+    workedHours: sick ? "30" : "26",
+    maxBalanceHours: "",
+    carryoverHours: "",
+    waitingDays: "0",
+    tenureBonuses: [],
+    employeeIds: [],
+    startingBalances: {},
+  };
 }
 
 function formatPtoHours(hours: number) {

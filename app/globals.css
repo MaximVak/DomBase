@@ -8570,7 +8570,7 @@ body:has(.modal-backdrop) {
   gap: 16px;
 }
 
-.pto-policy-name-field input {
+.pto-policy-name-field :is(input, select) {
   width: 100%;
   min-width: 0;
   max-width: 100%;
@@ -8582,7 +8582,7 @@ body:has(.modal-backdrop) {
   padding: 0 13px;
 }
 
-.pto-policy-name-field input:focus,
+.pto-policy-name-field :is(input, select):focus,
 .pto-policy-number-field:focus-within {
   border-color: var(--blue);
   outline: 3px solid rgba(15, 116, 189, .12);

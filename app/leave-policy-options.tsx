@@ -2,22 +2,18 @@
 
 import type { PtoPolicyForm } from "../workforce/model";
 
-export function LeavePolicyOptions({ form, editing, change }: {
-  form: PtoPolicyForm; editing: boolean; change: (next: Partial<PtoPolicyForm>) => void;
+export function LeavePolicyOptions({ form, change }: {
+  form: PtoPolicyForm; change: (next: Partial<PtoPolicyForm>) => void;
 }) {
   const sick = form.category === "sick";
   const frontLoaded = sick && form.method === "fixed" && form.fixedFrequency === "annual";
   return <div className="leave-policy-options">
-    <div className="my-time-off-fields">
-      <label>Leave category<select value={form.category} disabled={editing}
-        onChange={event => change({ category: event.target.value === "sick" ? "sick" : "pto", carryoverHours: "" })}>
-        <option value="pto">Paid time off</option><option value="sick">Paid sick leave</option>
-      </select></label>
-      {form.method === "fixed" ? <label>Credit schedule<select value={form.fixedFrequency}
+    {form.method === "fixed" ? <div className="my-time-off-fields">
+      <label>Credit schedule<select value={form.fixedFrequency}
         onChange={event => change({ fixedFrequency: event.target.value === "pay_period" ? "pay_period" : "annual", carryoverHours: "" })}>
         <option value="annual">Once per year</option><option value="pay_period">Each completed pay period</option>
-      </select></label> : null}
-    </div>
+      </select></label>
+    </div> : null}
     <div className="my-time-off-fields">
       <label>Maximum balance (hours)<input type="number" min={sick ? 80 : 0.01} max="10000" step="0.01" placeholder="No cap"
         value={form.maxBalanceHours} onChange={event => change({ maxBalanceHours: event.target.value })} /></label>
