@@ -26,7 +26,7 @@ import { createPortal } from "react-dom";
 import { DepartmentManagerCell, DepartmentManagerFeedback, useDepartmentManagers } from "./department-managers";
 import { useSharedWorkspace } from "./shared-workspace";
 import { equal, newRecordId } from "../workforce/contract";
-import { fullDayLeaveMinutes, leaveCategories, leaveCategory, leaveRequestMinutes } from "../workforce/leave-duration";
+import { fullDayLeaveMinutes, leaveCategories, leaveCategory, leaveRequestMinutes, maxBulkLeaveRequests } from "../workforce/leave-duration";
 import { PrintTable } from "./print-table";
 import { rosterCopyHeaders, rosterCopyRows, rosterCsv } from "./roster-export";
 import { alertsPermissionsFields, automaticClockOutAt, canManageScheduleRole, canViewTeamSchedule, clockInTiming, defaultScheduleEnforcement, normalizeScheduleEnforcement, scheduleEnforcementFields, schedulingSettingsForSave, workWeekOffset } from "./schedule-enforcement";
@@ -39,7 +39,7 @@ import { OvertimeOptionsPanel } from "./overtime-options";
 import { BreaksCompliancePanel } from "./breaks-compliance";
 import { MessagesSettingsPanel } from "./messages-settings";
 import { EmployeeReliabilityPanel } from "./team/employee-reliability";
-import { defaultPayCalendar, retainedThrough } from "../team/rules";
+import { defaultPayCalendar, periodFor, retainedThrough } from "../team/rules";
 import { PayrollSettingsPanel } from "./pay-period-settings";
 import { TeamPermissionsPanel } from "./team-permissions";
 import { AccountProfilePanel } from "./account-profile-panel";
@@ -60,6 +60,7 @@ export type { BasicInfo, Employee, StaffState } from "../workforce/model";
 
 import { TimeExceptionDialog } from "./time-exception-dialog";
 import { BackupMonitor } from "./backup-monitor";
+import { TimeOffDashboard } from "./time-off-dashboard";
 
 const timeExceptionExplanationLimit = 250;
 const automaticClockOutExplanation = "Automatically clocked out two hours after the scheduled shift ended.";
@@ -381,6 +382,8 @@ export default function Home({ account }: { account: DashboardAccount }) {
   const [highlightedPtoRequestId, setHighlightedPtoRequestId] = useState<number | null>(null);
   const [highlightedEventTargetId, setHighlightedEventTargetId] = useState<string | null>(null);
   const [ptoReviewError, setPtoReviewError] = useState("");
+  const [selectedTimeOffIds, setSelectedTimeOffIds] = useState<number[]>([]);
+  const [timeOffApprovalNotice, setTimeOffApprovalNotice] = useState("");
   const [arePtoRequestsExpanded, setArePtoRequestsExpanded] = useState(false);
   const [areEventsExpanded, setAreEventsExpanded] = useState(false);
   const [isViewingPtoHistory, setIsViewingPtoHistory] = useState(false);
@@ -1065,6 +1068,9 @@ export default function Home({ account }: { account: DashboardAccount }) {
     [activeEmployeeId, mode, state.ptoRequests],
   );
   const pendingPtoRequests = sortedPtoRequests.filter((request) => request.status === "pending");
+  const approvableTimeOff = canManageTimeOff ? pendingPtoRequests.filter(request => request.employeeId !== activeEmployeeId) : [];
+  const selectedTimeOff = approvableTimeOff.filter(request => selectedTimeOffIds.includes(request.id));
+  const timeOffToday = workDate(currentTime, basicInfo.timeZone);
   const nextPtoHistoryMonth = shiftDateByCalendarTab(ptoHistoryMonth, "month", 1);
   const filteredHistoricalPtoRequests = sortedPtoRequests
     .filter((request) => (
@@ -1600,6 +1606,8 @@ export default function Home({ account }: { account: DashboardAccount }) {
     setPtoRequestError("");
     setReviewingPtoRequestId(null);
     setPtoReviewError("");
+    setSelectedTimeOffIds([]);
+    setTimeOffApprovalNotice("");
     setPtoPolicyForm(null);
     setPtoPolicyStep("details");
     setPtoPolicyError("");
@@ -2595,6 +2603,20 @@ export default function Home({ account }: { account: DashboardAccount }) {
     }))) return;
     setReviewingPtoRequestId(null);
     setPtoReviewError("");
+  }
+
+  function reviewTimeOffRequest(id: number) {
+    setPtoReviewError("");
+    setReviewingPtoRequestId(id);
+  }
+
+  async function approveSelectedTimeOff() {
+    if (!canManageTimeOff || !selectedTimeOff.length || shared.pending) return;
+    const requestIds = selectedTimeOff.map(request => request.id);
+    setTimeOffApprovalNotice("");
+    if (!await shared.approveTimeOff(requestIds, shared.data.revision)) return;
+    setSelectedTimeOffIds([]);
+    setTimeOffApprovalNotice(`${requestIds.length} time-off ${requestIds.length === 1 ? "request" : "requests"} approved.`);
   }
 
   function managerTimeOffActions(request: PtoRequest) {
@@ -5410,6 +5432,15 @@ export default function Home({ account }: { account: DashboardAccount }) {
                       <button type="button" className="pto-history-link" onClick={() => setIsViewingPtoHistory(true)}>View history</button>
                     </div>
                   </div>
+                  {approvableTimeOff.length > 0 ? <div className="time-off-bulk-actions" aria-label="Bulk time-off approval">
+                    <button type="button" className="pto-policies-button" disabled={shared.pending || selectedTimeOff.length === 0}
+                      onClick={() => void approveSelectedTimeOff()}>Approve selected ({selectedTimeOff.length})</button>
+                    <button type="button" className="pto-history-link" disabled={shared.pending} onClick={() => {
+                      setTimeOffApprovalNotice("");
+                      setSelectedTimeOffIds(selectedTimeOff.length ? [] : approvableTimeOff.slice(0, maxBulkLeaveRequests).map(row => row.id));
+                    }}>{selectedTimeOff.length ? "Clear selection" : approvableTimeOff.length > maxBulkLeaveRequests ? `Select first ${maxBulkLeaveRequests}` : "Select all eligible requests"}</button>
+                  </div> : null}
+                  {timeOffApprovalNotice ? <p className="time-off-approval-notice" role="status">{timeOffApprovalNotice}</p> : null}
                   <div className="pto-current-request-table" role="table" aria-label="Current time off requests">
                     <div className="pto-current-request-head" role="row">
                       <span role="columnheader">Name</span>
@@ -5417,11 +5448,12 @@ export default function Home({ account }: { account: DashboardAccount }) {
                       <span role="columnheader">Dates</span>
                       <span role="columnheader">Status</span>
                       <span role="columnheader">Total hours</span>
-                      <span role="columnheader" aria-label="Request actions" />
+                      <span role="columnheader" aria-label={canManageTimeOff ? "Request selection" : "Request actions"} />
                     </div>
                     {pendingPtoRequests.map((request) => {
                       const employee = employeeById(state.employees, request.employeeId);
                       const totalHours = leaveRequestMinutes(request) / 60;
+                      const selected = selectedTimeOffIds.includes(request.id);
                       return (
                         <article
                           className={`pto-current-request-row${highlightedPtoRequestId === request.id ? " notification-target-highlight" : ""}`}
@@ -5439,16 +5471,22 @@ export default function Home({ account }: { account: DashboardAccount }) {
                           <div className="pto-current-request-actions" role="cell">
                             {request.employeeId === activeEmployeeId ? (
                               <button type="button" onClick={() => cancelPtoRequest(request.id)}>Cancel</button>
+                            ) : canManageTimeOff ? (
+                              <input type="checkbox" className="time-off-request-select" checked={selected}
+                                aria-label={`Select ${employee?.name ?? "employee"} ${leaveCategories[leaveCategory(request)].toLowerCase()} request on ${formatTimeOffRequestDate(request.startDate)}`}
+                                disabled={shared.pending || (!selected && selectedTimeOff.length >= maxBulkLeaveRequests)} onChange={event => {
+                                  setTimeOffApprovalNotice("");
+                                  const checked = event.target.checked;
+                                  const ids = selectedTimeOff.filter(row => row.id !== request.id).map(row => row.id);
+                                  setSelectedTimeOffIds(checked ? [...ids, request.id] : ids);
+                                }} />
                             ) : null}
                           </div>
                           {mode === "manager" && request.employeeId !== activeEmployeeId ? (
                             <button
                               type="button"
                               className="pto-current-request-review"
-                              onClick={() => {
-                                setPtoReviewError("");
-                                setReviewingPtoRequestId(request.id);
-                              }}
+                              onClick={() => reviewTimeOffRequest(request.id)}
                               aria-label={`Review ${employee?.name ?? "employee"} time off request`}
                             />
                           ) : null}
@@ -5657,6 +5695,9 @@ export default function Home({ account }: { account: DashboardAccount }) {
                   </div>
                 </>
               )}
+              {mode === "manager" && !isViewingPtoHistory ? <TimeOffDashboard requests={sortedPtoRequests} employees={state.employees}
+                today={timeOffToday} payPeriod={periodFor(timeOffToday, shared.data.teamPeriod?.payPeriod, shared.data.teamPeriod?.anchorDate)}
+                formatDate={formatTimeOffRequestDate} formatHours={formatPtoHours} onReview={reviewTimeOffRequest} /> : null}
               <div className="pto-balance-section">
                 <div className="panel-heading pto-heading">
                   <p className="eyebrow">Paid time off</p>

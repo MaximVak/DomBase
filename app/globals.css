@@ -7402,6 +7402,50 @@ label.enforcement-rule-line {
   padding: 4px 0;
 }
 
+.time-off-bulk-actions,
+.time-off-approved-range {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 16px;
+  margin: 0 0 12px;
+}
+
+.time-off-bulk-actions button:disabled { opacity: .55; cursor: default; }
+.time-off-request-select { position: relative; z-index: 3; width: 18px; height: 18px; accent-color: var(--blue-accent); }
+.time-off-approval-notice { margin: 0 0 12px; color: var(--green-dark); }
+
+.time-off-dashboard { display: grid; gap: 24px; margin-top: 24px; }
+.time-off-dashboard section { min-width: 0; }
+.time-off-upcoming-list,
+.time-off-approved-scroll {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+}
+
+.time-off-upcoming-list { list-style: none; padding: 0; }
+.time-off-upcoming-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto auto;
+  align-items: center;
+  gap: 8px 16px;
+  padding: 12px 16px;
+  font-size: .88rem;
+  overflow-wrap: anywhere;
+}
+.time-off-upcoming-list li + li { border-top: 1px solid var(--line); }
+.time-off-upcoming-list small { display: block; color: var(--muted); }
+.time-off-approved-range label { display: grid; gap: 4px; font-size: .86rem; font-weight: 700; }
+.time-off-approved-range input { max-width: 100%; min-height: 38px; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; color: var(--ink); background: white; }
+.time-off-approved-scroll { overflow-x: auto; }
+.time-off-approved-table { width: 100%; min-width: 420px; border-collapse: collapse; font-size: .88rem; }
+.time-off-approved-table th, .time-off-approved-table td { padding: 12px; text-align: right; vertical-align: top; }
+.time-off-approved-table th:first-child { text-align: left; overflow-wrap: anywhere; }
+.time-off-approved-table tbody tr { border-top: 1px solid var(--line); }
+.time-off-dashboard-empty, .time-off-dashboard-note { color: var(--muted); margin: 8px 0; }
+
 .pto-current-request-review {
   position: absolute;
   inset: 0;
@@ -9863,6 +9907,9 @@ button[aria-label^="Remove"]:focus-visible,
   .pto-current-request-actions {
     justify-content: flex-end;
   }
+
+  .time-off-upcoming-list li { grid-template-columns: minmax(0, 1fr) auto; }
+  .time-off-upcoming-list li > span:nth-child(2) { grid-column: 1; grid-row: 2; }
 
   .pto-request-card {
     grid-template-columns: 1fr;

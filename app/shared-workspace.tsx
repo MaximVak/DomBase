@@ -14,7 +14,7 @@ import type { PayCalendar } from "../team/rules";
 import { teamRequest } from "./team/client";
 
 type Period = { start: string; end: string };
-type Shared = { refresh: () => Promise<void>; scheduleTool: (body: Record<string, unknown>) => Promise<ScheduleToolResult | null>; setPeriod: (period: Period) => void; uploadDocument: (details: Omit<UploadDetails, "id">, file: File) => Promise<boolean>; data: WorkspaceData; pending: boolean; error: string; setEditing: (editing: boolean) => void; setState: (update: SetStateAction<StaffState>) => Promise<boolean>; save: (changes: Change[]) => Promise<boolean>; savePayCalendar: (calendar: PayCalendar) => Promise<boolean>; setError: (message: string) => void };
+type Shared = { refresh: () => Promise<void>; scheduleTool: (body: Record<string, unknown>) => Promise<ScheduleToolResult | null>; setPeriod: (period: Period) => void; uploadDocument: (details: Omit<UploadDetails, "id">, file: File) => Promise<boolean>; data: WorkspaceData; pending: boolean; error: string; setEditing: (editing: boolean) => void; setState: (update: SetStateAction<StaffState>) => Promise<boolean>; save: (changes: Change[]) => Promise<boolean>; savePayCalendar: (calendar: PayCalendar) => Promise<boolean>; approveTimeOff: (requestIds: number[], revision: number) => Promise<boolean>; setError: (message: string) => void };
 const SharedContext = createContext<Shared | null>(null);
 export function useSharedWorkspace() { const value = useContext(SharedContext); if (!value) throw new Error("Shared workspace provider missing."); return value; }
 function requestId() { return btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); }
@@ -102,6 +102,16 @@ export function SharedWorkspace({ account }: { account: DashboardAccount }) {
   function savePayCalendar(calendar: PayCalendar) {
     return commit((base, id) => teamRequest("commit", { id, revision: base.revision, operation: "settings", data: calendar }));
   }
+  function approveTimeOff(requestIds: number[], revision: number) {
+    return commit(async (base, id) => {
+      if (base.revision !== revision) throw new Error("Time off changed. Review the latest requests before approving.");
+      const response = await fetch("/api/workspace/time-off", { method: "POST", cache: "no-store", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "approve-selected", id, revision, requestIds }) });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Could not confirm the selected approvals.");
+      return result;
+    });
+  }
   async function scheduleTool(body: Record<string, unknown>): Promise<ScheduleToolResult | null> {
     const base = current.current;
     if (!base || saving.current || needsReload.current) { setError("Close this dialog and reload the latest data before continuing."); return null; }
@@ -168,7 +178,7 @@ export function SharedWorkspace({ account }: { account: DashboardAccount }) {
     catch { setError("Could not reload shared data. Check your connection and try again."); }
   }
   if (!data) return <main className="login-screen"><section className="login-card auth-card"><h1>DomBase</h1>{error ? <><p role="alert">{error}</p><button onClick={() => void reload()}>Try again</button></> : <p role="status">Loading shared workspace…</p>}</section></main>;
-  return <SharedContext.Provider value={{ data, refresh: async () => { await load(true); }, scheduleTool, pending: pending || periodLoading, error, setPeriod, uploadDocument, setState: updateState, save, savePayCalendar, setEditing: value => { editing.current = value; if (!value && requestedPeriod.current) setPeriod(requestedPeriod.current); }, setError }}>
+  return <SharedContext.Provider value={{ data, refresh: async () => { await load(true); }, scheduleTool, pending: pending || periodLoading, error, setPeriod, uploadDocument, setState: updateState, save, savePayCalendar, approveTimeOff, setEditing: value => { editing.current = value; if (!value && requestedPeriod.current) setPeriod(requestedPeriod.current); }, setError }}>
     <div className={`workspace-sync-bar ${error ? "has-error" : ""}`}>
       <p role={error ? "alert" : "status"}>{error || (periodLoading ? "Loading selected period…" : pending ? "Saving to the shared database…" : notice || "Connected to the shared database")}</p>
       {error ? <button disabled={pending} onClick={() => void reload()}>Reload latest data</button> : null}

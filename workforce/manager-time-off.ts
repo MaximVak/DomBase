@@ -4,8 +4,8 @@ import { AuthError, json, readAuthBody } from "../auth/http";
 import * as s from "../db/schema";
 import type { Context, Database } from "./context";
 import { canonical, newRecordId } from "./contract";
-import { leaveCategory, type LeaveCategory } from "./leave-duration";
-import { requireLeaveAvailable } from "./leave-balances";
+import { leaveCategory, maxBulkLeaveRequests, type LeaveCategory } from "./leave-duration";
+import { requireBulkLeaveAvailable, requireLeaveAvailable } from "./leave-balances";
 import type { PtoRequest } from "./model";
 import { timeOffDates } from "./time-off";
 import { activeTimesheetLock, periodLockByDate, requireTimesheetUnlocked } from "./timesheet-lock-guards";
@@ -151,6 +151,51 @@ async function applyChange(db: Database, ctx: Context, body: Record<string, unkn
   throw new AuthError(409, "Shared data changed. Reload the latest data before saving.");
 }
 
+async function approveSelected(db: Database, ctx: Context, body: Record<string, unknown>, secret: string, now: number) {
+  ctx.requirePermission("time_off.approve");
+  v.keys(body, ["action", "id", "revision", "requestIds"]);
+  if (!tokenIsValid(body.id)) throw new AuthError(400, "Invalid save identifier.");
+  const id = body.id, revision = v.integer(body.revision, 0);
+  const ids = v.list(body.requestIds, maxBulkLeaveRequests).map(value => v.integer(value));
+  if (!ids.length || new Set(ids).size !== ids.length) throw new AuthError(400, "Select each pending request once.");
+  const hash = `time-off-approve-selected:${rateKey(secret, canonical([...ids].sort((a, b) => a - b)))}`;
+  async function saved() {
+    const [receipt] = await db.select({ accountId: s.workforceCommits.accountId, bodyHash: s.workforceCommits.bodyHash })
+      .from(s.workforceCommits).where(and(eq(s.workforceCommits.id, id), ctx.activeActor())).limit(1);
+    if (!receipt) return false;
+    if (receipt.accountId !== ctx.account.id || receipt.bodyHash !== hash) throw new AuthError(409, "This save identifier is already in use.");
+    return true;
+  }
+  const result = { saved: true, count: ids.length };
+  if (await saved()) return result;
+  const p = s.ptoRequests;
+  const selected = sql`${p.id} IN (SELECT value FROM json_each(${JSON.stringify(ids)}))`;
+  const scope = and(selected, ctx.employeeFilter(p.employeeId), isNull(p.archivedAt));
+  const [requests, [state]] = await db.batch([
+    db.select({ id: p.id, employeeId: p.employeeId, employeeName: s.employees.name, compensation: p.compensation, category: p.category,
+      startDate: p.startDate, endDate: p.endDate, startTime: p.startTime, endTime: p.endTime, status: p.status })
+      .from(p).innerJoin(s.employees, eq(p.employeeId, s.employees.id)).where(and(scope, ctx.activeActor())).orderBy(p.id),
+    db.select({ revision: s.workforceState.revision }).from(s.workforceState).where(ctx.activeActor()).limit(1),
+  ]);
+  if (!state || state.revision !== revision) throw new AuthError(409, "Time off changed. Reload the latest requests before approving.");
+  if (requests.length !== ids.length) throw new AuthError(404, "A selected request is outside your access or unavailable.");
+  if (requests.some(row => row.employeeId === ctx.account.employeeId)) throw new AuthError(403, "You cannot approve your own time off request.");
+  if (requests.some(row => row.status !== "pending")) throw new AuthError(409, "A selected request has already been decided. Reload the latest requests.");
+  const lock = sql`l.employee_id IS NULL AND EXISTS (SELECT 1 FROM pto_requests WHERE ${selected} AND compensation = 'paid'
+    AND start_date <= l.end_date AND end_date >= l.start_date)`;
+  await requireTimesheetUnlocked(db, lock);
+  await requireBulkLeaveAvailable(db, ctx, now, requests);
+  const tx = new WorkspaceTransaction(db, { account: ctx.account, activeActor: () => sql`${ctx.activeActor()}
+    AND NOT EXISTS (SELECT 1 FROM timesheet_lock_events l WHERE ${activeTimesheetLock} AND ${lock})
+    AND NOT EXISTS (SELECT 1 FROM workforce_commits WHERE id = ${id})` }, id, new Date(now).toISOString());
+  tx.write(sql`UPDATE pto_requests SET status = 'approved', decided_at = ${tx.stamp}, decided_by_account_id = ${ctx.account.id}, version = version + 1
+    WHERE ${scope} AND status = 'pending' AND ${tx.receipt}`, ids.length);
+  tx.insertRows(s.ptoDecisions, requests.map(row => ({ requestId: row.id, status: "approved", actorAccountId: ctx.account.id, createdAt: tx.stamp })));
+  if (await tx.commit(revision, hash, ["pto-request"]) || await saved()) return result;
+  await requireTimesheetUnlocked(db, lock);
+  throw new AuthError(409, "Time off changed. Reload the latest requests before approving.");
+}
+
 export async function handleManagerTimeOff(db: Database, ctx: Context, request: Request, secret: string, now: number) {
   ctx.requirePermission("time_off.read");
   const params = new URL(request.url).searchParams;
@@ -160,7 +205,8 @@ export async function handleManagerTimeOff(db: Database, ctx: Context, request: 
   }
   if (request.method === "POST") {
     if (params.size) throw new AuthError(400, "Choose the time-off action in the request body.");
-    return json(await applyChange(db, ctx, await readAuthBody(request, 8192), secret, now));
+    const body = await readAuthBody(request, 8192);
+    return json(await (body.action === "approve-selected" ? approveSelected(db, ctx, body, secret, now) : applyChange(db, ctx, body, secret, now)));
   }
   return json({ error: "Method not allowed." }, 405, { Allow: "GET, POST" });
 }

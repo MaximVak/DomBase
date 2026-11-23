@@ -758,7 +758,7 @@ test("employees can submit persistent PTO requests with required details", async
   assert.match(page, /Back to requests/);
   assert.match(page, /pto-current-request-table/);
   assert.match(styles, /\.pto-current-requests-heading \{\s*padding-bottom: 24px;\s*\}/);
-  assert.match(page, /<span role="columnheader">Dates<\/span>\s*<span role="columnheader">Status<\/span>\s*<span role="columnheader">Total hours<\/span>\s*<span role="columnheader" aria-label="Request actions" \/>/);
+  assert.match(page, /<span role="columnheader">Dates<\/span>\s*<span role="columnheader">Status<\/span>\s*<span role="columnheader">Total hours<\/span>\s*<span role="columnheader" aria-label=\{canManageTimeOff \? "Request selection" : "Request actions"\} \/>/);
   assert.match(page, /<strong className="pto-current-request-status" role="cell">Pending<\/strong>/);
   assert.match(page, /className="pto-current-request-hours" role="cell">\s*<span>\{formatPtoHours\(totalHours\)\}<\/span>\s*<\/div>\s*<div className="pto-current-request-actions" role="cell">/);
   assert.match(styles, /\.pto-current-request-head,[^}]*grid-template-columns: repeat\(5, minmax\(0, 1fr\)\) 80px;/s);

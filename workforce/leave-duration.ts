@@ -1,4 +1,5 @@
 export const fullDayLeaveMinutes = 8 * 60;
+export const maxBulkLeaveRequests = 100;
 const dayMilliseconds = 86400000;
 export const leaveCategories = { pto: "Paid time off", sick: "Paid sick leave", unpaid: "Unpaid time off" } as const;
 export type LeaveCategory = keyof typeof leaveCategories;
@@ -51,4 +52,24 @@ export function approvedLeaveMinutesByDay(requests: LeaveDates[], period: { star
     totals.set(date, minutes);
   }
   return totals;
+}
+
+export function approvedLeaveByEmployee(
+  requests: (LeaveDates & { employeeId: number; status: string; compensation: string; category?: LeaveCategory | null })[],
+  period: { start: string; end: string },
+) {
+  const approved = requests.filter(row => row.status === "approved" && row.startDate <= period.end && row.endDate >= period.start);
+  const byEmployee = new Map<number, typeof approved>();
+  for (const row of approved) {
+    const entries = byEmployee.get(row.employeeId) ?? [];
+    entries.push(row);
+    byEmployee.set(row.employeeId, entries);
+  }
+  const minutes = (rows: LeaveDates[]) => [...approvedLeaveMinutesByDay(rows, period).values()].reduce((total, value) => total + value, 0);
+  return [...byEmployee].map(([employeeId, rows]) => ({ employeeId,
+    pto: minutes(rows.filter(row => leaveCategory(row) === "pto")),
+    sick: minutes(rows.filter(row => leaveCategory(row) === "sick")),
+    unpaid: minutes(rows.filter(row => leaveCategory(row) === "unpaid")),
+    total: minutes(rows),
+  }));
 }

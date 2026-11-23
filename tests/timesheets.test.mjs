@@ -4,6 +4,7 @@ import { loadServerModule } from "../scripts/server-runtime.mjs";
 const { buildTimeCards, totalMetrics, timeCardReviews, timeCardEvents, validateTimeCard, timesheetCsv, hourlyWage, weekStartFor, timeCardPreview, timeCardBreakIntervals, roundClockPunch } = await loadServerModule("app/timesheets-model.ts");
 const { defaultOvertimePolicy } = await loadServerModule("app/schedule-enforcement.ts");
 const { leaveBalance } = await loadServerModule("workforce/leave-policy.ts");
+const { approvedLeaveByEmployee } = await loadServerModule("workforce/leave-duration.ts");
 const employees = [{ id: 1, name: "Test Employee", role: "Sales", wage: "$20/hr", active: true }];
 const at = (date, time) => new Date(`${date}T${time}:00`).toISOString();
 const base = { employees, shifts: [], adjustments: [], pto: [], events: [], start: "2026-08-03", end: "2026-08-09", now: new Date("2026-08-10T12:00:00").getTime(), rounding: "actual", weekStart: 1, mandatoryMealBreak: true, mealBreakAfterHours: 5 };
@@ -17,6 +18,18 @@ function accountFor({ terms = {}, enrollment = {}, ...options } = {}) {
   return leaveBalance({ terms: { ...leaveTerms, ...terms }, enrollment: { startDate: "2026-01-01", openingBalanceSeconds: 0, legacyBalanceYear: null, ...enrollment },
     calendar: { payPeriod: "semimonthly", anchorDate: "2026-01-01" }, today: "2026-12-31", hireDate: null, worked: new Map(), approved: [], ...options });
 }
+
+test("approved hours are scoped to coverage dates and employee, with overlapping requests counted once", () => {
+  const row = (employeeId, category, date, details = {}) => ({ ...leaveDay(date), employeeId, category,
+    status: "approved", compensation: category === "unpaid" ? "unpaid" : "paid", ...details });
+  const requests = [row(1, "pto", "2026-11-15", { endDate: "2026-11-16" }),
+    row(1, "sick", "2026-11-17", { startTime: "09:00", endTime: "11:00" }), row(1, "sick", "2026-11-17", { startTime: "10:00", endTime: "12:00" }),
+    row(1, "unpaid", "2026-11-17", { startTime: "11:00", endTime: "13:00" }), row(2, undefined, "2026-11-17"),
+    row(2, "sick", "2026-11-17", { status: "pending" }), row(2, "unpaid", "2026-11-17", { status: "cancelled" }), row(2, "pto", "2026-11-18")];
+  assert.deepEqual(approvedLeaveByEmployee(requests, { start: "2026-11-16", end: "2026-11-17" }), [
+    { employeeId: 1, pto: 480, sick: 180, unpaid: 120, total: 720 }, { employeeId: 2, pto: 480, sick: 0, unpaid: 0, total: 480 },
+  ]);
+});
 
 test("annual leave carries vested PTO and applies an explicit carryover limit to front-loaded sick leave", () => {
   const options = { today: "2027-01-02", approved: [leaveDay("2026-06-01"), leaveDay("2027-01-15", "09:00", "11:00")],

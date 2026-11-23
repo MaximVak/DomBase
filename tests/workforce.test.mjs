@@ -508,6 +508,66 @@ test("shared workforce operations persist, scope, audit and serialize actual D1 
       await db.delete(schema.accountPermissions).where(sql`account_id = ${f.manager.id} AND permission = 'time_off.approve'`);
     }
   });
+  await t.test("bulk time-off approval is scoped, atomic, lock-aware, and charges the combined leave", async () => {
+    const [policy] = await db.insert(schema.ptoPolicies).values({ name: "Bulk approval fixture", method: "fixed", fixedAllowanceSeconds: 14400 }).returning();
+    await db.insert(schema.ptoAssignments).values({ employeeId: f.multi.id, policyId: policy.id, startDate: "2026-11-01" });
+    const fixture = (employeeId, date, startTime, endTime, compensation = "paid") => ({ employeeId, startDate: date, endDate: date, startTime, endTime, compensation, reason: "vacation" });
+    const [first, secondValid, excess, outside, own, unpaid] = await db.insert(schema.ptoRequests).values([
+      fixture(f.a.id, "2026-11-17", "09:00", "11:00"), fixture(f.multi.id, "2026-11-19", "10:00", "12:00"),
+      fixture(f.multi.id, "2026-11-20", "10:00", "13:00"), fixture(f.b.id, "2026-11-19", "10:00", "11:00"),
+      fixture(f.managerEmployee.id, "2026-11-19", "10:00", "11:00"), fixture(f.a.id, "2026-11-18", "10:00", "11:00", "unpaid"),
+    ]).returning();
+    const post = (body, cookie = manager) => call("time-off", cookie, body);
+    const revision = (await snapshot(manager)).revision;
+    const body = (rows, id = newToken()) => ({ id, action: "approve-selected", revision, requestIds: rows.map(row => row.id) });
+    const statuses = async () => (await db.select().from(schema.ptoRequests).where(sql`id between ${first.id} and ${unpaid.id}`).orderBy(schema.ptoRequests.id)).map(row => row.status);
+    const pending = Array(6).fill("pending");
+    assert.equal((await post(body([first, secondValid]), "")).status, 401);
+    assert.equal((await post(body([first, secondValid]))).status, 403);
+    await db.insert(schema.accountPermissions).values({ accountId: f.manager.id, permission: "time_off.approve", allowed: true });
+    const setLock = (date, action) => db.insert(schema.timesheetLockEvents).values({ targetKey: "bulk-leave-test:" + date,
+      startDate: date, endDate: date, startsAt: date + "T00:00:00Z", endsAt: date + "T23:59:59Z", action, actorAccountId: f.owner.id });
+    try {
+      assert.equal((await post(body([]))).status, 400);
+      assert.equal((await post(body([first, first]))).status, 400);
+      assert.equal((await post({ ...body([first, secondValid]), revision: revision - 1 })).status, 409);
+      assert.equal((await post(body([first, outside]))).status, 404);
+      assert.equal((await post(body([first, own]))).status, 403);
+      const overdraw = await post(body([first, secondValid, excess]));
+      assert.equal(overdraw.status, 409);
+      assert.match((await overdraw.json()).error, /Multi department worker.*does not have enough paid time off/);
+      assert.deepEqual(await statuses(), pending);
+      await setLock(first.startDate, "lock");
+      const locked = await post(body([first, secondValid]));
+      assert.equal(locked.status, 409);
+      assert.match((await locked.json()).error, /pay period is locked/i);
+      assert.deepEqual(await statuses(), pending);
+      await setLock(first.startDate, "unlock");
+      await setLock(unpaid.startDate, "lock");
+      const valid = body([first, secondValid, unpaid]);
+      await db.run(sql`CREATE TRIGGER reject_bulk_leave_decision BEFORE INSERT ON pto_decisions
+        WHEN NEW.request_id = ${sql.raw(String(secondValid.id))} BEGIN SELECT RAISE(ABORT, 'bulk leave fixture rollback'); END`);
+      try { assert.equal((await post(valid)).status, 503); }
+      finally { await db.run(sql`DROP TRIGGER reject_bulk_leave_decision`); }
+      assert.deepEqual(await statuses(), pending);
+      assert.equal((await snapshot(manager)).revision, revision);
+      const attempts = [valid, body([first, secondValid, unpaid])];
+      const race = await Promise.all(attempts.map(attempt => post(attempt)));
+      assert.deepEqual(race.map(response => response.status).sort(), [200, 409]);
+      assert.deepEqual(await ok(await post(attempts[race.findIndex(response => response.ok)])), { saved: true, count: 3 });
+      assert.deepEqual(await statuses(), ["approved", "approved", "pending", "pending", "pending", "approved"]);
+      const decisions = await db.select().from(schema.ptoDecisions).where(sql`request_id BETWEEN ${first.id} AND ${unpaid.id}`).orderBy(schema.ptoDecisions.requestId);
+      assert.deepEqual(decisions.map(row => [row.requestId, row.status, row.actorAccountId]), [first, secondValid, unpaid].map(row => [row.id, "approved", f.manager.id]));
+      const balances = await ok(await call("leave-balances", manager));
+      assert.equal(balances.find(row => row.employeeId === f.multi.id).balances[0].availableSeconds, 7200);
+      const report = await ok(await call("accountant-export?start=2026-11-17&end=2026-11-19", owner));
+      assert.equal(report.rows.find(row => row.employeeId === f.a.id).pto, 2);
+      assert.equal(report.rows.find(row => row.employeeId === f.multi.id).pto, 2);
+    } finally {
+      await setLock(unpaid.startDate, "unlock");
+      await db.delete(schema.accountPermissions).where(sql`account_id = ${f.manager.id} AND permission = 'time_off.approve'`);
+    }
+  });
   await t.test("a scoped Manager can change a future shift without erasing notes they cannot read", async () => {
     const before = await snapshot(owner); const ownKey = f.b.id;
     const draft = { upsertedShifts: [{ id: 79001, employeeId: f.a.id, date: "2026-11-12", start: "09:00", end: "17:00", role: f.roleA.name, station: "Floor", notes: "Preserve this private shift note" }], deletedShiftIds: [], affectedEmployeeIds: [f.a.id] };

@@ -106,11 +106,10 @@ export async function readLeaveBalances(db: Database, scope: LeaveScope, now: nu
   return [...result.values()];
 }
 
-export async function requireLeaveAvailable(db: Database, ctx: Context, now: number, proposed: PaidRequest, replaced?: PaidRequest, staged: PaidRequest[] = []) {
+function validateAvailable(data: Inputs, proposed: PaidRequest, replaced?: PaidRequest, staged: PaidRequest[] = []) {
   const category = leaveCategory(proposed);
   if (category === "unpaid") return;
   const employeeId = proposed.employeeId;
-  const data = await leaveInputs(db, ownLeaveScope(ctx.activeActor(), employeeId), now);
   const requests = [...requestsFor(data, employeeId, category), ...staged.filter(row => row.employeeId === employeeId && leaveCategory(row) === category)];
   const old = replaced && leaveCategory(replaced) === category ? replaced : undefined;
   const other = old ? requests.filter(row => row.id !== old.id) : requests;
@@ -121,11 +120,34 @@ export async function requireLeaveAvailable(db: Database, ctx: Context, now: num
   const revisedDays = approvedLeaveMinutesByDay(revised, period);
   const additionalDates = [...revisedDays].filter(([date, minutes]) => minutes > (priorDays.get(date) ?? 0)).map(([date]) => date);
   if (!additionalDates.length) return;
-  const assigned = data.assignments.find(item => item.policy.category === category);
+  const assigned = data.assignments.find(item => item.enrollment.employeeId === employeeId && item.policy.category === category);
   if (!assigned) throw new AuthError(409, "Assign a " + leaveCategories[category].toLowerCase() + " policy before approving this request.");
   const usableFrom = leaveUsageStarts(assigned.policy, assigned.enrollment.startDate, assigned.hireDate);
   if (additionalDates.some(date => date < usableFrom)) throw new AuthError(409, "This policy is available from " + usableFrom + ".");
   if (balanceFor(data, assigned, revised).availableSeconds < 0) {
     throw new AuthError(409, "This employee does not have enough " + leaveCategories[category].toLowerCase() + " for these hours.");
+  }
+}
+
+export async function requireLeaveAvailable(db: Database, ctx: Context, now: number, proposed: PaidRequest, replaced?: PaidRequest, staged?: PaidRequest[]) {
+  if (leaveCategory(proposed) === "unpaid") return;
+  const data = await leaveInputs(db, ownLeaveScope(ctx.activeActor(), proposed.employeeId), now);
+  validateAvailable(data, proposed, replaced, staged);
+}
+
+export async function requireBulkLeaveAvailable(db: Database, ctx: Context, now: number, requests: (PaidRequest & { employeeName: string })[]) {
+  const paid = requests.filter(row => leaveCategory(row) !== "unpaid");
+  if (!paid.length) return;
+  const ids = [...new Set(paid.map(row => row.employeeId))];
+  const data = await leaveInputs(db, { guard: ctx.activeActor(), employees: column => sql`${ctx.employeeFilter(column)}
+    AND ${column} IN (SELECT value FROM json_each(${JSON.stringify(ids)}))` }, now);
+  const staged: PaidRequest[] = [];
+  for (const row of paid) {
+    try { validateAvailable(data, row, undefined, staged); }
+    catch (error) {
+      if (!(error instanceof AuthError)) throw error;
+      throw new AuthError(error.status, `${row.employeeName} (${row.startDate}). ${error.message}`);
+    }
+    staged.push(row);
   }
 }
