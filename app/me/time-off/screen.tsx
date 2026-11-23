@@ -12,6 +12,7 @@ const hoursLabel = (minutes: number) => {
   const hours = Math.floor(minutes / 60);
   return [hours ? `${hours} hr` : "", minutes % 60 ? `${minutes % 60} min` : ""].filter(Boolean).join(" ");
 };
+const balanceLabel = (seconds: number) => ((seconds / 3600).toLocaleString(undefined, { maximumFractionDigits: 2 }) + " hours");
 const requestId = () => btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
 
 async function loadTimeOff(signal?: AbortSignal): Promise<MyTimeOff> {
@@ -39,6 +40,16 @@ export function MyTimeOffScreen() {
   return <main className="my-profile-screen my-time-off-screen">
     <header><div><nav aria-label="My account"><a href="/me">← My profile</a> · <a href="/me/schedule">My schedule</a></nav><h1>Request time off</h1></div></header>
     {error ? <div className="my-profile-error"><p role="alert">{error}</p><button type="button" onClick={() => window.location.reload()}>Reload time off</button></div> : null}
+    {data ? <section aria-labelledby="my-leave-balances" className="my-leave-balances">
+      <h2 id="my-leave-balances">Available balances</h2>
+      <dl>{(["pto", "sick"] as const).map(category => {
+        const balance = data.balances.find(row => row.category === category);
+        return <div key={category}><dt>{leaveCategories[category]}</dt>
+          <dd>{balance ? balanceLabel(balance.availableSeconds) : "No policy assigned"}</dd>
+          {balance && balance.usableFrom > data.today ? <dd>Available from {dateLabel(balance.usableFrom)}</dd> : null}
+        </div>;
+      })}</dl>
+    </section> : null}
     {data ? <TimeOffForm key={data.contextToken} data={data} onLoad={setData} /> : !error ? <p role="status">Loading time off…</p> : null}
     {data ? <section aria-labelledby="my-time-off-requests">
       <h2 id="my-time-off-requests">Recent requests</h2>

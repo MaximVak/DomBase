@@ -649,6 +649,12 @@ export const ptoPolicies = sqliteTable("pto_policies", {
   id: id(),
   name: text("name").notNull(),
   method: text("method", { enum: ["fixed", "rate"] }).notNull(),
+  category: text("category", { enum: ["pto", "sick"] }).notNull().default("pto"),
+  fixedFrequency: text("fixed_frequency", { enum: ["annual", "pay_period"] }).notNull().default("annual"),
+  maxBalanceSeconds: integer("max_balance_seconds"),
+  carryoverSeconds: integer("carryover_seconds"),
+  waitingDays: integer("waiting_days").notNull().default(0),
+  tenureBonuses: text("tenure_bonuses", { mode: "json" }).$type<{ years: number; seconds: number }[]>().notNull().default(sql`'[]'`),
   fixedAllowanceSeconds: integer("fixed_allowance_seconds").notNull().default(0),
   earnedSeconds: integer("earned_seconds").notNull().default(0),
   perWorkedSeconds: integer("per_worked_seconds").notNull().default(3600),
@@ -658,12 +664,15 @@ export const ptoPolicies = sqliteTable("pto_policies", {
 }, table => [check("pto_policies_method_check", sql`(${table.method} = 'fixed' AND ${table.fixedAllowanceSeconds} > 0) OR (${table.method} = 'rate' AND ${table.earnedSeconds} > 0 AND ${table.perWorkedSeconds} > 0)`)]);
 
 export const ptoAssignments = sqliteTable("pto_assignments", {
-  employeeId: integer("employee_id").primaryKey().references(() => employees.id),
+  employeeId: integer("employee_id").notNull().references(() => employees.id),
+  category: text("category", { enum: ["pto", "sick"] }).notNull().default("pto"),
   policyId: integer("policy_id").notNull().references(() => ptoPolicies.id),
   startDate: text("start_date").notNull(),
   openingBalanceSeconds: integer("opening_balance_seconds").notNull().default(0),
+  legacyBalanceYear: integer("legacy_balance_year"),
   ...timestamps(),
-}, table => [index("pto_assignments_policy_idx").on(table.policyId)]);
+}, table => [primaryKey({ columns: [table.employeeId, table.category] }), index("pto_assignments_policy_idx").on(table.policyId),
+  check("pto_assignments_category_check", sql`${table.category} IN ('pto', 'sick')`)]);
 
 export const ptoRequests = sqliteTable("pto_requests", {
   id: id(),

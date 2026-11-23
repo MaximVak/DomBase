@@ -8,6 +8,40 @@ import { employeeInScope } from "./records";
 import * as v from "./validation";
 import { availabilitySlots, appendAvailability } from "./availability";
 import { periodLockByDate, requireTimesheetUnlocked } from "./timesheet-lock-guards";
+import { requireLeaveAvailable, type PaidRequest } from "./leave-balances";
+
+async function reserveLeave(r: RecordContext, request: PaidRequest) {
+  await requireLeaveAvailable(r.db, r.ctx, Date.parse(r.tx.stamp), request, undefined, r.pendingLeave);
+  (r.pendingLeave ??= []).push(request);
+}
+
+function policySettings(data: Record<string, unknown>) {
+  const category = v.oneOf(data.category ?? "pto", ["pto", "sick"]);
+  const method = v.oneOf(data.method, ["fixed", "rate"]);
+  const fixedFrequency = v.oneOf(data.fixedFrequency ?? "annual", ["annual", "pay_period"]);
+  const fixed = v.number(data.fixedHours, 0, 10000);
+  const earned = v.number(data.earnedHours, 0, 1000);
+  const worked = v.number(data.workedHours, 0, 10000);
+  if (method === "fixed" ? fixed <= 0 : earned <= 0 || worked <= 0) throw new AuthError(400, "Enter a positive policy allowance or accrual rate.");
+  const optionalHours = (value: unknown, min: number) => value == null ? null : Math.round(v.number(value, min, 10000) * 3600);
+  const maxBalanceSeconds = optionalHours(data.maxBalanceHours, category === "sick" ? 80 : 0.01);
+  const carryoverSeconds = optionalHours(data.carryoverHours, 0);
+  if (carryoverSeconds !== null && (category !== "sick" || method !== "fixed" || fixedFrequency !== "annual")) {
+    throw new AuthError(400, "A year-end carryover limit is available for annually front-loaded sick leave.");
+  }
+  const waitingDays = v.integer(data.waitingDays ?? 0, 0, category === "sick" ? 90 : 365);
+  const tenureBonuses = v.list(data.tenureBonuses ?? [], 20).map(row => {
+    const bonus = v.object(row);
+    v.keys(bonus, ["years", "hours"]);
+    return { years: v.integer(bonus.years, 1, 100), seconds: Math.round(v.number(bonus.hours, 0.01, 10000) * 3600) };
+  }).sort((a, b) => a.years - b.years);
+  if (new Set(tenureBonuses.map(row => row.years)).size !== tenureBonuses.length) throw new AuthError(400, "Choose each tenure anniversary once.");
+  if (category === "sick" && (method === "fixed" ? fixed < 40 : earned * 30 < worked)) {
+    throw new AuthError(400, "Use at least 40 annual sick hours or an hourly rate of at least one hour per 30 worked hours.");
+  }
+  return { category, method, fixedFrequency, maxBalanceSeconds, carryoverSeconds, waitingDays, tenureBonuses,
+    fixedAllowanceSeconds: Math.round(fixed * 3600), earnedSeconds: Math.round(earned * 3600), perWorkedSeconds: Math.round(worked * 3600) };
+}
 
 export function timeOffDates(data: Record<string, unknown>) {
   const startDate = v.date(data.startDate);
@@ -23,17 +57,24 @@ export async function timeOffChange(r: RecordContext, change: Change) {
     r.ctx.requirePermission("settings.manage");
     if (!r.ctx.allDepartments) throw new AuthError(403, "An Owner or General Manager must manage company time-off policies.");
     if (change.after === null) { r.tx.update(s.ptoPolicies, { archived: true, updatedAt: r.tx.stamp }, sql`id = ${change.id} AND archived = 0`); r.tx.remove(s.ptoAssignments, sql`policy_id = ${change.id}`); return; }
-    const data = v.object(change.after); v.keys(data, ["id", "name", "method", "fixedHours", "earnedHours", "workedHours", "employeeIds", "startingBalances"]);
-    const method = v.oneOf(data.method, ["fixed", "rate"]); const fixed = v.number(data.fixedHours, 0, 10000); const earned = v.number(data.earnedHours, 0, 1000); const worked = v.number(data.workedHours, 0, 10000);
-    if (method === "fixed" ? fixed <= 0 : earned <= 0 || worked <= 0) throw new AuthError(400, "Enter a positive policy allowance or accrual rate.");
+    const data = v.object(change.after); v.keys(data, ["id", "name", "method", "fixedHours", "earnedHours", "workedHours", "employeeIds", "startingBalances",
+      "category", "fixedFrequency", "maxBalanceHours", "carryoverHours", "waitingDays", "tenureBonuses"]);
+    const settings = policySettings(data);
+    if (change.before && settings.category !== (v.object(change.before).category ?? "pto")) throw new AuthError(400, "Choose the leave category when creating a policy.");
     const ids = v.list(data.employeeIds, 500).map(id => v.integer(id)); if (!ids.length || new Set(ids).size !== ids.length) throw new AuthError(400, "Choose employees once each.");
     const balances = v.object(data.startingBalances); if (Object.keys(balances).some(key => !ids.includes(Number(key)))) throw new AuthError(400, "Unexpected policy employee.");
-    const values = { name: v.text(data.name, 100, true), method, fixedAllowanceSeconds: Math.round(fixed * 3600), earnedSeconds: Math.round(earned * 3600), perWorkedSeconds: Math.round(worked * 3600), updatedAt: r.tx.stamp };
+    const values = { name: v.text(data.name, 100, true), ...settings, updatedAt: r.tx.stamp };
     if (change.before) r.tx.update(s.ptoPolicies, values, sql`id = ${change.id} AND archived = 0`); else r.tx.insert(s.ptoPolicies, { id: change.id, ...values });
-    r.tx.remove(s.ptoAssignments, sql`policy_id = ${change.id}`);
+    const previous = await r.db.select().from(s.ptoAssignments).where(eq(s.ptoAssignments.policyId, change.id));
+    r.tx.remove(s.ptoAssignments, sql`policy_id = ${change.id} AND employee_id NOT IN (SELECT value FROM json_each(${JSON.stringify(ids)}))`);
     for (const id of ids) {
       await employeeInScope(r, id); const balance = v.object(balances[String(id)]); v.keys(balance, ["startDate", "balance"]);
-      r.tx.insert(s.ptoAssignments, { employeeId: id, policyId: change.id, startDate: v.date(balance.startDate), openingBalanceSeconds: Math.round(v.number(balance.balance, -10000, 10000) * 3600), updatedAt: r.tx.stamp }, sql`1 = 1`, { target: ["employeeId"], update: ["policyId", "startDate", "openingBalanceSeconds", "updatedAt"] });
+      const startDate = v.date(balance.startDate);
+      const old = previous.find(entry => entry.employeeId === id);
+      const openingBalanceSeconds = Math.round(v.number(balance.balance, old?.openingBalanceSeconds && old.openingBalanceSeconds < 0 ? old.openingBalanceSeconds / 3600 : 0, 10000) * 3600);
+      const legacyBalanceYear = old?.startDate === startDate && old.openingBalanceSeconds === openingBalanceSeconds ? old.legacyBalanceYear : null;
+      r.tx.insert(s.ptoAssignments, { employeeId: id, policyId: change.id, category: settings.category, startDate, openingBalanceSeconds, legacyBalanceYear, updatedAt: r.tx.stamp },
+        sql`1 = 1`, { target: ["employeeId", "category"], update: ["policyId", "startDate", "openingBalanceSeconds", "legacyBalanceYear", "updatedAt"] });
     }
     return;
   }
@@ -56,7 +97,10 @@ export async function timeOffChange(r: RecordContext, change: Change) {
       const category = data.category === undefined ? null : v.oneOf(data.category, ["pto", "sick", "unpaid"]);
       if (category && (category === "unpaid") !== (compensation === "unpaid")) throw new AuthError(400, "The time-off category and pay type must agree.");
       const status = r.ctx.account.accessLevel === "owner" ? "approved" : "pending";
-      if (status === "approved" && compensation === "paid") await requireTimesheetUnlocked(r.db, periodLockByDate(dates.startDate, dates.endDate));
+      if (status === "approved" && compensation === "paid") {
+        await requireTimesheetUnlocked(r.db, periodLockByDate(dates.startDate, dates.endDate));
+        await reserveLeave(r, { ...dates, id: change.id, employeeId, category, compensation });
+      }
       r.tx.insert(s.ptoRequests, { id: change.id, employeeId, compensation, category, ...dates, reason: v.oneOf(data.reason, ["sick_emergency", "vacation"]), explanation: v.text(data.explanation, 1000), status, requestedAt: r.tx.stamp, decidedAt: status === "approved" ? r.tx.stamp : null, decidedByAccountId: status === "approved" ? r.ctx.account.id : null });
       if (status === "approved") r.tx.insert(s.ptoDecisions, { requestId: change.id, status, actorAccountId: r.ctx.account.id });
       return;
@@ -69,6 +113,7 @@ export async function timeOffChange(r: RecordContext, change: Change) {
     const [stored] = await r.db.select().from(s.ptoRequests).where(eq(s.ptoRequests.id, change.id));
     if (!stored || (status !== "cancelled" && stored.status !== "pending") || stored.status === "cancelled" || stored.status === "denied") throw new AuthError(409, "This request has already been decided.");
     if (stored.compensation === "paid" && (status === "approved" || stored.status === "approved")) await requireTimesheetUnlocked(r.db, periodLockByDate(stored.startDate, stored.endDate));
+    if (status === "approved" && stored.compensation === "paid") await reserveLeave(r, stored);
     r.tx.update(s.ptoRequests, { status, decidedAt: r.tx.stamp, decidedByAccountId: r.ctx.account.id, version: stored.version + 1 }, sql`id = ${change.id} AND version = ${stored.version} AND archived_at IS NULL`);
     r.tx.insert(s.ptoDecisions, { requestId: change.id, status, actorAccountId: r.ctx.account.id });
     return;

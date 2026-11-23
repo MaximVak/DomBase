@@ -3,10 +3,58 @@ import test from "node:test";
 import { loadServerModule } from "../scripts/server-runtime.mjs";
 const { buildTimeCards, totalMetrics, timeCardReviews, timeCardEvents, validateTimeCard, timesheetCsv, hourlyWage, weekStartFor, timeCardPreview, timeCardBreakIntervals, roundClockPunch } = await loadServerModule("app/timesheets-model.ts");
 const { defaultOvertimePolicy } = await loadServerModule("app/schedule-enforcement.ts");
+const { leaveBalance } = await loadServerModule("workforce/leave-policy.ts");
 const employees = [{ id: 1, name: "Test Employee", role: "Sales", wage: "$20/hr", active: true }];
 const at = (date, time) => new Date(`${date}T${time}:00`).toISOString();
 const base = { employees, shifts: [], adjustments: [], pto: [], events: [], start: "2026-08-03", end: "2026-08-09", now: new Date("2026-08-10T12:00:00").getTime(), rounding: "actual", weekStart: 1, mandatoryMealBreak: true, mealBreakAfterHours: 5 };
 function eventsFor(date, start, end, breakMinutes = 0, id = 1, nextDay = false) { return timeCardEvents({ employeeId: 1, date, start, end, nextDay, breakMinutes, role: "Sales", note: "", eventIds: [] }, id); }
+
+const hours = value => value * 3600;
+const leaveTerms = { category: "pto", method: "fixed", fixedFrequency: "annual", fixedAllowanceSeconds: hours(40),
+  earnedSeconds: hours(1), perWorkedSeconds: hours(20), maxBalanceSeconds: null, carryoverSeconds: null, waitingDays: 0, tenureBonuses: [] };
+const leaveDay = (date, startTime = null, endTime = null) => ({ startDate: date, endDate: date, startTime, endTime });
+function accountFor({ terms = {}, enrollment = {}, ...options } = {}) {
+  return leaveBalance({ terms: { ...leaveTerms, ...terms }, enrollment: { startDate: "2026-01-01", openingBalanceSeconds: 0, legacyBalanceYear: null, ...enrollment },
+    calendar: { payPeriod: "semimonthly", anchorDate: "2026-01-01" }, today: "2026-12-31", hireDate: null, worked: new Map(), approved: [], ...options });
+}
+
+test("annual leave carries vested PTO and applies an explicit carryover limit to front-loaded sick leave", () => {
+  const options = { today: "2027-01-02", approved: [leaveDay("2026-06-01"), leaveDay("2027-01-15", "09:00", "11:00")],
+    enrollment: { startDate: "2025-03-01", legacyBalanceYear: 2026, openingBalanceSeconds: hours(3) } };
+  assert.deepEqual(accountFor(options), { availableSeconds: hours(73), yearEarnedSeconds: hours(40), yearUsedSeconds: hours(2),
+    reservedSeconds: hours(2), usableFrom: "2025-03-01" });
+  const sick = accountFor({ ...options, terms: { category: "sick", carryoverSeconds: hours(5) } });
+  assert.equal(sick.availableSeconds, hours(43));
+});
+
+test("fixed credits post on pay-period end dates and sick pay follows first-year earning milestones", () => {
+  const terms = { fixedFrequency: "pay_period", fixedAllowanceSeconds: hours(24) };
+  assert.equal(accountFor({ terms, today: "2026-01-14" }).availableSeconds, 0);
+  assert.equal(accountFor({ terms, today: "2026-01-15" }).availableSeconds, hours(1));
+  assert.equal(accountFor({ terms }).availableSeconds, hours(24));
+  const sick = { terms: { ...terms, category: "sick", fixedAllowanceSeconds: hours(40) }, enrollment: { startDate: "2026-10-01" } };
+  assert.ok(accountFor({ ...sick, today: "2027-01-27" }).availableSeconds < hours(24));
+  assert.equal(accountFor({ ...sick, today: "2027-01-28" }).availableSeconds, hours(24));
+  assert.equal(accountFor({ ...sick, today: "2027-04-18" }).availableSeconds, hours(40));
+  assert.equal(accountFor({ ...sick, today: "2027-12-31" }).yearEarnedSeconds, hours(40));
+});
+
+test("verified worked time, waiting, tenure and caps apply independently of approved coverage", () => {
+  const worked = new Map([["2026-01-02", hours(20)], ["2026-01-12", hours(40)], ["2026-01-25", hours(20)]]);
+  const approved = [leaveDay("2026-01-13", "10:00", "12:00"), leaveDay("2026-01-13", "11:00", "13:00"), leaveDay("2026-11-01", "10:00", "12:00")];
+  const options = { hireDate: "2026-01-01", today: "2026-02-01", worked, approved, enrollment: { openingBalanceSeconds: hours(8) },
+    terms: { method: "rate", maxBalanceSeconds: hours(7), waitingDays: 10, tenureBonuses: [{ years: 1, seconds: hours(4) }] } };
+  const pto = accountFor(options);
+  assert.equal(pto.usableFrom, "2026-01-11");
+  assert.equal(pto.yearEarnedSeconds, hours(1));
+  assert.equal(pto.availableSeconds, hours(4));
+  assert.equal(accountFor({ ...options, today: "2027-01-01" }).availableSeconds, hours(7));
+  assert.equal(accountFor({ ...options, today: "2028-01-01" }).yearEarnedSeconds, 0);
+  const sick = accountFor({ ...options, terms: { ...options.terms, category: "sick", maxBalanceSeconds: hours(80) } });
+  assert.equal(sick.usableFrom, pto.usableFrom);
+  assert.equal(sick.yearEarnedSeconds, hours(4));
+  assert.equal(sick.availableSeconds, hours(7));
+});
 
 test("accountant CSV and native Excel preserve fixed columns, text IDs and editable salaried references", async () => {
   const { accountantCells, accountantColumns } = await loadServerModule("workforce/accountant-report.ts");

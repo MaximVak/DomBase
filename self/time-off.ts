@@ -7,6 +7,8 @@ import { AuthError } from "../auth/http";
 import { rateKey, tokenIsValid } from "../auth/crypto";
 import { canonical, newRecordId } from "../workforce/contract";
 import { leaveCategory, leaveRequestMinutes, type LeaveCategory } from "../workforce/leave-duration";
+import { ownLeaveScope, readLeaveBalances } from "../workforce/leave-balances";
+import type { LeaveAccount } from "../workforce/leave-policy";
 import type { PtoRequest } from "../workforce/model";
 import { timeOffDates } from "../workforce/time-off";
 import { WorkspaceTransaction } from "../workforce/transaction";
@@ -14,7 +16,7 @@ import * as v from "../workforce/validation";
 
 type Context = { account: { id: number; employeeId: number | null }; guard: SQL; contextToken: string };
 type OwnRequest = Pick<PtoRequest, "id" | "startDate" | "endDate" | "startTime" | "endTime" | "status"> & { category: LeaveCategory; minutes: number };
-export type MyTimeOff = { today: string; contextToken: string; revision: number; requests: OwnRequest[] };
+export type MyTimeOff = { today: string; contextToken: string; revision: number; requests: OwnRequest[]; balances: LeaveAccount[] };
 
 export async function readMyTimeOff(db: KioskOperatorDatabase, ctx: Context, now: number): Promise<MyTimeOff> {
   const [metadata, requests] = await db.batch([
@@ -27,7 +29,8 @@ export async function readMyTimeOff(db: KioskOperatorDatabase, ctx: Context, now
   ]);
   if (!metadata[0]) throw new AuthError(401, "Sign in to continue.");
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
-  return { ...metadata[0], today, contextToken: ctx.contextToken,
+  const [own] = await readLeaveBalances(db, ownLeaveScope(ctx.guard, ctx.account.employeeId ?? -1), now);
+  return { ...metadata[0], today, contextToken: ctx.contextToken, balances: own?.balances ?? [],
     requests: requests.map(({ compensation, category, startTime, endTime, ...request }) => ({
       ...request, startTime: startTime ?? undefined, endTime: endTime ?? undefined,
       category: leaveCategory({ category, compensation }), minutes: leaveRequestMinutes({ ...request, startTime, endTime }),

@@ -5,6 +5,7 @@ import * as s from "../db/schema";
 import type { Context, Database } from "./context";
 import { canonical, newRecordId } from "./contract";
 import { leaveCategory, type LeaveCategory } from "./leave-duration";
+import { requireLeaveAvailable } from "./leave-balances";
 import type { PtoRequest } from "./model";
 import { timeOffDates } from "./time-off";
 import { activeTimesheetLock, periodLockByDate, requireTimesheetUnlocked } from "./timesheet-lock-guards";
@@ -126,6 +127,7 @@ async function applyChange(db: Database, ctx: Context, body: Record<string, unkn
     dates ? periodLockByDate(dates.startDate, dates.endDate) : undefined,
   ) : undefined;
   if (lock) await requireTimesheetUnlocked(db, lock);
+  if (next && compensation === "paid") await requireLeaveAvailable(db, ctx, now, { ...next, employeeId, compensation }, stored ?? undefined);
   const unlocked = lock ? sql`NOT EXISTS (SELECT 1 FROM timesheet_lock_events l WHERE (${lock}) AND ${activeTimesheetLock})` : sql`1 = 1`;
   const tx = new WorkspaceTransaction(db, { account: ctx.account, activeActor: () => sql`${ctx.activeActor()} AND ${unlocked}
     AND NOT EXISTS (SELECT 1 FROM workforce_commits WHERE id = ${id})` }, id, new Date(now).toISOString());

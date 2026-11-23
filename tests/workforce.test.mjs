@@ -416,6 +416,8 @@ test("shared workforce operations persist, scope, audit and serialize actual D1 
     const endpoint = "time-off";
     const original = "2026-11-07", proposed = "2026-11-14";
     const details = { category: "pto", startDate: original, endDate: original, startTime: "09:00", endTime: "11:30", reason: "vacation" };
+    const [allowance] = await db.insert(schema.ptoPolicies).values({ name: "Manager action test PTO", method: "fixed", fixedAllowanceSeconds: 144000 }).returning();
+    await db.insert(schema.ptoAssignments).values({ employeeId: f.a.id, policyId: allowance.id, startDate: "2026-11-01" });
     const callBody = async (cookie, action) => ({ ...action, id: newToken(), revision: (await snapshot(cookie)).revision });
     const post = (cookie, body) => call(endpoint, cookie, body);
     const history = (cookie, id) => call(endpoint + "?request=" + id, cookie);

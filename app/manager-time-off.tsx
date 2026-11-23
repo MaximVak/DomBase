@@ -59,13 +59,12 @@ function HistoryEntries({ entries }: { entries: ManagerTimeOffView["history"] })
   </li>)}</ol>;
 }
 
-export function ManagerTimeOffDialog({ target, people, close, restoreFocus, onSaved, validateBalance }: {
+export function ManagerTimeOffDialog({ target, people, close, restoreFocus, onSaved }: {
   target: ManagerTimeOffTarget;
   people: Person[];
   close: () => void;
   restoreFocus: HTMLElement | null;
   onSaved: (operation: ManagerTimeOffOperation) => void;
-  validateBalance: (employeeId: number, details: ManagerTimeOffFields, requestId?: number) => string;
 }) {
   const shared = useSharedWorkspace();
   const { history, error: loadError } = useLeaveHistory(target.action === "add" ? undefined : target.requestId);
@@ -141,8 +140,6 @@ export function ManagerTimeOffDialog({ target, people, close, restoreFocus, onSa
           <button type="button" className="danger-confirm" disabled={saving || shared.pending}
             onClick={() => void save({ action: "cancel", requestId: record.id, version: record.version })}>{saving ? "Saving…" : title}</button></div>
       </> : <LeaveForm initial={initial} people={people} record={record} saving={saving || shared.pending} onClose={close} onSubmit={(emp, details) => {
-        const issue = validateBalance(emp, details, record?.id);
-        if (issue) { setError(issue); return; }
         void save(record ? { action: "edit", requestId: record.id, version: record.version, details } : { action: "add", employeeId: emp, details });
       }} />}
     {error ? <p role="alert" className="manager-time-off-error">{error}</p> : null}

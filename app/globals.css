@@ -7040,7 +7040,7 @@ label.enforcement-rule-line {
 
 .pto-row {
   display: grid;
-  grid-template-columns: minmax(190px, 1.35fr) minmax(145px, 0.9fr) repeat(3, minmax(95px, 0.6fr));
+  grid-template-columns: minmax(150px, 1.35fr) minmax(105px, 0.9fr) repeat(4, minmax(75px, 0.6fr));
   align-items: center;
   gap: 16px;
   min-height: 68px;
@@ -11116,6 +11116,17 @@ button[aria-label^="Remove"]:focus-visible,
 .my-time-off-requests { padding: 0; list-style: none; }
 .my-time-off-requests li { display: flex; flex-wrap: wrap; gap: 4px 12px; padding-block: 12px; border-bottom: 1px solid var(--line); }
 .my-time-off-requests li span:last-child { margin-inline-start: auto; }
+.my-leave-balances dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr)); gap: 12px; }
+.my-leave-balances dl > div { padding: 12px 16px; border: 1px solid var(--line); border-radius: 8px; }
+.my-leave-balances dt { color: var(--muted); }
+.my-leave-balances dd { margin: 4px 0 0; font-weight: 700; }
+.leave-policy-options { display: grid; gap: 12px; min-width: 0; }
+.leave-policy-options label { display: grid; gap: 4px; font-weight: 600; min-width: 0; }
+.leave-policy-options :is(input, select) { min-width: 0; width: 100%; min-height: 38px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: white; color: var(--ink); }
+.leave-policy-options p { margin: 0; color: var(--muted); }
+.leave-policy-options fieldset { display: grid; gap: 8px; border: 1px solid var(--line); padding: 8px; min-width: 0; }
+.leave-tenure-bonus { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; }
+.leave-tenure-bonus label { flex: 1 1 95px; }
 .manager-time-off-dialog { box-sizing: border-box; width: min(540px, calc(100% - 24px)); max-height: calc(100dvh - 32px); overflow: auto; padding: clamp(14px, 4vw, 24px); border: 1px solid var(--line); border-radius: 10px; background: white; color: var(--ink); }
 .manager-time-off-dialog::backdrop { background: rgb(18 33 58 / 48%); }
 .manager-time-off-dialog .modal-heading { align-items: flex-start; }

@@ -15,7 +15,8 @@ import { OpenShiftManager } from "./open-shift-manager";
 import { SchedulePublishControl } from "./schedule-publish";
 import { ScheduleTools } from "./schedule-tools";
 import { ManagerTimeOffDialog, ManagerTimeOffHistory, type ManagerTimeOffTarget } from "./manager-time-off";
-import type { ManagerTimeOffFields } from "../workforce/manager-time-off";
+import { useLeaveBalances } from "./leave-balances";
+import { LeavePolicyOptions } from "./leave-policy-options";
 import { ShiftBuilderOptions } from "./shift-builder-options";
 import { isWorkShift, shiftLayoutError } from "./shift-builder";
 import { estimateSchedule } from "./schedule-estimates";
@@ -25,7 +26,7 @@ import { createPortal } from "react-dom";
 import { DepartmentManagerCell, DepartmentManagerFeedback, useDepartmentManagers } from "./department-managers";
 import { useSharedWorkspace } from "./shared-workspace";
 import { equal, newRecordId } from "../workforce/contract";
-import { approvedLeaveMinutesByDay, fullDayLeaveMinutes, leaveCategories, leaveCategory, leaveRequestMinutes } from "../workforce/leave-duration";
+import { fullDayLeaveMinutes, leaveCategories, leaveCategory, leaveRequestMinutes } from "../workforce/leave-duration";
 import { PrintTable } from "./print-table";
 import { rosterCopyHeaders, rosterCopyRows, rosterCsv } from "./roster-export";
 import { alertsPermissionsFields, automaticClockOutAt, canManageScheduleRole, canViewTeamSchedule, clockInTiming, defaultScheduleEnforcement, normalizeScheduleEnforcement, scheduleEnforcementFields, schedulingSettingsForSave, workWeekOffset } from "./schedule-enforcement";
@@ -1038,42 +1039,14 @@ export default function Home({ account }: { account: DashboardAccount }) {
   const timeExceptionMessage = pendingTimeException
     ? timeExceptionWarningMessage(pendingTimeException, myShift, activeBreakEndTime, currentTime)
     : "";
-  const ptoRows = useMemo(() => {
-    const yearToDate = yearToDateRange(new Date(currentTime));
-    const ptoPolicyByEmployeeId = new Map<number, PtoPolicy>();
-    (state.ptoPolicies ?? []).forEach((policy) => {
-      policy.employeeIds.forEach((employeeId) => ptoPolicyByEmployeeId.set(employeeId, policy));
-    });
-
-    return state.employees.map((employee) => {
-      const hoursWorked = adjustedWorkedHoursForRange(
-        state.clockEvents,
-        state.hoursAdjustments ?? [],
-        employee.id,
-        yearToDate,
-        currentTime,
-      );
-      const ptoPolicy = ptoPolicyByEmployeeId.get(employee.id);
-      const policyStartDate = ptoPolicy?.startingBalances?.[employee.id]?.startDate;
-      const policyStart = policyStartDate ? startOfDay(parseLocalDate(policyStartDate)) : yearToDate.start;
-      const accrualHoursWorked = ptoPolicy && policyStart > yearToDate.start
-        ? adjustedWorkedHoursForRange(
-            state.clockEvents,
-            state.hoursAdjustments ?? [],
-            employee.id,
-            { start: policyStart, end: yearToDate.end },
-            currentTime,
-          )
-        : hoursWorked;
-
-      return {
-        employee,
-        hoursWorked,
-        ptoHours: ptoHoursEarnedForPolicy(accrualHoursWorked, ptoPolicy, employee.id),
-        ptoUsed: ptoHoursUsedThisYear(state.ptoRequests ?? [], employee.id, new Date(currentTime).getFullYear()),
-      };
-    });
-  }, [currentTime, state.clockEvents, state.employees, state.hoursAdjustments, state.ptoPolicies, state.ptoRequests]);
+  const canManageLeavePolicies = shared.data.permissions["settings.manage"] && shared.data.scheduleEstimateScopeComplete === true;
+  const leave = useLeaveBalances(mode === "manager" && shared.data.permissions["time_off.read"] &&
+    (activeView === "time_off" || activeView === "employees"), shared.data.revision);
+  const ptoRows = state.employees.map(employee => {
+    const summary = leave.rows.find(row => row.employeeId === employee.id);
+    return { employee, hoursWorked: summary ? summary.verifiedWorkedSeconds / 3600 : undefined,
+      pto: summary?.balances.find(balance => balance.category === "pto"), sick: summary?.balances.find(balance => balance.category === "sick") };
+  });
   const activeEmployeePto = ptoRows.find((row) => row.employee.id === activeEmployeeId);
   const viewingRosterEmployee = state.employees.find((employee) => employee.id === viewingRosterEmployeeId);
   const rosterActionEmployee = state.employees.find((employee) => employee.id === rosterActionEmployeeId);
@@ -1085,9 +1058,6 @@ export default function Home({ account }: { account: DashboardAccount }) {
     .some(([field, value]) => value !== savedPersonalContact[field as keyof typeof personalContactDraft]);
   const terminatingEmployee = state.employees.find((employee) => employee.id === terminatingEmployeeId);
   const viewingRosterEmployeePto = ptoRows.find((row) => row.employee.id === viewingRosterEmployeeId);
-  const viewingRosterEmployeePtoPolicy = (state.ptoPolicies ?? []).find(
-    (policy) => viewingRosterEmployeeId !== null && policy.employeeIds.includes(viewingRosterEmployeeId),
-  );
   const sortedPtoRequests = useMemo(
     () => (state.ptoRequests ?? [])
       .filter((request) => mode === "manager" || request.employeeId === activeEmployeeId)
@@ -1110,9 +1080,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
   const displayedPtoRequests = arePtoRequestsExpanded
     ? filteredHistoricalPtoRequests
     : filteredHistoricalPtoRequests.slice(0, 1);
-  const activeEmployeePtoLeft = activeEmployeePto
-    ? activeEmployeePto.ptoHours - activeEmployeePto.ptoUsed
-    : 0;
+  const activeEmployeePtoLeft = (activeEmployeePto?.pto?.availableSeconds ?? 0) / 3600;
   const ptoRequestPreviewHours = ptoRequestForm
     ? leaveRequestMinutes(ptoRequestForm) / 60
     : 0;
@@ -2388,10 +2356,12 @@ export default function Home({ account }: { account: DashboardAccount }) {
   }
 
   function openPtoPolicy() {
+    shared.setError("");
     setEditingPtoPolicyId(null);
     setPtoPolicyForm({
       name: "",
       method: "rate",
+      category: "pto", fixedFrequency: "annual", maxBalanceHours: "", carryoverHours: "", waitingDays: "0", tenureBonuses: [],
       fixedHours: "120",
       earnedHours: "1",
       workedHours: "30",
@@ -2403,10 +2373,14 @@ export default function Home({ account }: { account: DashboardAccount }) {
   }
 
   function editPtoPolicy(policy: PtoPolicy) {
+    shared.setError("");
     setEditingPtoPolicyId(policy.id);
     setPtoPolicyForm({
       name: policy.name,
       method: policy.method,
+      category: policy.category ?? "pto", fixedFrequency: policy.fixedFrequency ?? "annual",
+      maxBalanceHours: String(policy.maxBalanceHours ?? ""), carryoverHours: String(policy.carryoverHours ?? ""),
+      waitingDays: String(policy.waitingDays ?? 0), tenureBonuses: (policy.tenureBonuses ?? []).map(item => ({ years: String(item.years), hours: String(item.hours) })),
       fixedHours: String(policy.fixedHours || 120),
       earnedHours: String(policy.earnedHours || 1),
       workedHours: String(policy.workedHours || 30),
@@ -2453,6 +2427,10 @@ export default function Home({ account }: { account: DashboardAccount }) {
       return;
     }
 
+    if (ptoPolicyForm.tenureBonuses.some(bonus => !bonus.years || !bonus.hours)) {
+      setPtoPolicyError("Enter the anniversary year and hours for each bonus.");
+      return;
+    }
     const fixedHours = Number(ptoPolicyForm.fixedHours);
     const earnedHours = Number(ptoPolicyForm.earnedHours);
     const workedHours = Number(ptoPolicyForm.workedHours);
@@ -2515,25 +2493,17 @@ export default function Home({ account }: { account: DashboardAccount }) {
 
     const editedPolicyId = editingPtoPolicyId;
     if (!await setState((current) => {
-      const selectedIds = new Set(ptoPolicyForm.employeeIds);
-      const existingPolicies = (current.ptoPolicies ?? [])
-        .filter((policy) => policy.id !== editedPolicyId)
-        .map((policy) => {
-          const employeeIds = policy.employeeIds.filter((employeeId) => !selectedIds.has(employeeId));
-          return {
-            ...policy,
-            employeeIds,
-            startingBalances: Object.fromEntries(employeeIds.map((employeeId) => [
-              employeeId,
-              policy.startingBalances?.[employeeId] ?? { startDate: today, balance: 0 },
-            ])),
-          };
-        })
-        .filter((policy) => policy.employeeIds.length > 0);
+      const existingPolicies = (current.ptoPolicies ?? []).filter(policy => policy.id !== editedPolicyId);
       const newPolicy: PtoPolicy = {
         id: editedPolicyId ?? nextId(current.ptoPolicies ?? []),
         name: ptoPolicyForm.name.trim(),
         method: ptoPolicyForm.method,
+        category: ptoPolicyForm.category, fixedFrequency: ptoPolicyForm.fixedFrequency,
+        maxBalanceHours: ptoPolicyForm.maxBalanceHours ? Number(ptoPolicyForm.maxBalanceHours) : null,
+        carryoverHours: ptoPolicyForm.category === "sick" && ptoPolicyForm.method === "fixed" && ptoPolicyForm.fixedFrequency === "annual" && ptoPolicyForm.carryoverHours
+          ? Number(ptoPolicyForm.carryoverHours) : null,
+        waitingDays: Number(ptoPolicyForm.waitingDays),
+        tenureBonuses: ptoPolicyForm.tenureBonuses.map(bonus => ({ years: Number(bonus.years), hours: Number(bonus.hours) })),
         fixedHours: ptoPolicyForm.method === "fixed" ? Number(ptoPolicyForm.fixedHours) : 0,
         earnedHours: ptoPolicyForm.method === "rate" ? Number(ptoPolicyForm.earnedHours) : 0,
         workedHours: ptoPolicyForm.method === "rate" ? Number(ptoPolicyForm.workedHours) : 0,
@@ -2581,12 +2551,6 @@ export default function Home({ account }: { account: DashboardAccount }) {
       setPtoRequestError("Choose at least one valid day for time off.");
       return;
     }
-    const employeePto = ptoRows.find((row) => row.employee.id === activeEmployee.id);
-    const ptoHoursLeft = employeePto ? employeePto.ptoHours - employeePto.ptoUsed : 0;
-    if (ptoRequestForm.compensation === "paid" && ptoHoursLeft < requestedPtoHours) {
-      setPtoRequestError("You do not have enough PTO hours. You cannot submit this request.");
-      return;
-    }
     const explanation = ptoRequestForm.explanation.trim();
     const requestedAt = new Date().toISOString();
     const autoApproved = activeEmployee.accessLevel === "Admin";
@@ -2624,20 +2588,6 @@ export default function Home({ account }: { account: DashboardAccount }) {
       setPtoReviewError("You cannot approve or deny your own time off request.");
       return;
     }
-    if (status === "approved" && request.status !== "approved" && leaveCategory(request) === "pto") {
-      const employeePto = ptoRows.find((row) => row.employee.id === request.employeeId);
-      const ptoHoursLeft = employeePto ? employeePto.ptoHours - employeePto.ptoUsed : 0;
-      const existing = approvedPtoForEmployee(state.ptoRequests, request.employeeId);
-      const period = { start: request.startDate, end: request.endDate };
-      const requestedHours = ptoHoursInPeriod([...existing, request], period) - ptoHoursInPeriod(existing, period);
-      if (ptoHoursLeft < requestedHours) {
-        setPtoReviewError(
-          `This employee does not have enough PTO hours. They have ${formatPtoHours(ptoHoursLeft)} left, but this request uses ${formatPtoHours(requestedHours)}.`,
-        );
-        return;
-      }
-    }
-
     if (!await setState((current) => ({
       ...current,
       ptoRequests: (current.ptoRequests ?? []).map((request) =>
@@ -2668,17 +2618,6 @@ export default function Home({ account }: { account: DashboardAccount }) {
       <button className="edit-approved-time-off" type="button" onClick={event => open("edit", event.currentTarget)}>Edit approved time off</button>
       <button className="cancel-approved-time-off" type="button" onClick={event => open("cancel", event.currentTarget)}>Cancel approved time off</button>
     </>;
-  }
-
-  function checkManagerPtoBalance(employeeId: number, details: ManagerTimeOffFields, requestId?: number) {
-    if (details.category !== "pto") return "";
-    const year = new Date(currentTime).getFullYear(), period = { start: year + "-01-01", end: year + "-12-31" };
-    const existing = approvedPtoForEmployee(state.ptoRequests, employeeId);
-    const proposed = [...existing.filter(request => request.id !== requestId), details];
-    const added = ptoHoursInPeriod(proposed, period) - ptoHoursInPeriod(existing, period);
-    const employee = ptoRows.find(row => row.employee.id === employeeId);
-    const left = employee ? employee.ptoHours - employee.ptoUsed : 0;
-    return added > 0 && added > left ? "This change needs " + formatPtoHours(added) + " of PTO. This employee has " + formatPtoHours(left) + " left." : "";
   }
 
   async function cancelPtoRequest(requestId: number) {
@@ -4398,7 +4337,10 @@ export default function Home({ account }: { account: DashboardAccount }) {
                             <div className="team-member-profile-card-heading"><h3>Time off balances</h3></div>
                             <div className="team-member-time-off-table" role="table" aria-label={`${viewingRosterEmployee.name} time off balances`}>
                               <div role="row"><span role="columnheader">Time Off Category</span><span role="columnheader">Policy Name</span><span role="columnheader">Balance</span></div>
-                              <div role="row"><span role="cell">Paid Time Off</span><span role="cell">{viewingRosterEmployeePtoPolicy?.name ?? "No policy"}</span><span role="cell">{formatPtoHours((viewingRosterEmployeePto?.ptoHours ?? 0) - (viewingRosterEmployeePto?.ptoUsed ?? 0))}</span></div>
+                              {(["pto", "sick"] as const).map(category => {
+                                const balance = viewingRosterEmployeePto?.[category];
+                                return <div role="row" key={category}><span role="cell">{leaveCategories[category]}</span><span role="cell">{balance?.name ?? "No policy"}</span><span role="cell">{balance ? formatPtoHours(balance.availableSeconds / 3600) : "—"}</span></div>;
+                              })}
                             </div>
                           </section>
                         </>
@@ -5736,17 +5678,19 @@ export default function Home({ account }: { account: DashboardAccount }) {
                     </button>
                   ) : null}
                 </div>
-                <div className="pto-list" role="table" aria-label="Employee year-to-date PTO">
+                {leave.error ? <p role="alert">{leave.error}</p> : null}
+                <div className="pto-list" role="table" aria-label="Employee leave balances">
                   <div className="pto-row pto-table-head" role="row">
                     <span role="columnheader">Employee</span>
                     <span role="columnheader">Hours worked YTD</span>
                     <span role="columnheader">PTO earned</span>
                     <span role="columnheader">PTO used</span>
                     <span role="columnheader">PTO left</span>
+                    <span role="columnheader">Sick leave left</span>
                   </div>
                   {ptoRows
                     .filter(({ employee }) => mode === "manager" || employee.id === activeEmployeeId)
-                    .map(({ employee, hoursWorked, ptoHours, ptoUsed }) => (
+                    .map(({ employee, hoursWorked, pto, sick }) => (
                     <div className="pto-row" role="row" key={employee.id}>
                       <div role="cell" className="pto-employee">
                         <span className="schedule-avatar" aria-hidden="true">{employeeInitials(employee.name)}</span>
@@ -5755,10 +5699,11 @@ export default function Home({ account }: { account: DashboardAccount }) {
                           <span>{employee.role}</span>
                         </div>
                       </div>
-                      <strong role="cell">{formatPtoChartHours(hoursWorked)}</strong>
-                      <strong role="cell" className="pto-earned">{formatPtoHours(ptoHours)}</strong>
-                      <strong role="cell">{formatPtoHours(ptoUsed)}</strong>
-                      <strong role="cell" className="pto-left">{formatPtoHours(ptoHours - ptoUsed)}</strong>
+                      <strong role="cell">{hoursWorked === undefined ? "—" : formatPtoChartHours(hoursWorked)}</strong>
+                      <strong role="cell" className="pto-earned">{pto ? formatPtoHours(pto.yearEarnedSeconds / 3600) : "—"}</strong>
+                      <strong role="cell">{pto ? formatPtoHours(pto.yearUsedSeconds / 3600) : "—"}</strong>
+                      <strong role="cell" className="pto-left">{pto ? formatPtoHours(pto.availableSeconds / 3600) : "—"}</strong>
+                      <strong role="cell" className="pto-left">{sick ? formatPtoHours(sick.availableSeconds / 3600) : "—"}</strong>
                     </div>
                   ))}
                 </div>
@@ -6109,7 +6054,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
               <div>
                 <h2 id="pto-policy-title">
                   {ptoPolicyStep === "details"
-                    ? editingPtoPolicyId === null ? "Add PTO policy" : "Edit PTO policy"
+                    ? editingPtoPolicyId === null ? "Add leave policy" : "Edit leave policy"
                     : ptoPolicyStep === "employees" ? "Choose employees" : "Starting balances"}
                 </h2>
               </div>
@@ -6149,7 +6094,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                         type="radio"
                         name="pto-policy-method"
                         checked={ptoPolicyForm.method === "rate"}
-                        onChange={() => setPtoPolicyForm((form) => form ? { ...form, method: "rate" } : form)}
+                        onChange={() => setPtoPolicyForm((form) => form ? { ...form, method: "rate", carryoverHours: "" } : form)}
                       />
                       <span>Rate <small>(example: 1 hour per 30 hours worked)</small></span>
                     </label>
@@ -6181,7 +6126,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                           step="0.01"
                           value={ptoPolicyForm.earnedHours}
                           onChange={(event) => setPtoPolicyForm((form) => form ? { ...form, earnedHours: event.target.value } : form)}
-                          aria-label="PTO hours earned"
+                          aria-label="Leave hours earned"
                         />
                         <b>hours</b>
                       </span>
@@ -6193,7 +6138,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                           step="0.01"
                           value={ptoPolicyForm.workedHours}
                           onChange={(event) => setPtoPolicyForm((form) => form ? { ...form, workedHours: event.target.value } : form)}
-                          aria-label="Hours worked for PTO accrual"
+                          aria-label="Hours worked for leave accrual"
                         />
                         <b>hours</b>
                       </span>
@@ -6201,6 +6146,8 @@ export default function Home({ account }: { account: DashboardAccount }) {
                     </div>
                   </div>
                 )}
+                <LeavePolicyOptions form={ptoPolicyForm} editing={editingPtoPolicyId !== null}
+                  change={next => setPtoPolicyForm(form => form ? { ...form, ...next } : form)} />
               </div>
             ) : ptoPolicyStep === "employees" ? (
               <div className="pto-policy-employee-step">
@@ -6224,12 +6171,12 @@ export default function Home({ account }: { account: DashboardAccount }) {
               </div>
             ) : (
               <div className="pto-policy-balance-step">
-                <p>If your team members have an existing balance, enter those hours here. Their PTO begins accruing from the selected start date.</p>
+                <p>Enter each employee’s existing balance and the date this policy starts.</p>
                 <div className="pto-policy-balance-table">
                   <div className="pto-policy-balance-header" aria-hidden="true">
                     <span>Employee</span>
                     <span>Employee start date</span>
-                    <span>PTO start balance</span>
+                    <span>Starting balance (hours)</span>
                   </div>
                   {ptoPolicyForm.employeeIds.map((employeeId) => {
                     const employee = employeeById(activeEmployees, employeeId);
@@ -6260,7 +6207,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                           />
                         </label>
                         <label>
-                          <span>PTO start balance</span>
+                          <span>Starting balance (hours)</span>
                           <span className="pto-policy-balance-input">
                             <input
                               type="number"
@@ -6284,7 +6231,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
               </div>
             )}
 
-            {ptoPolicyError ? <p className="shift-error-message" role="alert">{ptoPolicyError}</p> : null}
+            {ptoPolicyError || shared.error ? <p className="shift-error-message" role="alert">{ptoPolicyError || shared.error}</p> : null}
             <div className="pto-policy-actions">
               <button
                 type="button"
@@ -6324,7 +6271,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
             <div className="modal-heading">
               <div className="pto-policies-heading-content">
                 <h2 id="saved-pto-policies-title">Policies</h2>
-                <button
+                {canManageLeavePolicies ? <button
                   type="button"
                   className="pto-policy-add-link"
                   onClick={() => {
@@ -6333,7 +6280,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                   }}
                 >
                   + Add Policy
-                </button>
+                </button> : null}
               </div>
               <button type="button" onClick={() => setIsViewingPtoPolicies(false)} aria-label="Close PTO policies">
                 <span aria-hidden="true">&times;</span>
@@ -6349,7 +6296,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                   .filter((name): name is string => Boolean(name));
                 return (
                   <article className="pto-saved-policy-card" key={policy.id}>
-                    <div className="pto-policy-card-actions">
+                    {canManageLeavePolicies ? <div className="pto-policy-card-actions">
                       <button
                         type="button"
                         className="pto-policy-edit-button"
@@ -6376,9 +6323,10 @@ export default function Home({ account }: { account: DashboardAccount }) {
                           <path d="M10 11v5M14 11v5" />
                         </svg>
                       </button>
-                    </div>
+                    </div> : null}
                     <div>
                       <h3>{policy.name}</h3>
+                      <p>{leaveCategories[policy.category ?? "pto"]}</p>
                       <p>
                         {policy.method === "fixed"
                           ? `${policy.fixedHours} hours per year`
@@ -6467,7 +6415,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                 </button>
                 {reviewingPtoRequest.status === "pending" && canManageTimeOff ? <>
                   <p className="pto-review-prompt">Approve or deny this time off request?</p>
-                  {ptoReviewError ? <p className="shift-error-message" role="alert">{ptoReviewError}</p> : null}
+                  {ptoReviewError || shared.error ? <p className="shift-error-message" role="alert">{ptoReviewError || shared.error}</p> : null}
                   <div className="pto-review-actions">
                     <button type="button" className="approve-action" onClick={() => decidePtoRequest("approved")}>Approve</button>
                     <button type="button" className="deny-action" onClick={() => decidePtoRequest("denied")}>Deny</button>
@@ -6483,7 +6431,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
 
       {managerTimeOff ? <ManagerTimeOffDialog target={managerTimeOff.target} restoreFocus={managerTimeOff.opener}
         people={state.employees.filter(person => person.active && !person.terminated && (person.id !== activeEmployeeId || account.accessLevel === "owner"))}
-        close={() => setManagerTimeOff(null)} validateBalance={checkManagerPtoBalance} onSaved={operation => {
+        close={() => setManagerTimeOff(null)} onSaved={operation => {
           if (activeView === "schedule" && operation.action !== "cancel") setScheduleDate(operation.details.startDate);
         }} /> : null}
 
@@ -8189,35 +8137,6 @@ function startOfNextDay(date: Date) {
   const next = startOfDay(date);
   next.setDate(next.getDate() + 1);
   return next;
-}
-
-function yearToDateRange(date: Date) {
-  return {
-    start: new Date(date.getFullYear(), 0, 1),
-    end: startOfDay(date),
-  };
-}
-
-function ptoHoursEarnedForPolicy(hoursWorked: number, policy: PtoPolicy | undefined, employeeId: number) {
-  if (!policy) return 0;
-  const startingBalance = policy.startingBalances?.[employeeId]?.balance ?? 0;
-  if (policy.method === "fixed") return startingBalance + policy.fixedHours;
-  if (policy.earnedHours <= 0 || policy.workedHours <= 0) return startingBalance;
-
-  const accruedHours = (Math.max(0, hoursWorked) / policy.workedHours) * policy.earnedHours;
-  return Math.round((startingBalance + accruedHours) * 100) / 100;
-}
-
-function approvedPtoForEmployee(requests: PtoRequest[], employeeId: number) {
-  return requests.filter(request => request.employeeId === employeeId && request.status === "approved" && leaveCategory(request) === "pto");
-}
-
-function ptoHoursInPeriod(requests: Parameters<typeof approvedLeaveMinutesByDay>[0], period: { start: string; end: string }) {
-  return [...approvedLeaveMinutesByDay(requests, period).values()].reduce((total, minutes) => total + minutes, 0) / 60;
-}
-
-function ptoHoursUsedThisYear(requests: PtoRequest[], employeeId: number, year: number) {
-  return ptoHoursInPeriod(approvedPtoForEmployee(requests, employeeId), { start: `${year}-01-01`, end: `${year}-12-31` });
 }
 
 function scheduleTimeOffHours(request: PtoRequest) {

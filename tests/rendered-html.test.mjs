@@ -629,24 +629,25 @@ test("starter preview code is no longer wired into DomBase", async () => {
 
 test("manager PTO view supports configurable fixed and rate policies", async () => {
   const page = await workspaceSource();
+  const options = await readFile(new URL("../app/leave-policy-options.tsx", import.meta.url), "utf8");
 
   assert.doesNotMatch(page, /id: "pto", label: "PTO"/);
   assert.doesNotMatch(page, /HoursSectionTab|hours-section-tabs|Hours and PTO views/);
   assert.match(page, /activeView === "time_off" && !isPublicSchedule && \(/);
   assert.match(page, /onClick=\{\(\) => navigateToView\("time_off"\)\}>View PTO<\/button>/);
-  assert.match(page, /ptoHours: ptoHoursEarnedForPolicy\(accrualHoursWorked, ptoPolicy, employee\.id\)/);
-  assert.match(page, /const ptoPolicyByEmployeeId = new Map<number, PtoPolicy>\(\)/);
-  assert.match(page, /ptoPolicyByEmployeeId\.set\(employeeId, policy\)/);
-  assert.match(page, /function ptoHoursEarnedForPolicy/);
-  assert.match(page, /Math\.max\(0, hoursWorked\) \/ policy\.workedHours/);
+  assert.match(page, /useLeaveBalances\(mode === "manager"/);
+  assert.match(page, /summary\.verifiedWorkedSeconds \/ 3600/);
+  assert.match(options, /Paid sick leave/);
+  assert.match(options, /Each completed pay period/);
+  assert.match(options, /Add anniversary bonus/);
   assert.match(page, /function formatPtoChartHours/);
   assert.match(page, /Math\.trunc\(hours\)/);
-  assert.match(page, /role="cell">\{formatPtoChartHours\(hoursWorked\)\}/);
-  assert.match(page, /className="pto-earned">\{formatPtoHours\(ptoHours\)\}/);
-  assert.match(page, /className="pto-left">\{formatPtoHours\(ptoHours - ptoUsed\)\}/);
+  assert.match(page, /role="cell">\{hoursWorked === undefined \? "—" : formatPtoChartHours\(hoursWorked\)\}/);
+  assert.match(page, /className="pto-earned">\{pto \? formatPtoHours\(pto.yearEarnedSeconds \/ 3600\)/);
+  assert.match(page, /className="pto-left">\{pto \? formatPtoHours\(pto.availableSeconds \/ 3600\)/);
   assert.match(page, /setPtoPolicyStep\("balances"\)/);
   assert.match(page, /"Starting balances"/);
-  assert.match(page, />PTO start balance</);
+  assert.match(page, />Starting balance \(hours\)</);
   assert.match(page, /startingBalances:/);
   assert.match(page, /earnedHours: "1",[^]*workedHours: "30"/);
   assert.match(page, />Fixed <small>/);
@@ -666,7 +667,7 @@ test("manager PTO view supports configurable fixed and rate policies", async () 
   assert.match(page, /function deletePtoPolicy/);
   assert.match(page, /className="pto-policy-edit-button"/);
   assert.match(page, /className="pto-policy-delete-button"/);
-  assert.match(page, /"Edit PTO policy"/);
+  assert.match(page, /"Edit leave policy"/);
   assert.doesNotMatch(page, /className="pto-policy-delete-link"/);
   assert.match(page, />No saved policies\.</);
   assert.doesNotMatch(page, /formatDecimalHours/);
@@ -674,7 +675,7 @@ test("manager PTO view supports configurable fixed and rate policies", async () 
   assert.match(page, /PTO earned/);
   assert.match(page, /PTO used/);
   assert.match(page, /PTO left/);
-  assert.match(page, /function ptoHoursUsedThisYear/);
+  assert.match(page, /Sick leave left/);
 });
 
 test("manager can persist manual worked-hour adjustments", async () => {
@@ -735,8 +736,6 @@ test("employees can submit persistent PTO requests with required details", async
   assert.match(page, /\{ptoRequestForm \? \(/);
   assert.match(page, /<button type="button" className="pto-new-request-button" onClick=\{openPtoRequest\}>Request time off<\/button>/);
   assert.match(page, /Requested \{formatRequestTimestamp\(request\.requestedAt\)\}/);
-  assert.match(page, /You do not have enough PTO hours\. You cannot submit this request\./);
-  assert.match(page, /This employee does not have enough PTO hours/);
   assert.match(page, /leaveRequestMinutes\(ptoRequestForm\) \/ 60/);
   assert.doesNotMatch(page, /useCustomTime/);
   assert.doesNotMatch(page, /Specify hours instead of requesting full days/);
@@ -809,7 +808,6 @@ test("managers can approve or deny pending PTO requests", async () => {
   assert.match(page, /Your request is pending approval\./);
   assert.match(page, /request\.employeeId === activeEmployeeId \? \(/);
   assert.match(page, /Approve or deny this time off request/);
-  assert.match(page, /leaveCategory\(request\) === "pto"/);
   assert.match(page, /decidePtoRequest\("approved"\)/);
   assert.match(page, /decidePtoRequest\("denied"\)/);
   assert.match(page, /pto-request-list-header/);

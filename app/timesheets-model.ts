@@ -104,6 +104,7 @@ export function buildTimeCards(input: {
   employees: TimesheetEmployee[]; events: TimesheetEvent[]; shifts: TimesheetShift[]; adjustments: TimesheetAdjustment[]; pto: TimesheetPto[];
   start: string; end: string; now: number; rounding: Rounding; weekStart: number; mandatoryMealBreak: boolean; mealBreakAfterHours: number; mealBreakMinutes?: number;
   breakPremiumPolicy?: BreakPremiumPolicy; timeZone?: string;
+  workedOnly?: boolean;
   overtimePolicy?: OvertimePolicy; overtimeScope?: WorkweekScope;
   schedulePreview?: { shifts: PublishedTimesheetShift[]; minutes: HoursRoundingMinutes };
 }): TimeCard[] {
@@ -207,6 +208,10 @@ export function buildTimeCards(input: {
       }
     }
     flush(false);
+    if (input.workedOnly) {
+      output.push(...cards.filter(card => card.date >= input.start && card.date <= input.end));
+      continue;
+    }
     const typed = events.filter(event => event.clockDetails?.california || event.clockDetails?.breakKind);
     if (typed.length || input.breakPremiumPolicy) {
       const history = events.map(event => ({ type: event.type, at: Date.parse(event.at), automatic: event.automatic, details: event.clockDetails }));

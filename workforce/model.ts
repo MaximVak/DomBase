@@ -234,6 +234,12 @@ export type PtoPolicy = {
   id: number;
   name: string;
   method: PtoPolicyMethod;
+  category?: import("./leave-policy").PaidLeaveCategory;
+  fixedFrequency?: "annual" | "pay_period";
+  maxBalanceHours?: number | null;
+  carryoverHours?: number | null;
+  waitingDays?: number;
+  tenureBonuses?: { years: number; hours: number }[];
   fixedHours: number;
   earnedHours: number;
   workedHours: number;
@@ -244,6 +250,12 @@ export type PtoPolicy = {
 export type PtoPolicyForm = {
   name: string;
   method: PtoPolicyMethod;
+  category: import("./leave-policy").PaidLeaveCategory;
+  fixedFrequency: "annual" | "pay_period";
+  maxBalanceHours: string;
+  carryoverHours: string;
+  waitingDays: string;
+  tenureBonuses: { years: string; hours: string }[];
   fixedHours: string;
   earnedHours: string;
   workedHours: string;

@@ -181,11 +181,31 @@ test("employee password self-service enforces person, field, session and transac
     const after = await current(); assert.deepEqual(after.values, before.values); assert.equal(after.employeeVersion, before.employeeVersion); assert.equal(after.profileVersion, before.profileVersion);
   });
   await t.test("own hourly and whole-day time off reach manager approval, schedule and accountant export", async () => {
+    const [pto, sickPolicy] = await db.insert(schema.ptoPolicies).values([
+      { name: "Earned PTO", category: "pto", method: "rate", earnedSeconds: 3600, perWorkedSeconds: 20 * 3600 },
+      { name: "Annual sick leave", category: "sick", method: "fixed", fixedAllowanceSeconds: 40 * 3600 },
+    ]).returning();
+    await db.insert(schema.ptoAssignments).values([
+      { employeeId: f.a.id, policyId: pto.id, category: "pto", startDate: "2026-11-01", openingBalanceSeconds: 10 * 3600 },
+      { employeeId: f.a.id, policyId: sickPolicy.id, category: "sick", startDate: "2026-11-01" },
+    ]);
+    const stamp = (date, time) => date + "T" + time + ":00-08:00";
+    await db.insert(schema.clockEvents).values([
+      { employeeId: f.a.id, eventType: "in", occurredAt: stamp("2026-11-11", "08:00"), roleName: f.roleA.name },
+      { employeeId: f.a.id, eventType: "break", occurredAt: stamp("2026-11-11", "12:00"), roleName: f.roleA.name },
+      { employeeId: f.a.id, eventType: "break_end", occurredAt: stamp("2026-11-11", "13:00"), roleName: f.roleA.name },
+      { employeeId: f.a.id, eventType: "out", occurredAt: stamp("2026-11-11", "19:00"), roleName: f.roleA.name },
+      { employeeId: f.a.id, eventType: "in", occurredAt: stamp("2026-11-12", "08:00"), roleName: f.roleA.name },
+      { employeeId: f.a.id, eventType: "out", occurredAt: stamp("2026-11-12", "18:00"), roleName: f.roleA.name },
+      { employeeId: f.a.id, eventType: "in", occurredAt: stamp("2026-11-13", "08:00"), roleName: f.roleA.name },
+      { employeeId: f.a.id, eventType: "out", occurredAt: stamp("2026-11-13", "17:00"), roleName: f.roleA.name, automatic: true },
+    ].map(row => ({ ...row, occurredAt: new Date(row.occurredAt).toISOString() })));
     const path = "/api/self/time-off";
     const callTimeOff = (body, cookie = employee, route = path) => call(body, cookie, route);
     const currentTimeOff = async () => data(await callTimeOff());
     const initial = await currentTimeOff();
     assert.deepEqual(initial.requests.map(row => row.category), ["unpaid"]);
+    assert.deepEqual(initial.balances.map(row => [row.category, row.availableSeconds / 3600]).sort(), [["pto", 11], ["sick", 40]]);
     assert.equal((await callTimeOff(undefined, "")).status, 401);
     assert.equal((await callTimeOff(undefined, owner)).status, 403);
     assert.equal((await callTimeOff(undefined, employee, path + "?employeeId=2")).status, 400);
@@ -232,8 +252,21 @@ test("employee password self-service enforces person, field, session and transac
     const [sick] = (await currentTimeOff()).requests.filter(row => row.startDate === sickDate);
     assert.deepEqual([sick.category, sick.minutes], ["sick", 480]);
     await approve(sick.id);
+    const balances = (await currentTimeOff()).balances;
+    assert.deepEqual(balances.map(row => [row.category, row.availableSeconds / 3600]).sort(), [["pto", 9], ["sick", 32]]);
     const report = await data(await workforce.handle(request(`/api/workspace/accountant-export?start=${date}&end=${sickDate}`, owner)));
     assert.equal(report.rows.find(row => row.employeeId === f.a.id).pto, 10);
+    const last = await currentTimeOff();
+    await data(await callTimeOff({ ...fullDay, id: newToken(), revision: last.revision, category: "pto", reason: "vacation",
+      startDate: "2026-11-19", endDate: "2026-11-20" }));
+    const overdraw = (await currentTimeOff()).requests.find(row => row.startDate === "2026-11-19");
+    const managerView = await workspace();
+    const before = managerView.state.ptoRequests.find(row => row.id === overdraw.id);
+    const denied = await workforce.handle(request("/api/workspace/commit", manager, { id: newToken(), revision: managerView.revision,
+      employeeVersions: managerView.employeeVersions, changes: [{ entity: "pto-request", id: overdraw.id, before, after: { ...before, status: "approved" } }] }));
+    assert.equal(denied.status, 409);
+    assert.match((await denied.json()).error, /does not have enough paid time off/i);
+    assert.equal((await currentTimeOff()).requests.find(row => row.id === overdraw.id).status, "pending");
     await db.insert(schema.accountPermissions).values({ accountId: f.manager.id, permission: "time_off.read", allowed: false });
     const restricted = await workspace();
     assert.equal(restricted.state.ptoRequests.some(row => row.employeeId === f.a.id), false);
