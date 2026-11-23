@@ -31,7 +31,7 @@ export function schedulePrintDocument(input: {
   location: string; timeZone: string; start: string; end: string; weekStart: number;
   capturedAt: string; draft: boolean; canPrintDraft: boolean; scope: string;
   employees: { id: number; name: string }[]; shifts: Shift[]; draftChanges?: ScheduleDraft;
-  open?: OpenSchedule; events?: ScheduleEvent[]; leave?: PtoRequest[];
+  open?: OpenSchedule; events?: ScheduleEvent[]; leave?: (Pick<PtoRequest, "employeeId" | "status"> & import("../workforce/leave-duration").LeaveDates)[];
 }): SchedulePrintDocument {
   const draft = input.draft && input.canPrintDraft;
   const changes = draft ? input.draftChanges : undefined;

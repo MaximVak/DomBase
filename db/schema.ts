@@ -669,6 +669,7 @@ export const ptoRequests = sqliteTable("pto_requests", {
   id: id(),
   employeeId: integer("employee_id").notNull().references(() => employees.id),
   compensation: text("compensation", { enum: ["paid", "unpaid"] }).notNull(),
+  category: text("category", { enum: ["pto", "sick", "unpaid"] }),
   startDate: text("start_date").notNull(),
   endDate: text("end_date").notNull(),
   startTime: text("start_time"),

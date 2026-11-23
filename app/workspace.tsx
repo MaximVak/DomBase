@@ -23,6 +23,7 @@ import { createPortal } from "react-dom";
 import { DepartmentManagerCell, DepartmentManagerFeedback, useDepartmentManagers } from "./department-managers";
 import { useSharedWorkspace } from "./shared-workspace";
 import { equal, newRecordId } from "../workforce/contract";
+import { approvedLeaveMinutesByDay, fullDayLeaveMinutes, leaveCategories, leaveCategory, leaveRequestMinutes } from "../workforce/leave-duration";
 import { PrintTable } from "./print-table";
 import { rosterCopyHeaders, rosterCopyRows, rosterCsv } from "./roster-export";
 import { alertsPermissionsFields, automaticClockOutAt, canManageScheduleRole, canViewTeamSchedule, clockInTiming, defaultScheduleEnforcement, normalizeScheduleEnforcement, scheduleEnforcementFields, schedulingSettingsForSave, workWeekOffset } from "./schedule-enforcement";
@@ -1103,10 +1104,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
     ? activeEmployeePto.ptoHours - activeEmployeePto.ptoUsed
     : 0;
   const ptoRequestPreviewHours = ptoRequestForm
-    ? ptoHoursForDateRange(
-        ptoRequestForm.startDate,
-        ptoRequestForm.endDate,
-      )
+    ? leaveRequestMinutes(ptoRequestForm) / 60
     : 0;
 
   useEffect(() => {
@@ -2568,10 +2566,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
       setPtoRequestError("The end date cannot be before the start date.");
       return;
     }
-    const requestedPtoHours = ptoHoursForDateRange(
-      ptoRequestForm.startDate,
-      ptoRequestForm.endDate,
-    );
+    const requestedPtoHours = leaveRequestMinutes(ptoRequestForm) / 60;
     if (requestedPtoHours <= 0) {
       setPtoRequestError("Choose at least one valid day for time off.");
       return;
@@ -2619,13 +2614,12 @@ export default function Home({ account }: { account: DashboardAccount }) {
       setPtoReviewError("You cannot approve or deny your own time off request.");
       return;
     }
-    if (status === "approved" && request.status !== "approved" && request.compensation !== "unpaid") {
+    if (status === "approved" && request.status !== "approved" && leaveCategory(request) === "pto") {
       const employeePto = ptoRows.find((row) => row.employee.id === request.employeeId);
       const ptoHoursLeft = employeePto ? employeePto.ptoHours - employeePto.ptoUsed : 0;
-      const requestedHours = ptoHoursForDateRange(
-        request.startDate,
-        request.endDate,
-      );
+      const existing = approvedPtoForEmployee(state.ptoRequests, request.employeeId);
+      const period = { start: request.startDate, end: request.endDate };
+      const requestedHours = ptoHoursInPeriod([...existing, request], period) - ptoHoursInPeriod(existing, period);
       if (ptoHoursLeft < requestedHours) {
         setPtoReviewError(
           `This employee does not have enough PTO hours. They have ${formatPtoHours(ptoHoursLeft)} left, but this request uses ${formatPtoHours(requestedHours)}.`,
@@ -5058,7 +5052,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                           {visibleScheduleEmployees.map((employee) => {
                             const employeeShifts = scheduleDayShifts.filter((shift) => shift.employeeId === employee.id);
                             const dailyHours = employeeShifts.reduce((total, shift) => total + (scheduleMinutes.get(shift.id)?.paidMinutes ?? 0), 0) / 60;
-                            const timeOff = (state.ptoRequests ?? []).find((request) => request.employeeId === employee.id && request.status === "approved" && request.startDate <= scheduleDate && request.endDate >= scheduleDate);
+                            const dailyTimeOff = (state.ptoRequests ?? []).filter((request) => request.employeeId === employee.id && request.status === "approved" && request.startDate <= scheduleDate && request.endDate >= scheduleDate);
                             const employeeEditedTimes = employeeShifts
                               .map((shift) => editedShiftTimes[shift.id])
                               .filter((value): value is number => Boolean(value));
@@ -5081,6 +5075,11 @@ export default function Home({ account }: { account: DashboardAccount }) {
                                       <button type="button" className="shift-member-name-link" onClick={() => openScheduleEmployeeProfile(employee.id)}>{employee.name}</button>
                                     ) : <strong>{employee.name}</strong>}
                                     <span>{dailyHours.toFixed(2)} hrs</span>
+                                    {employeeShifts.length || dailyTimeOff.length > 1 ? dailyTimeOff.map(request => (
+                                      <button type="button" className="schedule-member-time-off schedule-time-off-button" key={request.id}
+                                        onClick={event => openScheduleTimeOff(event, request)} disabled={isPublicSchedule || (mode !== "manager" && request.employeeId !== activeEmployeeId)}
+                                        aria-haspopup="dialog" aria-expanded={scheduleTimeOffRequestId === request.id}>Time off · {scheduleTimeOffHours(request)}</button>
+                                    )) : null}
                                   </div>
                                   {employeeLastEditedAt ? (
                                     <small>Last edited at {formatSavedTime(employeeLastEditedAt)}</small>
@@ -5113,11 +5112,11 @@ export default function Home({ account }: { account: DashboardAccount }) {
                                       <span>{shift.role} | {formatScheduledHours(shift)} hours</span><ShiftWarningBadge codes={warningsByShift.get(shift.id)} />
                                     </div>
                                   ))}
-                                  {employeeShifts.length === 0 && timeOff ? (
-                                    <button type="button" className="schedule-bar time-off schedule-time-off-button" style={{ "--shift-left": "0%", "--shift-width": "100%" } as CSSProperties} onClick={(event) => openScheduleTimeOff(event, timeOff)} disabled={isPublicSchedule || (mode !== "manager" && timeOff.employeeId !== activeEmployeeId)} aria-label={`View time off for ${employee.name} on ${formatLongDate(scheduleDate)}`} aria-haspopup="dialog" aria-expanded={scheduleTimeOffRequestId === timeOff.id}>
-                                      <strong>Time off</strong><span>{timeOff.startTime && timeOff.endTime ? `${formatTime12(timeOff.startTime)}–${formatTime12(timeOff.endTime)}` : "All day"}</span>
+                                  {employeeShifts.length === 0 && dailyTimeOff.length === 1 ? dailyTimeOff.map(timeOff => (
+                                    <button type="button" key={timeOff.id} className="schedule-bar time-off schedule-time-off-button" style={{ "--shift-left": "0%", "--shift-width": "100%" } as CSSProperties} onClick={(event) => openScheduleTimeOff(event, timeOff)} disabled={isPublicSchedule || (mode !== "manager" && timeOff.employeeId !== activeEmployeeId)} aria-label={`View time off for ${employee.name} on ${formatLongDate(scheduleDate)}`} aria-haspopup="dialog" aria-expanded={scheduleTimeOffRequestId === timeOff.id}>
+                                      <strong>Time off</strong><span>{scheduleTimeOffHours(timeOff)}</span>
                                     </button>
-                                  ) : null}
+                                  )) : null}
                                   {mode === "manager" ? (
                                     <button
                                       type="button"
@@ -5183,9 +5182,9 @@ export default function Home({ account }: { account: DashboardAccount }) {
                               </div>
                               {scheduleWeekDays.map((day) => {
                                 const dayShifts = day.shifts.filter((shift) => shift.employeeId === employee.id);
-                                const timeOff = (state.ptoRequests ?? []).find((request) => request.employeeId === employee.id && request.status === "approved" && request.startDate <= day.date && request.endDate >= day.date);
+                                const dailyTimeOff = (state.ptoRequests ?? []).filter((request) => request.employeeId === employee.id && request.status === "approved" && request.startDate <= day.date && request.endDate >= day.date);
 
-                                const hasCellContent = dayShifts.length > 0 || Boolean(timeOff);
+                                const hasCellContent = dayShifts.length > 0 || dailyTimeOff.length > 0;
 
                                 return (
                                   <div className={`shift-week-cell${hasCellContent ? " has-content" : " empty"}`} role="cell" key={day.date} onDragOver={event => event.preventDefault()} onDrop={event => void dropScheduleShift(event, employee.id, day.date)}>
@@ -5201,9 +5200,9 @@ export default function Home({ account }: { account: DashboardAccount }) {
                                         <span>{shift.role || "Shift"}</span><ShiftWarningBadge codes={warningsByShift.get(shift.id)} />
                                       </button>
                                     ))}
-                                    {timeOff ? (
-                                      <button type="button" className="shift-time-off schedule-time-off-button" onClick={(event) => openScheduleTimeOff(event, timeOff)} disabled={isPublicSchedule || (mode !== "manager" && timeOff.employeeId !== activeEmployeeId)} aria-label={`View time off for ${employee.name} on ${formatLongDate(day.date)}`} aria-haspopup="dialog" aria-expanded={scheduleTimeOffRequestId === timeOff.id}><strong>⊘ Time off</strong><span>▣ {timeOff.startTime && timeOff.endTime ? `${formatTime12(timeOff.startTime)}–${formatTime12(timeOff.endTime)}` : "All day"}</span></button>
-                                    ) : null}
+                                    {dailyTimeOff.map(timeOff => (
+                                      <button type="button" key={timeOff.id} className="shift-time-off schedule-time-off-button" onClick={(event) => openScheduleTimeOff(event, timeOff)} disabled={isPublicSchedule || (mode !== "manager" && timeOff.employeeId !== activeEmployeeId)} aria-label={`View time off for ${employee.name} on ${formatLongDate(day.date)}`} aria-haspopup="dialog" aria-expanded={scheduleTimeOffRequestId === timeOff.id}><strong>⊘ Time off</strong><span>▣ {scheduleTimeOffHours(timeOff)}</span></button>
+                                    ))}
                                     {mode === "manager" ? (
                                       <button
                                         type="button"
@@ -5259,7 +5258,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                               })}
                               {timeOffRequests.map((request) => (
                                 <button type="button" className="shift-month-time-off schedule-time-off-button" key={request.id} onClick={(event) => openScheduleTimeOff(event, request)} disabled={isPublicSchedule || (mode !== "manager" && request.employeeId !== activeEmployeeId)} aria-label={`View time off for ${employeeById(state.employees, request.employeeId)?.name ?? "Team member"} on ${formatLongDate(day.date)}`} aria-haspopup="dialog" aria-expanded={scheduleTimeOffRequestId === request.id}>
-                                  <strong>⊘ Time off {request.startTime && request.endTime ? `(${formatTime12(request.startTime)}–${formatTime12(request.endTime)})` : "(all day)"}</strong>
+                                  <strong>⊘ Time off {`(${scheduleTimeOffHours(request)})`}</strong>
                                   <span>{employeeById(state.employees, request.employeeId)?.name ?? "Team member"}</span>
                                 </button>
                               ))}
@@ -5389,7 +5388,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
               events={state.clockEvents}
               shifts={state.shifts.filter(isWorkShift)}
               adjustments={state.hoursAdjustments ?? []}
-              pto={state.ptoRequests ?? []}
+              pto={shared.data.permissions["time_off.read"] ? state.ptoRequests : shared.data.timesheetLeave ?? []}
               departments={state.departments}
               history={state.timeCardEdits ?? []}
               today={workDate(currentTime, basicInfo.timeZone)}
@@ -5450,7 +5449,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                     </div>
                     {pendingPtoRequests.map((request) => {
                       const employee = employeeById(state.employees, request.employeeId);
-                      const totalHours = ptoHoursForDateRange(request.startDate, request.endDate);
+                      const totalHours = leaveRequestMinutes(request) / 60;
                       return (
                         <article
                           className={`pto-current-request-row${highlightedPtoRequestId === request.id ? " notification-target-highlight" : ""}`}
@@ -5459,7 +5458,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                           key={request.id}
                         >
                           <span role="cell">{employee?.name ?? "Employee"}</span>
-                          <span role="cell">{request.compensation === "unpaid" ? "Unpaid Time Off" : "Paid Time Off"}</span>
+                          <span role="cell">{leaveCategories[leaveCategory(request)]}</span>
                           <span role="cell">{formatTimeOffRequestDate(request.startDate)}{request.endDate !== request.startDate ? ` – ${formatTimeOffRequestDate(request.endDate)}` : ""}</span>
                           <strong className="pto-current-request-status" role="cell">Pending</strong>
                           <div className="pto-current-request-hours" role="cell">
@@ -5612,7 +5611,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                           <div className="pto-request-summary">
                             <span className="pto-request-timestamp">Requested {formatRequestTimestamp(request.requestedAt)}</span>
                             <strong>{formatTimeOffRequestDate(request.startDate)}{request.endDate !== request.startDate ? ` – ${formatTimeOffRequestDate(request.endDate)}` : ""}</strong>
-                            <span className="pto-request-type">{request.compensation === "unpaid" ? "Unpaid Time Off" : "Paid Time Off"}</span>
+                            <span className="pto-request-type">{leaveCategories[leaveCategory(request)]}</span>
                           </div>
                           <div className="pto-request-decision">
                             <strong className={`pto-request-status ${request.status}`}>{capitalize(request.status)}</strong>
@@ -5719,9 +5718,9 @@ export default function Home({ account }: { account: DashboardAccount }) {
                         </div>
                       </div>
                       <strong role="cell">{formatPtoChartHours(hoursWorked)}</strong>
-                      <strong role="cell" className="pto-earned">{formatPtoChartHours(ptoHours)}</strong>
-                      <strong role="cell">{formatPtoChartHours(ptoUsed)}</strong>
-                      <strong role="cell" className="pto-left">{formatPtoChartHours(ptoHours - ptoUsed)}</strong>
+                      <strong role="cell" className="pto-earned">{formatPtoHours(ptoHours)}</strong>
+                      <strong role="cell">{formatPtoHours(ptoUsed)}</strong>
+                      <strong role="cell" className="pto-left">{formatPtoHours(ptoHours - ptoUsed)}</strong>
                     </div>
                   ))}
                 </div>
@@ -5770,7 +5769,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
             <span className="schedule-avatar" aria-hidden="true">{employeeInitials(scheduleTimeOffEmployee?.name ?? "Employee")}</span>
             <div>
               <h2 id="schedule-time-off-title">{scheduleTimeOffEmployee?.name ?? "Employee"}</h2>
-              <p>{scheduleTimeOffRequest.compensation === "unpaid" ? "Unpaid time off" : "Paid time off"} | {scheduleTimeOffRequest.reason === "vacation" ? "Vacation" : scheduleTimeOffRequest.reason === "sick_emergency" ? "Sick / Emergency" : "Other"}</p>
+              <p>{leaveCategories[leaveCategory(scheduleTimeOffRequest)]} | {scheduleTimeOffRequest.reason === "vacation" ? "Vacation" : scheduleTimeOffRequest.reason === "sick_emergency" ? "Sick / Emergency" : "Other"}</p>
               <span className={`pto-request-status ${scheduleTimeOffRequest.status}`}>{scheduleTimeOffRequest.status}</span>
             </div>
             <button type="button" className="schedule-time-off-close" onClick={closeScheduleTimeOff} aria-label="Close time off details">×</button>
@@ -5784,7 +5783,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                 </div>
               ))}
             </div>
-            <dl className="schedule-time-off-hours"><dt>Hours Requested</dt><dd>{scheduleTimeOffRequest.startTime && scheduleTimeOffRequest.endTime ? `${formatTime12(scheduleTimeOffRequest.startTime)} – ${formatTime12(scheduleTimeOffRequest.endTime)}` : "All day"}</dd></dl>
+            <dl className="schedule-time-off-hours"><dt>Hours Requested</dt><dd>{scheduleTimeOffRequest.startTime ? scheduleTimeOffHours(scheduleTimeOffRequest) : formatPtoHours(leaveRequestMinutes(scheduleTimeOffRequest) / 60)}</dd></dl>
             <p className="schedule-time-off-note">{scheduleTimeOffRequest.explanation ? `“${scheduleTimeOffRequest.explanation}”` : "No explanation provided."}</p>
             <p className="schedule-time-off-requested">Requested {new Date(scheduleTimeOffRequest.requestedAt).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" })}</p>
           </div>
@@ -6399,11 +6398,15 @@ export default function Home({ account }: { account: DashboardAccount }) {
               </div>
               <div>
                 <dt>Time off type:</dt>
-                <dd>{reviewingPtoRequest.compensation === "unpaid" ? "Unpaid time off" : "Paid time off"}</dd>
+                <dd>{leaveCategories[leaveCategory(reviewingPtoRequest)]}</dd>
+              </div>
+              <div>
+                <dt>Hours requested:</dt>
+                <dd>{formatPtoHours(leaveRequestMinutes(reviewingPtoRequest) / 60)}</dd>
               </div>
               <div>
                 <dt>Reason:</dt>
-                <dd>{reviewingPtoRequest.reason === "vacation" ? "Vacation" : "Sick / Emergency"}</dd>
+                <dd>{reviewingPtoRequest.reason === "vacation" ? "Vacation / personal" : "Sick / emergency"}</dd>
               </div>
             </dl>
             <div className="pto-review-explanation">
@@ -8157,40 +8160,22 @@ function ptoHoursEarnedForPolicy(hoursWorked: number, policy: PtoPolicy | undefi
   return Math.round((startingBalance + accruedHours) * 100) / 100;
 }
 
-function ptoHoursUsedThisYear(requests: PtoRequest[], employeeId: number, year: number) {
-  return requests
-    .filter((request) => (
-      request.employeeId === employeeId
-      && request.status === "approved"
-      && request.compensation !== "unpaid"
-    ))
-    .reduce((total, request) => {
-      const start = parseLocalDate(request.startDate);
-      const end = parseLocalDate(request.endDate);
-      const yearStart = new Date(year, 0, 1, 12);
-      const yearEnd = new Date(year, 11, 31, 12);
-      const current = new Date(Math.max(start.getTime(), yearStart.getTime()));
-      const finalDay = new Date(Math.min(end.getTime(), yearEnd.getTime()));
-      if (current > finalDay) return total;
-
-      return total + ptoHoursForDateRange(
-        toDateInputValue(current),
-        toDateInputValue(finalDay),
-      );
-    }, 0);
+function approvedPtoForEmployee(requests: PtoRequest[], employeeId: number) {
+  return requests.filter(request => request.employeeId === employeeId && request.status === "approved" && leaveCategory(request) === "pto");
 }
 
-function ptoHoursForDateRange(startDate: string, endDate: string) {
-  const current = parseLocalDate(startDate);
-  const end = parseLocalDate(endDate);
-  let calendarDays = 0;
+function ptoHoursInPeriod(requests: PtoRequest[], period: { start: string; end: string }) {
+  return [...approvedLeaveMinutesByDay(requests, period).values()].reduce((total, minutes) => total + minutes, 0) / 60;
+}
 
-  while (current <= end) {
-    calendarDays += 1;
-    current.setDate(current.getDate() + 1);
-  }
+function ptoHoursUsedThisYear(requests: PtoRequest[], employeeId: number, year: number) {
+  return ptoHoursInPeriod(approvedPtoForEmployee(requests, employeeId), { start: `${year}-01-01`, end: `${year}-12-31` });
+}
 
-  return calendarDays * 8;
+function scheduleTimeOffHours(request: PtoRequest) {
+  return request.startTime && request.endTime
+    ? `${formatTime12(request.startTime)}–${formatTime12(request.endTime)} · ${formatPtoHours(leaveRequestMinutes(request) / 60)}`
+    : `All day · ${formatPtoHours(fullDayLeaveMinutes / 60)}`;
 }
 
 function formatWorkedHours(hours: number) {

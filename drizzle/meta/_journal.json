@@ -197,6 +197,13 @@
       "when": 1795209825206,
       "tag": "0027_timesheet_locks",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "6",
+      "when": 1795412173072,
+      "tag": "0028_stage5_leave_categories",
+      "breakpoints": true
     }
   ]
 }

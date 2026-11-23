@@ -17,6 +17,7 @@ import type { PersonalProfile, MyProfile } from "./profile";
 import { readEmployeeSchedule } from "./schedule";
 import { readSchedulePreferences, saveSchedulePreferences, readScheduleAlerts, saveScheduleAlertReceipt } from "./schedule-notifications";
 import { readMyAvailability, saveMyAvailability } from "./availability";
+import { readMyTimeOff, submitMyTimeOff } from "./time-off";
 
 type Auth = Pick<ReturnType<typeof createAuthService>, "getSession">;
 export function createSelfService(db: KioskOperatorDatabase, auth: Auth, secret: string, now = Date.now, emailEnabled = false) {
@@ -106,6 +107,12 @@ export function createSelfService(db: KioskOperatorDatabase, auth: Auth, secret:
   async function handle(request: Request) {
     try {
       const ctx = await context(request); const url = new URL(request.url);
+      if (url.pathname === "/api/self/time-off") {
+        if (url.search) throw new AuthError(400, "Time off does not accept employee selectors.");
+        if (request.method === "GET") return json(await readMyTimeOff(db, ctx, now()));
+        if (request.method === "POST") return json(await submitMyTimeOff(db, ctx, await readAuthBody(request, 8192), secret, now()));
+        return json({ error: "Method not allowed." }, 405, { Allow: "GET, POST" });
+      }
       if (url.pathname === "/api/self/shift-exchanges") {
         if (request.method === "GET") return json(await readMyExchanges(db, ctx, url, secret, now()));
         if (request.method === "POST") { if (url.search) throw new AuthError(400, "Choose shift request options in the body."); return json(await saveMyExchange(db, ctx, await readAuthBody(request, 131072), secret, now(), emailEnabled), 200, { "X-Schedule-Dispatch": "1" }); }

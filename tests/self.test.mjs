@@ -180,6 +180,67 @@ test("employee password self-service enforces person, field, session and transac
     employee = await login(f.employeeAccount);
     const after = await current(); assert.deepEqual(after.values, before.values); assert.equal(after.employeeVersion, before.employeeVersion); assert.equal(after.profileVersion, before.profileVersion);
   });
+  await t.test("own hourly and whole-day time off reach manager approval, schedule and accountant export", async () => {
+    const path = "/api/self/time-off";
+    const callTimeOff = (body, cookie = employee, route = path) => call(body, cookie, route);
+    const currentTimeOff = async () => data(await callTimeOff());
+    const initial = await currentTimeOff();
+    assert.deepEqual(initial.requests.map(row => row.category), ["unpaid"]);
+    assert.equal((await callTimeOff(undefined, "")).status, 401);
+    assert.equal((await callTimeOff(undefined, owner)).status, 403);
+    assert.equal((await callTimeOff(undefined, employee, path + "?employeeId=2")).status, 400);
+    const date = "2026-11-17";
+    const body = { id: newToken(), contextToken: initial.contextToken, revision: initial.revision,
+      category: "pto", reason: "vacation", startDate: date, endDate: date, startTime: "10:45", endTime: "12:45",
+      explanation: "Synthetic leave note" };
+    for (const invalid of [{ employeeId: f.b.id }, { status: "approved" }, { endDate: "2026-11-18" }, { endTime: "10:45" }, { category: "invalid" }]) {
+      assert.equal((await callTimeOff({ ...body, ...invalid })).status, 400);
+    }
+    assert.equal((await callTimeOff({ ...body, contextToken: "0".repeat(64) })).status, 409);
+    const repeated = await Promise.all([callTimeOff(body), callTimeOff(body)]);
+    assert.deepEqual(repeated.map(response => response.status), [200, 200]);
+    assert.equal((await callTimeOff({ ...body, endTime: "13:45" })).status, 409);
+    const saved = await currentTimeOff();
+    assert.equal(saved.revision, initial.revision + 1);
+    const [pending] = saved.requests.filter(row => row.startDate === date);
+    assert.deepEqual([pending.category, pending.status, pending.minutes], ["pto", "pending", 120]);
+    assert.equal(saved.requests.filter(row => row.startDate === date).length, 1);
+    assert.doesNotMatch(JSON.stringify(saved), /Synthetic leave note|Private medical explanation/);
+    const schedule = async () => data(await call(undefined, employee, "/api/self/schedule?date=" + date));
+    assert.deepEqual((await schedule()).timeOff, []);
+
+    await db.insert(schema.accountPermissions).values({ accountId: f.manager.id, permission: "time_off.approve", allowed: true });
+    const manager = await login(f.manager);
+    const workspace = async () => data(await workforce.handle(request("/api/workspace/state", manager)));
+    const approve = async requestId => {
+      const { revision, state, employeeVersions } = await workspace();
+      const before = state.ptoRequests.find(row => row.id === requestId);
+      assert.ok(before);
+      await data(await workforce.handle(request("/api/workspace/commit", manager, {
+        id: newToken(), revision, employeeVersions, changes: [{ entity: "pto-request", id: requestId, before, after: { ...before, status: "approved" } }],
+      })));
+    };
+    await approve(pending.id);
+    assert.equal((await currentTimeOff()).requests.find(row => row.id === pending.id).status, "approved");
+    assert.deepEqual((await schedule()).timeOff, [{ id: pending.id, employeeId: f.a.id, startDate: date, endDate: date, startTime: "10:45", endTime: "12:45", status: "approved" }]);
+
+    const updated = await currentTimeOff();
+    const sickDate = "2026-11-18";
+    const fullDay = { ...body, id: newToken(), revision: updated.revision, startDate: sickDate, endDate: sickDate,
+      category: "sick", reason: "sick_emergency", startTime: undefined, endTime: undefined };
+    await data(await callTimeOff(fullDay));
+    const [sick] = (await currentTimeOff()).requests.filter(row => row.startDate === sickDate);
+    assert.deepEqual([sick.category, sick.minutes], ["sick", 480]);
+    await approve(sick.id);
+    const report = await data(await workforce.handle(request(`/api/workspace/accountant-export?start=${date}&end=${sickDate}`, owner)));
+    assert.equal(report.rows.find(row => row.employeeId === f.a.id).pto, 10);
+    await db.insert(schema.accountPermissions).values({ accountId: f.manager.id, permission: "time_off.read", allowed: false });
+    const restricted = await workspace();
+    assert.equal(restricted.state.ptoRequests.some(row => row.employeeId === f.a.id), false);
+    const [restrictedHourly, restrictedFullDay] = restricted.timesheetLeave.filter(row => row.employeeId === f.a.id).sort((a, b) => a.startDate.localeCompare(b.startDate));
+    assert.deepEqual([restrictedHourly.startTime, restrictedHourly.endTime, restrictedFullDay.startTime], ["10:45", "12:45", null]);
+    assert.doesNotMatch(JSON.stringify(restricted.timesheetLeave), /category|reason|explanation/);
+  });
   await t.test("saved profiles survive restart; logout and logout-everywhere revoke password sessions", async () => {
     const before = await current(); await platform.dispose(); ({ db, auth, access, self, workforce } = await connect());
     assert.deepEqual(await current(), before);

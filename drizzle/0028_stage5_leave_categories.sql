@@ -1,0 +1,1 @@
+ALTER TABLE `pto_requests` ADD `category` text;

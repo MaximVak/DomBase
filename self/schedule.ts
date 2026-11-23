@@ -11,10 +11,9 @@ export async function readEmployeeSchedule(db: KioskOperatorDatabase, ctx: { acc
   }
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
   const anchor = validDate(url.searchParams.get("date") ?? today);
-  // Both queries run in one D1 read transaction. The current company setting,
-  // identity guard and date limits apply before any shift reaches the client.
+  // Apply the live identity guard and week bounds in the same read transaction.
   const weekStart = sql`date(${anchor}, '-' || ((CAST(strftime('%w', ${anchor}) AS INTEGER) - ${s.locationSettings.workWeekStart} + 7) % 7) || ' days')`;
-  const [metadata, shifts] = await db.batch([
+  const [metadata, shifts, leave] = await db.batch([
     db.select({ employeeId: s.employees.id, locationName: s.business.locationName, timeZone: s.business.timeZone,
       ownOnly: s.locationSettings.employeesOwnScheduleOnly, workWeekStart: s.locationSettings.workWeekStart })
       .from(s.business).innerJoin(s.locationSettings, eq(s.locationSettings.businessId, s.business.id))
@@ -28,12 +27,18 @@ export async function readEmployeeSchedule(db: KioskOperatorDatabase, ctx: { acc
         AND ${s.shifts.date} >= ${weekStart} AND ${s.shifts.date} < date(${weekStart}, '+7 days')
         AND (${s.locationSettings.employeesOwnScheduleOnly} = 0 OR ${s.shifts.employeeId} = ${ctx.account.employeeId})`)
       .orderBy(s.shifts.date, s.shifts.startTime, s.employees.name, s.shifts.id).limit(2001),
+    db.select({ id: s.ptoRequests.id, employeeId: s.ptoRequests.employeeId, startDate: s.ptoRequests.startDate, endDate: s.ptoRequests.endDate,
+      startTime: s.ptoRequests.startTime, endTime: s.ptoRequests.endTime })
+      .from(s.ptoRequests).innerJoin(s.locationSettings, eq(s.locationSettings.businessId, 1))
+      .where(sql`${ctx.guard} AND ${s.ptoRequests.employeeId} = ${ctx.account.employeeId} AND ${s.ptoRequests.status} = 'approved'
+        AND ${s.ptoRequests.archivedAt} IS NULL AND ${s.ptoRequests.endDate} >= ${weekStart} AND ${s.ptoRequests.startDate} < date(${weekStart}, '+7 days')`)
+      .orderBy(s.ptoRequests.startDate, s.ptoRequests.startTime, s.ptoRequests.id).limit(2001),
   ]);
   const meta = metadata[0];
   if (!meta) throw new AuthError(401, "Sign in to continue.");
-  if (shifts.length > 2000) throw new AuthError(503, "This schedule is too large to display. Ask your manager for help.");
+  if (shifts.length > 2000 || leave.length > 2000) throw new AuthError(503, "This schedule is too large to display. Ask your manager for help.");
   const weekday = new Date(`${anchor}T12:00:00Z`).getUTCDay();
   const startDate = offsetScheduleDate(anchor, -((weekday - meta.workWeekStart + 7) % 7));
   return { employeeId: meta.employeeId, locationName: meta.locationName, timeZone: meta.timeZone, ownOnly: meta.ownOnly,
-    today, startDate, endDate: offsetScheduleDate(startDate, 6), shifts };
+    today, startDate, endDate: offsetScheduleDate(startDate, 6), shifts, timeOff: leave.map(request => ({ ...request, status: "approved" })) };
 }

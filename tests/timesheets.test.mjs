@@ -183,6 +183,21 @@ test("seventh-day overtime resets on the configured workweek and distinguishes p
   ] }), [8, 2, 0]);
 });
 
+test("approved partial days merge overlapping intervals and preserve the full-day default", () => {
+  const date = "2026-08-03", next = "2026-08-04";
+  const range = (startTime, endTime, extra = {}) => ({ employeeId: 1, startDate: date, endDate: date, compensation: "paid", status: "approved", startTime, endTime, ...extra });
+  const pto = [
+    range("09:00", "11:00"), range("10:30", "12:00"), range("14:00", "14:30"),
+    range("17:00", "18:00", { compensation: "unpaid" }), range("18:00", "21:00", { status: "pending" }),
+    range(undefined, undefined, { startDate: next, endDate: next }),
+    range("09:00", "11:00", { startDate: next, endDate: next }),
+  ];
+  const cards = buildTimeCards({ ...base, events: eventsFor(date, "07:00", "08:30"), pto });
+  assert.deepEqual(cards.map(card => [card.date, card.metrics.actual, card.metrics.pto, card.metrics.paid]), [
+    [date, 1.5, 3.5, 5], [next, 0, 8, 8],
+  ]);
+});
+
 test("editable thresholds and multipliers apply across split cards without stacking weekly and daily premiums", () => {
   const [first, second] = buildTimeCards({ ...base, events: [
     ...eventsFor("2026-08-03", "06:00", "19:00"),

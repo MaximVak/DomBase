@@ -215,6 +215,7 @@ export type PtoRequest = {
   id: number;
   employeeId: number;
   compensation: "paid" | "unpaid";
+  category?: import("./leave-duration").LeaveCategory;
   startDate: string;
   endDate: string;
   startTime?: string;

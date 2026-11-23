@@ -8,39 +8,11 @@ import { roundReportHours } from "./accountant-report";
 import type { AccountantReport, AccountantRow } from "./accountant-report";
 import type { Context, Database } from "./context";
 import { offsetDate, workspacePeriod } from "./period";
-import type { WorkspacePeriod } from "./period";
 import { workspaceSnapshot } from "./snapshot";
+import { approvedLeaveMinutesByDay, type LeaveDates } from "./leave-duration";
 
 const annualPeriods = { weekly: 52, biweekly: 26, semimonthly: 24, monthly: 12 } as const;
 const uncertainClockIssues = new Set(["Missing clock-out", "Clock time needs review", "Confirm unfinished break"]);
-type PaidLeave = { employeeId: number; startDate: string; endDate: string; startTime: string | null; endTime: string | null };
-
-function approvedLeaveHours(requests: PaidLeave[], period: WorkspacePeriod) {
-  const byDay = new Map<string, { employeeId: number; intervals: [number, number][]; fullDay: boolean }>();
-  const minutes = (time: string) => Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5));
-  for (const request of requests) {
-    const start = request.startDate < period.start ? period.start : request.startDate;
-    const end = request.endDate > period.end ? period.end : request.endDate;
-    for (let date = start; date <= end; date = offsetDate(date, 1)) {
-      const key = `${request.employeeId}:${date}`;
-      const day = byDay.get(key) ?? { employeeId: request.employeeId, intervals: [], fullDay: false };
-      if (request.startTime && request.endTime && request.startDate === request.endDate) day.intervals.push([minutes(request.startTime), minutes(request.endTime)]);
-      else day.fullDay = true;
-      byDay.set(key, day);
-    }
-  }
-  const byEmployee = new Map<number, number>();
-  for (const { employeeId, fullDay, intervals } of byDay.values()) {
-    let duration = fullDay ? 480 : 0;
-    let previousEnd = 0;
-    if (!fullDay) for (const [start, end] of intervals.sort(([a], [b]) => a - b)) {
-      duration += Math.max(0, end - Math.max(start, previousEnd));
-      previousEnd = Math.max(previousEnd, end);
-    }
-    byEmployee.set(employeeId, (byEmployee.get(employeeId) ?? 0) + duration);
-  }
-  return byEmployee;
-}
 
 function readStamp(db: Database, ctx: Context) {
   return db.get<{ revision: number; punches: number; reports: number }>(sql`SELECT revision,
@@ -99,7 +71,12 @@ export async function readAccountantReport(db: Database, ctx: Context, url: URL,
     entries.push(card);
     byEmployee.set(card.employeeId, entries);
   }
-  const ptoMinutes = approvedLeaveHours(leave, period);
+  const leaveByEmployee = new Map<number, LeaveDates[]>();
+  for (const request of leave) {
+    const own = leaveByEmployee.get(request.employeeId) ?? [];
+    own.push(request);
+    leaveByEmployee.set(request.employeeId, own);
+  }
   const calendar = view.teamPeriod ?? defaultPayCalendar;
   const configured = periodFor(period.start, calendar.payPeriod, calendar.anchorDate);
   const periodsPerYear = configured.start === period.start && configured.end === period.end ? annualPeriods[calendar.payPeriod] : null;
@@ -107,7 +84,8 @@ export async function readAccountantReport(db: Database, ctx: Context, url: URL,
   for (const employee of employees) {
     const own = byEmployee.get(employee.id) ?? [];
     const totals = totalMetrics(own);
-    const pto = roundReportHours((ptoMinutes.get(employee.id) ?? 0) / 60);
+    const leaveMinutes = [...approvedLeaveMinutesByDay(leaveByEmployee.get(employee.id) ?? [], period).values()].reduce((total, minutes) => total + minutes, 0);
+    const pto = roundReportHours(leaveMinutes / 60);
     const ratesInPeriod = [period.start, ...employee.wageRates.map(rate => rate.effectiveDate).filter(date => date > period.start && date <= period.end)];
     const coversPeriod = (!employee.startDate || employee.startDate <= period.start) && (!employee.terminationDate || employee.terminationDate > period.end);
     const salaryEligible = periodsPerYear !== null && coversPeriod && (employee.active || !!employee.terminationDate)

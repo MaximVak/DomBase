@@ -243,7 +243,7 @@ test("shift editor uses clear time labels and available role options", async () 
   assert.equal((page.match(/<ShiftWarningBadge codes=\{warningsByShift\.get\(shift\.id\)\} \/>/g) ?? []).length, 3);
   assert.match(page, /<ScheduleWarningPanel result=\{scheduleWarnings\}/);
   assert.match(page, /label="Shift warning preview"/);
-  assert.match(page, /\{timeOff \? \(\s*<button type="button" className="shift-time-off schedule-time-off-button"/);
+  assert.match(page, /\{dailyTimeOff\.map\(timeOff => \(\s*<button type="button" key=\{timeOff\.id\} className="shift-time-off schedule-time-off-button"/);
   assert.doesNotMatch(page, /\{dayShifts\.length === 0 && timeOff \? \(/);
   assert.match(page, /onClick=\{\(\) => openShiftCreator\(employee, day\.date\)\}/);
   assert.match(page, /className="shift-cell-add schedule-track-add"/);
@@ -642,7 +642,8 @@ test("manager PTO view supports configurable fixed and rate policies", async () 
   assert.match(page, /function formatPtoChartHours/);
   assert.match(page, /Math\.trunc\(hours\)/);
   assert.match(page, /role="cell">\{formatPtoChartHours\(hoursWorked\)\}/);
-  assert.match(page, /className="pto-earned">\{formatPtoChartHours\(ptoHours\)\}/);
+  assert.match(page, /className="pto-earned">\{formatPtoHours\(ptoHours\)\}/);
+  assert.match(page, /className="pto-left">\{formatPtoHours\(ptoHours - ptoUsed\)\}/);
   assert.match(page, /setPtoPolicyStep\("balances"\)/);
   assert.match(page, /"Starting balances"/);
   assert.match(page, />PTO start balance</);
@@ -736,13 +737,11 @@ test("employees can submit persistent PTO requests with required details", async
   assert.match(page, /Requested \{formatRequestTimestamp\(request\.requestedAt\)\}/);
   assert.match(page, /You do not have enough PTO hours\. You cannot submit this request\./);
   assert.match(page, /This employee does not have enough PTO hours/);
-  assert.match(page, /function ptoHoursForDateRange/);
+  assert.match(page, /leaveRequestMinutes\(ptoRequestForm\) \/ 60/);
   assert.doesNotMatch(page, /useCustomTime/);
   assert.doesNotMatch(page, /Specify hours instead of requesting full days/);
   assert.match(page, /Each selected day, including weekends, counts as one full 8-hour day/);
-  assert.match(page, /calendarDays \+= 1/);
-  assert.match(page, /return calendarDays \* 8/);
-  assert.doesNotMatch(page, /current\.getDay\(\) !== 0 && current\.getDay\(\) !== 6/);
+  assert.match(page, /fullDayLeaveMinutes \/ 60/);
   assert.match(page, /PTO available:/);
   assert.match(styles, /\.pto-request-preview \{[^}]*grid-template-columns: repeat\(3, minmax\(0, 1fr\)\);[^}]*justify-self: center;/s);
   assert.match(styles, /\.pto-request-preview > div \{[^}]*display: flex;[^}]*justify-content: center;[^}]*white-space: nowrap;/s);
@@ -810,7 +809,7 @@ test("managers can approve or deny pending PTO requests", async () => {
   assert.match(page, /Your request is pending approval\./);
   assert.match(page, /request\.employeeId === activeEmployeeId \? \(/);
   assert.match(page, /Approve or deny this time off request/);
-  assert.match(page, /request\.compensation !== "unpaid"/);
+  assert.match(page, /leaveCategory\(request\) === "pto"/);
   assert.match(page, /decidePtoRequest\("approved"\)/);
   assert.match(page, /decidePtoRequest\("denied"\)/);
   assert.match(page, /pto-request-list-header/);

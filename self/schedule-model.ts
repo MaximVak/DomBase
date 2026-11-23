@@ -7,6 +7,7 @@ export type EmployeeSchedule = {
   endDate: string;
   ownOnly: boolean;
   shifts: { shiftType: "work" | "day_off"; color: import("../app/shift-builder").ShiftColor; id: number; employeeId: number; employeeName: string; date: string; start: string; end: string; role: string; station: string }[];
+  timeOff: (import("../workforce/leave-duration").LeaveDates & { id: number; employeeId: number; status: "approved" })[];
 };
 
 export function offsetScheduleDate(date: string, days: number) {

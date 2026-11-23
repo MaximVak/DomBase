@@ -11,11 +11,12 @@ import { zonedTimestamp } from "../workforce/time";
 import type { ClockEvent, HoursRounding, HoursRoundingMinutes, PublishedTimesheetShift, TimeCardNote } from "../workforce/model";
 import { timeCardNotes } from "../workforce/timecard-notes";
 import { scheduleClockPreview, scheduleShiftBounds } from "./timesheets-display";
+import { approvedLeaveMinutesByDay, type LeaveDates } from "../workforce/leave-duration";
 export type TimesheetEmployee = { id: number; name: string; role: string; wage: string; active: boolean; terminated?: boolean; terminationDate?: string; wageRates?: WageRate[]; jobs?: { id: number; name: string }[]; payrollId?: string; legalFirstName?: string; legalMiddleName?: string; legalLastName?: string };
 export type TimesheetEvent = Pick<ClockEvent, "id" | "employeeId" | "type" | "at" | "explanation" | "automatic" | "role" | "cardId" | "shiftId" | "clockDetails" | "assistedStatus" | "noteAuthor" | "carriedNotes">;
 export type TimesheetShift = { shiftType?: "work" | "day_off"; employeeId: number; date: string; start: string; end: string; role: string };
 export type TimesheetAdjustment = { id: number; employeeId: number; date: string; hours: number };
-export type TimesheetPto = { employeeId: number; startDate: string; endDate: string; compensation: string; status: string };
+export type TimesheetPto = LeaveDates & { employeeId: number; compensation: string; status: string };
 export type TimeCardBreak = { id: number; start: string; end: string; nextDay: boolean; kind?: BreakKind; confirmEnd?: boolean };
 export type TimeCardDraft = { employeeId: number; date: string; start: string; end: string; nextDay: boolean; breakMinutes: number; role: string; note: string; eventIds: number[]; breaks?: TimeCardBreak[]; cardId?: number; timeZone?: string; confirmBreakRecord?: boolean };
 export type TimeCardEdit = { id: number; employeeId: number; date: string; at: string; actor: string; before: string; after: string; cardId?: number; notes?: TimeCardNote[] };
@@ -261,12 +262,10 @@ export function buildTimeCards(input: {
       const card = cards.find(card => card.date === date) ?? dayCard(date);
       card.adjustment = hours; card.notes.push(`Manual hours adjustment: ${hours >= 0 ? "+" : ""}${hours.toFixed(2)} hours`);
     }
-    for (const request of input.pto.filter(request => request.employeeId === employee.id && request.status === "approved" && request.compensation === "paid")) {
-      for (let date = request.startDate < contextStart ? contextStart : request.startDate; date <= request.endDate && date <= contextEnd; date = addDays(date, 1)) {
-        // Existing DomBase requests count each calendar day as eight PTO hours.
-        const card = cards.find(card => card.date === date) ?? dayCard(date);
-        card.metrics.pto = 8;
-      }
+    const paidLeave = input.pto.filter(request => request.employeeId === employee.id && request.status === "approved" && request.compensation === "paid");
+    for (const [date, minutes] of approvedLeaveMinutesByDay(paidLeave, { start: contextStart, end: contextEnd })) {
+      const card = cards.find(card => card.date === date) ?? dayCard(date);
+      card.metrics.pto = minutes / 60;
     }
     cards.sort((a, b) => a.date.localeCompare(b.date) || (a.start ?? "").localeCompare(b.start ?? ""));
     const byWorkDate = new Map<string, TimeCard[]>();

@@ -23,6 +23,7 @@ export type WorkspaceData = {
   employeeVersions: Record<number, number>;
   teamPeriod?: import("../team/rules").PayCalendar;
   timesheetSchedule?: PublishedTimesheetShift[];
+  timesheetLeave?: import("../app/timesheets-model").TimesheetPto[];
 };
 export const defaultInfo: BasicInfo = { companyName: "Molding Mart", locationName: "Molding Mart", locationPhone: "", companyPhone: "", accountOwner: "", address1: "", address2: "", city: "Sacramento", stateProvince: "California", postalCode: "", country: "United States", timeZone: "America/Los_Angeles", businessType: "", businessCategory: "", website: "" };
 export const emptyState = (): StaffState => ({ employees: [], departments: [], shifts: [], scheduleEvents: [], clockEvents: [], hoursAdjustments: [], timeCardEdits: [], ptoRequests: [], ptoPolicies: [], conversations: [], scheduleUpdates: [], scheduleHasBeenPublished: false, pendingScheduleUpdateEmployeeIds: [], scheduleDraftsByManager: {}, availabilityRequests: [], hoursRoundingMinutes: 15 });

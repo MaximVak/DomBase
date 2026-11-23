@@ -6,6 +6,7 @@ import { EmployeeOpenShifts } from "./open-shifts";
 import { ScheduleAlerts } from "./alerts";
 import { ScheduleAlertPreferences } from "../../schedule-alert-preferences";
 import { offsetScheduleDate, type EmployeeSchedule } from "../../../self/schedule-model";
+import { fullDayLeaveMinutes, leaveRequestMinutes } from "../../../workforce/leave-duration";
 
 function dayLabel(date: string) {
   return new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "long", month: "short", day: "numeric" }).format(new Date(`${date}T12:00:00Z`));
@@ -51,7 +52,7 @@ export function EmployeeScheduleScreen() {
   }, [load]);
   const shifts = data?.shifts.filter(shift => showTeam || shift.employeeId === data.employeeId) ?? [];
   return <main className="team-screen employee-schedule-screen">
-    <header><div><a href="/me">← My profile</a> · <a href="/me/availability">My availability</a><h1>My schedule</h1><p>Published shifts for your workweek.</p></div><button type="button" disabled={pending} onClick={() => void load()}>Reload schedule</button></header>
+    <header><div><a href="/me">← My profile</a> · <a href="/me/availability">My availability</a> · <a href="/me/time-off">Request time off</a><h1>My schedule</h1><p>Published shifts and your approved time off.</p></div><button type="button" disabled={pending} onClick={() => void load()}>Reload schedule</button></header>
     <details className="schedule-alert-settings"><summary>My schedule alert preferences</summary><ScheduleAlertPreferences endpoint="/api/self/schedule-preferences" /></details>
     <ScheduleAlerts onView={setDate} />
     <div className="employee-week-toolbar">
@@ -73,6 +74,7 @@ export function EmployeeScheduleScreen() {
       {!shifts.length ? <p role="status">{showTeam ? "No published shifts this week." : "You have no published shifts this week."}</p> : null}
       <div className="employee-schedule-days">{Array.from({ length: 7 }, (_, index) => {
         const day = offsetScheduleDate(data.startDate, index), dayShifts = shifts.filter(shift => shift.date === day);
+        const dayLeave = data.timeOff.filter(request => request.startDate <= day && request.endDate >= day);
         return <section className="employee-schedule-day" key={day} aria-labelledby={`day-${day}`}>
           <h3 id={`day-${day}`}><time dateTime={day}>{dayLabel(day)}</time>{day === data.today ? <span>Today</span> : null}</h3>
           {dayShifts.length ? <ul>{dayShifts.map(shift => <li key={shift.id} data-shift-color={shift.color}>
@@ -80,7 +82,13 @@ export function EmployeeScheduleScreen() {
             {showTeam ? <span>{shift.employeeId === data.employeeId ? `${shift.employeeName} (you)` : shift.employeeName}</span> : null}
             <span>{shift.role || "Shift"}{shift.station ? ` · ${shift.station}` : ""}</span>
             {shift.employeeId===data.employeeId&&shift.shiftType==='work'&&openShiftIsFuture(shift.date,shift.start,Date.now())?<div className="open-shift-actions"><button type="button" onClick={()=>setExchangeEditor({sourceShiftId:shift.id,kind:'cover'})}>Request cover</button><button type="button" onClick={()=>setExchangeEditor({sourceShiftId:shift.id,kind:'trade'})}>Request trade</button></div>:null}
-          </li>)}</ul> : <p>No shifts</p>}
+          </li>)}</ul> : dayLeave.length ? null : <p>No shifts</p>}
+          {dayLeave.length ? <ul aria-label="Approved time off">{dayLeave.map(request => <li key={request.id}>
+            <strong>Approved time off</strong>
+            <span>{request.startTime && request.endTime
+              ? `${timeLabel(request.startTime)} – ${timeLabel(request.endTime)} · ${leaveRequestMinutes(request) / 60} hr`
+              : `All day · ${fullDayLeaveMinutes / 60} hr`}</span>
+          </li>)}</ul> : null}
         </section>;
       })}</div>
     </> : null}

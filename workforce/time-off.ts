@@ -8,6 +8,16 @@ import { employeeInScope } from "./records";
 import * as v from "./validation";
 import { availabilitySlots, appendAvailability } from "./availability";
 import { periodLockByDate, requireTimesheetUnlocked } from "./timesheet-lock-guards";
+
+export function timeOffDates(data: Record<string, unknown>) {
+  const startDate = v.date(data.startDate);
+  const endDate = v.date(data.endDate);
+  if (endDate < startDate || Date.parse(endDate) - Date.parse(startDate) > 366 * 86400000) throw new AuthError(400, "Choose a valid time-off range up to one year.");
+  const startTime = data.startTime == null || data.startTime === "" ? null : v.time(data.startTime);
+  const endTime = data.endTime == null || data.endTime === "" ? null : v.time(data.endTime);
+  if ((startTime === null) !== (endTime === null) || startTime && endTime && (startDate !== endDate || endTime <= startTime)) throw new AuthError(400, "Enter a start and end time on the same day, with the end after the start.");
+  return { startDate, endDate, startTime, endTime };
+}
 export async function timeOffChange(r: RecordContext, change: Change) {
   if (change.entity === "pto-policy") {
     r.ctx.requirePermission("settings.manage");
@@ -35,18 +45,19 @@ export async function timeOffChange(r: RecordContext, change: Change) {
       if (before.status === "approved" && before.compensation === "paid") await requireTimesheetUnlocked(r.db, periodLockByDate(v.date(before.startDate), v.date(before.endDate)));
       r.tx.update(s.ptoRequests, { archivedAt: r.tx.stamp }, sql`id = ${change.id} AND archived_at IS NULL AND status <> 'pending'`); return;
     }
-    const data = v.object(change.after); v.keys(data, ["id", "employeeId", "compensation", "startDate", "endDate", "startTime", "endTime", "reason", "explanation", "status", "requestedAt", "decidedAt", "decidedByEmployeeId"]);
+    const data = v.object(change.after); v.keys(data, ["id", "employeeId", "compensation", "category", "startDate", "endDate", "startTime", "endTime", "reason", "explanation", "status", "requestedAt", "decidedAt", "decidedByEmployeeId"]);
     const employeeId = v.integer(data.employeeId); const self = employeeId === r.ctx.account.employeeId;
     await employeeInScope(r, employeeId, self);
     if (!before) {
       if (!self) throw new AuthError(403, "Submit time off only for your linked employee profile.");
       const employee = r.view.state.employees.find(e => e.id === employeeId); if (!employee?.active || employee.terminated) throw new AuthError(403, "This employee profile is inactive.");
-      const startDate = v.date(data.startDate); const endDate = v.date(data.endDate); if (endDate < startDate || Date.parse(endDate) - Date.parse(startDate) > 366 * 86400000) throw new AuthError(400, "Choose a valid time-off range up to one year.");
-      const startTime = data.startTime ? v.time(data.startTime) : null; const endTime = data.endTime ? v.time(data.endTime) : null;
-      if ((startTime === null) !== (endTime === null) || startTime && endTime && (startDate !== endDate || endTime <= startTime)) throw new AuthError(400, "Choose a valid partial-day time range.");
+      const dates = timeOffDates(data);
+      const compensation = v.oneOf(data.compensation, ["paid", "unpaid"]);
+      const category = data.category === undefined ? null : v.oneOf(data.category, ["pto", "sick", "unpaid"]);
+      if (category && (category === "unpaid") !== (compensation === "unpaid")) throw new AuthError(400, "The time-off category and pay type must agree.");
       const status = r.ctx.account.accessLevel === "owner" ? "approved" : "pending";
-      if (status === "approved" && data.compensation === "paid") await requireTimesheetUnlocked(r.db, periodLockByDate(startDate, endDate));
-      r.tx.insert(s.ptoRequests, { id: change.id, employeeId, compensation: v.oneOf(data.compensation, ["paid", "unpaid"]), startDate, endDate, startTime, endTime, reason: v.oneOf(data.reason, ["sick_emergency", "vacation"]), explanation: v.text(data.explanation, 1000), status, requestedAt: r.tx.stamp, decidedAt: status === "approved" ? r.tx.stamp : null, decidedByAccountId: status === "approved" ? r.ctx.account.id : null });
+      if (status === "approved" && compensation === "paid") await requireTimesheetUnlocked(r.db, periodLockByDate(dates.startDate, dates.endDate));
+      r.tx.insert(s.ptoRequests, { id: change.id, employeeId, compensation, category, ...dates, reason: v.oneOf(data.reason, ["sick_emergency", "vacation"]), explanation: v.text(data.explanation, 1000), status, requestedAt: r.tx.stamp, decidedAt: status === "approved" ? r.tx.stamp : null, decidedByAccountId: status === "approved" ? r.ctx.account.id : null });
       if (status === "approved") r.tx.insert(s.ptoDecisions, { requestId: change.id, status, actorAccountId: r.ctx.account.id });
       return;
     }
