@@ -14,6 +14,8 @@ import { OpenShiftRequests } from "./open-shift-requests";
 import { OpenShiftManager } from "./open-shift-manager";
 import { SchedulePublishControl } from "./schedule-publish";
 import { ScheduleTools } from "./schedule-tools";
+import { ManagerTimeOffDialog, ManagerTimeOffHistory, type ManagerTimeOffTarget } from "./manager-time-off";
+import type { ManagerTimeOffFields } from "../workforce/manager-time-off";
 import { ShiftBuilderOptions } from "./shift-builder-options";
 import { isWorkShift, shiftLayoutError } from "./shift-builder";
 import { estimateSchedule } from "./schedule-estimates";
@@ -369,6 +371,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
     explanation: string;
   } | null>(null);
   const [ptoRequestError, setPtoRequestError] = useState("");
+  const [managerTimeOff, setManagerTimeOff] = useState<{ target: ManagerTimeOffTarget; opener: HTMLElement | null } | null>(null);
   const [reviewingPtoRequestId, setReviewingPtoRequestId] = useState<number | null>(null);
   const [scheduleTimeOffRequestId, setScheduleTimeOffRequestId] = useState<number | null>(null);
   const [scheduleTimeOffPosition, setScheduleTimeOffPosition] = useState({ top: 0, left: 0 });
@@ -672,9 +675,11 @@ export default function Home({ account }: { account: DashboardAccount }) {
     ? (state.ptoRequests ?? []).find((request) => request.id === scheduleTimeOffRequestId && (mode === "manager" || request.employeeId === activeEmployeeId))
     : undefined;
   const scheduleTimeOffEmployee = scheduleTimeOffRequest ? employeeById(state.employees, scheduleTimeOffRequest.employeeId) : undefined;
+  const canManageTimeOff = mode === "manager" && shared.data.permissions["time_off.read"] && shared.data.permissions["time_off.approve"];
+  const visibleScheduleTimeOffId = scheduleTimeOffRequest?.id;
 
   useEffect(() => {
-    if (!scheduleTimeOffRequest) return;
+    if (visibleScheduleTimeOffId === undefined) return;
     function dismiss(restoreFocus = false) {
       setScheduleTimeOffRequestId(null);
       if (restoreFocus) scheduleTimeOffTriggerRef.current?.focus();
@@ -686,31 +691,36 @@ export default function Home({ account }: { account: DashboardAccount }) {
     function closeOnEscape(event: KeyboardEvent) {
       if (event.key === "Escape") { event.preventDefault(); dismiss(true); }
     }
-    function closeOnLayoutChange(event: Event) {
-      if (event.target instanceof Node && scheduleTimeOffPopoverRef.current?.contains(event.target)) return;
-      dismiss();
+    function reposition(event?: Event) {
+      if (event?.target instanceof Node && scheduleTimeOffPopoverRef.current?.contains(event.target)) return;
+      const popover = scheduleTimeOffPopoverRef.current;
+      const anchor = scheduleTimeOffTriggerRef.current?.getBoundingClientRect();
+      if (!popover || !anchor) return;
+      const bounds = popover.getBoundingClientRect();
+      const left = anchor.left >= bounds.width + 24 ? anchor.left - bounds.width - 12
+        : anchor.right + bounds.width + 24 <= window.innerWidth ? anchor.right + 12
+        : Math.max(12, Math.min(anchor.left, window.innerWidth - bounds.width - 12));
+      const top = Math.max(12, Math.min(anchor.top - 100, window.innerHeight - bounds.height - 12));
+      setScheduleTimeOffPosition(position => position.top === top && position.left === left ? position : { top, left });
     }
     const frame = window.requestAnimationFrame(() => {
-      const popover = scheduleTimeOffPopoverRef.current;
-      if (!popover) return;
-      const bounds = popover.getBoundingClientRect();
-      setScheduleTimeOffPosition((position) => ({ ...position, top: Math.max(12, Math.min(position.top, window.innerHeight - bounds.height - 12)) }));
-      popover.querySelector<HTMLButtonElement>("button")?.focus({ preventScroll: true });
+      reposition();
+      scheduleTimeOffPopoverRef.current?.querySelector<HTMLButtonElement>("button")?.focus({ preventScroll: true });
     });
     document.addEventListener("pointerdown", closeOutside);
     document.addEventListener("focusin", closeOutside);
     document.addEventListener("keydown", closeOnEscape);
-    window.addEventListener("scroll", closeOnLayoutChange, true);
-    window.addEventListener("resize", closeOnLayoutChange);
+    window.addEventListener("scroll", reposition, true);
+    window.addEventListener("resize", reposition);
     return () => {
       window.cancelAnimationFrame(frame);
       document.removeEventListener("pointerdown", closeOutside);
       document.removeEventListener("focusin", closeOutside);
       document.removeEventListener("keydown", closeOnEscape);
-      window.removeEventListener("scroll", closeOnLayoutChange, true);
-      window.removeEventListener("resize", closeOnLayoutChange);
+      window.removeEventListener("scroll", reposition, true);
+      window.removeEventListener("resize", reposition);
     };
-  }, [scheduleTimeOffRequest, scheduleTimeOffRequestId]);
+  }, [visibleScheduleTimeOffId]);
   const reviewingOwnPtoRequest = reviewingPtoRequest?.employeeId === activeEmployeeId;
   const activeUserCanManage = shared.data.permissions["team.manage"] || shared.data.permissions["schedule.manage"] || shared.data.permissions["time_off.approve"];
   const notificationRequests = activeUserCanManage ? [...(state.ptoRequests ?? [])]
@@ -2645,6 +2655,32 @@ export default function Home({ account }: { account: DashboardAccount }) {
     setPtoReviewError("");
   }
 
+  function managerTimeOffActions(request: PtoRequest) {
+    if (!canManageTimeOff || request.status !== "approved" || (request.employeeId === activeEmployeeId && account.accessLevel !== "owner")) return null;
+    const name = employeeById(state.employees, request.employeeId)?.name ?? "Employee";
+    function open(action: "edit" | "cancel", opener: HTMLElement) {
+      setManagerTimeOff({ target: { action, requestId: request.id, employeeName: name },
+        opener: scheduleTimeOffRequestId === request.id ? scheduleTimeOffTriggerRef.current : opener });
+      setScheduleTimeOffRequestId(null);
+      setReviewingPtoRequestId(null);
+    }
+    return <>
+      <button className="edit-approved-time-off" type="button" onClick={event => open("edit", event.currentTarget)}>Edit approved time off</button>
+      <button className="cancel-approved-time-off" type="button" onClick={event => open("cancel", event.currentTarget)}>Cancel approved time off</button>
+    </>;
+  }
+
+  function checkManagerPtoBalance(employeeId: number, details: ManagerTimeOffFields, requestId?: number) {
+    if (details.category !== "pto") return "";
+    const year = new Date(currentTime).getFullYear(), period = { start: year + "-01-01", end: year + "-12-31" };
+    const existing = approvedPtoForEmployee(state.ptoRequests, employeeId);
+    const proposed = [...existing.filter(request => request.id !== requestId), details];
+    const added = ptoHoursInPeriod(proposed, period) - ptoHoursInPeriod(existing, period);
+    const employee = ptoRows.find(row => row.employee.id === employeeId);
+    const left = employee ? employee.ptoHours - employee.ptoUsed : 0;
+    return added > 0 && added > left ? "This change needs " + formatPtoHours(added) + " of PTO. This employee has " + formatPtoHours(left) + " left." : "";
+  }
+
   async function cancelPtoRequest(requestId: number) {
     const cancelledAt = new Date().toISOString();
     if (!await setState((current) => ({
@@ -2979,7 +3015,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
   }
 
   useEffect(() => {
-    shared.setEditing(Boolean(isOpenShiftDialogOpen || isPublicationOpen || isScheduleToolsOpen || isSharedTimeCardEditing || ptoRequestForm || editingPayrollEmployeeId !== null || activeView === "profile" || isAddingEmployee || editingEmployeeId !== null || isAddingDepartment || editingDepartmentId !== null || isAddingShift || editingShift || scheduleEventDraft || editingHours || editingPtoPolicyId !== null || ptoPolicyForm || reviewingPtoRequestId !== null || certificateEmployeeId !== null || terminatingEmployeeId !== null || editingPersonalContactEmployeeId !== null || editingPersonalPayrollEmployeeId !== null || editingBasicInfoField !== null || activeView === "settings" || activeView === "my_availability" || activeView === "team_availability" || isCreatingConversation || editingConversationNameId !== null));
+    shared.setEditing(Boolean(isOpenShiftDialogOpen || isPublicationOpen || isScheduleToolsOpen || isSharedTimeCardEditing || ptoRequestForm || managerTimeOff || editingPayrollEmployeeId !== null || activeView === "profile" || isAddingEmployee || editingEmployeeId !== null || isAddingDepartment || editingDepartmentId !== null || isAddingShift || editingShift || scheduleEventDraft || editingHours || editingPtoPolicyId !== null || ptoPolicyForm || reviewingPtoRequestId !== null || certificateEmployeeId !== null || terminatingEmployeeId !== null || editingPersonalContactEmployeeId !== null || editingPersonalPayrollEmployeeId !== null || editingBasicInfoField !== null || activeView === "settings" || activeView === "my_availability" || activeView === "team_availability" || isCreatingConversation || editingConversationNameId !== null));
   });
 
   if (!isUnlocked) return <main className="login-screen"><p role="status">Returning to sign in…</p></main>;
@@ -4983,6 +5019,8 @@ export default function Home({ account }: { account: DashboardAccount }) {
                       </div>
                     ) : null}
                   </div>
+                  {canManageTimeOff && shared.data.permissions["schedule.read"] ? <button type="button" data-time-off-focus
+                    onClick={event => setManagerTimeOff({ target: { action: "add", date: scheduleDate }, opener: event.currentTarget })}>Add time off</button> : null}
                   {mode === "manager" && shared.data.permissions["schedule.read"] && shared.data.permissions["schedule.manage"] ? <ScheduleTools weekStart={scheduleWeekDays[0].date} enabled={employeeScheduleTab === "week"} onOpenChange={setIsScheduleToolsOpen} onDraftReady={date => { setScheduleDate(date); setEmployeeScheduleTab("week"); }} /> : null}
                   {mode === "manager" && shared.data.permissions["schedule.manage"] && shared.data.permissions["schedule.read"] ? <button type="button" onClick={() => { setShowExchangeRequests(true); setIsOpenShiftDialogOpen(true); }}>Trades & cover</button> : null}
                   {shared.data.permissions["schedule.read"] ? <a className="schedule-print-link" target="_blank" rel="noopener noreferrer" href={`/schedule/print?${new URLSearchParams({ date: scheduleDate, view: employeeScheduleTab, employees: visibleScheduleEmployees.map(person => person.id).join(",") })}`}>Print schedule</a> : null}
@@ -5490,7 +5528,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                 <>
                   <div className="pto-request-section pto-history-heading">
                     <h3>Request history</h3>
-                    <button type="button" className="pto-history-link" onClick={() => setIsViewingPtoHistory(false)}>Back to requests</button>
+                    <button type="button" className="pto-history-link" data-time-off-focus onClick={() => setIsViewingPtoHistory(false)}>Back to requests</button>
                   </div>
                   <div className="pto-history-toolbar">
                     <strong>{ptoHistoryStatusLabel(ptoHistoryStatusFilter)} ({filteredHistoricalPtoRequests.length})</strong>
@@ -5650,7 +5688,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                                     </svg>
                                   </button>
                                 ) : null}
-                                <button
+                                {request.status !== "approved" && canManageTimeOff ? <button
                                   type="button"
                                   className="pto-request-icon-action delete"
                                   onClick={() => deletePtoRequest(request.id)}
@@ -5663,7 +5701,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                                     <path d="m7 7 1 13h8l1-13" />
                                     <path d="M10 11v5M14 11v5" />
                                   </svg>
-                                </button>
+                                </button> : null}
                               </>
                             ) : null}
                           </div>
@@ -5787,7 +5825,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
             <p className="schedule-time-off-note">{scheduleTimeOffRequest.explanation ? `“${scheduleTimeOffRequest.explanation}”` : "No explanation provided."}</p>
             <p className="schedule-time-off-requested">Requested {new Date(scheduleTimeOffRequest.requestedAt).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" })}</p>
           </div>
-          {mode === "manager" ? <div className="schedule-time-off-actions"><button type="button" onClick={() => deletePtoRequest(scheduleTimeOffRequest.id)}>Delete</button></div> : null}
+          {canManageTimeOff ? <div className="schedule-time-off-actions">{managerTimeOffActions(scheduleTimeOffRequest)}</div> : null}
         </div>, document.body,
       ) : null}
 
@@ -6427,17 +6465,27 @@ export default function Home({ account }: { account: DashboardAccount }) {
                   </svg>
                   Message employee
                 </button>
-                <p className="pto-review-prompt">Approve or deny this time off request?</p>
-                {ptoReviewError ? <p className="shift-error-message" role="alert">{ptoReviewError}</p> : null}
-                <div className="pto-review-actions">
-                  <button type="button" className="approve-action" onClick={() => decidePtoRequest("approved")}>Approve</button>
-                  <button type="button" className="deny-action" onClick={() => decidePtoRequest("denied")}>Deny</button>
-                </div>
+                {reviewingPtoRequest.status === "pending" && canManageTimeOff ? <>
+                  <p className="pto-review-prompt">Approve or deny this time off request?</p>
+                  {ptoReviewError ? <p className="shift-error-message" role="alert">{ptoReviewError}</p> : null}
+                  <div className="pto-review-actions">
+                    <button type="button" className="approve-action" onClick={() => decidePtoRequest("approved")}>Approve</button>
+                    <button type="button" className="deny-action" onClick={() => decidePtoRequest("denied")}>Deny</button>
+                  </div>
+                </> : null}
               </>
             )}
+            {reviewingPtoRequest.status !== "pending" ? <ManagerTimeOffHistory key={reviewingPtoRequest.id} request={reviewingPtoRequest.id} /> : null}
+            {reviewingPtoRequest.status === "approved" && canManageTimeOff ? <div className="pto-review-actions">{managerTimeOffActions(reviewingPtoRequest)}</div> : null}
           </div>
         </div>
       ) : null}
+
+      {managerTimeOff ? <ManagerTimeOffDialog target={managerTimeOff.target} restoreFocus={managerTimeOff.opener}
+        people={state.employees.filter(person => person.active && !person.terminated && (person.id !== activeEmployeeId || account.accessLevel === "owner"))}
+        close={() => setManagerTimeOff(null)} validateBalance={checkManagerPtoBalance} onSaved={operation => {
+          if (activeView === "schedule" && operation.action !== "cancel") setScheduleDate(operation.details.startDate);
+        }} /> : null}
 
       {ptoRequestForm ? (
         <div className="modal-backdrop" role="presentation">
@@ -8164,7 +8212,7 @@ function approvedPtoForEmployee(requests: PtoRequest[], employeeId: number) {
   return requests.filter(request => request.employeeId === employeeId && request.status === "approved" && leaveCategory(request) === "pto");
 }
 
-function ptoHoursInPeriod(requests: PtoRequest[], period: { start: string; end: string }) {
+function ptoHoursInPeriod(requests: Parameters<typeof approvedLeaveMinutesByDay>[0], period: { start: string; end: string }) {
   return [...approvedLeaveMinutesByDay(requests, period).values()].reduce((total, minutes) => total + minutes, 0) / 60;
 }
 

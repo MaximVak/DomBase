@@ -412,6 +412,100 @@ test("shared workforce operations persist, scope, audit and serialize actual D1 
       await db.delete(schema.accountPermissions).where(sql`account_id = ${f.manager.id} AND permission IN ('timesheets.manage','timesheets.lock')`);
     }
   });
+  await t.test("scoped managers can add, edit and cancel approved leave with atomic audit and original and proposed period locks", async () => {
+    const endpoint = "time-off";
+    const original = "2026-11-07", proposed = "2026-11-14";
+    const details = { category: "pto", startDate: original, endDate: original, startTime: "09:00", endTime: "11:30", reason: "vacation" };
+    const callBody = async (cookie, action) => ({ ...action, id: newToken(), revision: (await snapshot(cookie)).revision });
+    const post = (cookie, body) => call(endpoint, cookie, body);
+    const history = (cookie, id) => call(endpoint + "?request=" + id, cookie);
+    const accountHours = async date => (await ok(await call("accountant-export?start=" + date + "&end=" + date, owner)))
+      .rows.find(row => row.employeeId === f.a.id)?.pto ?? 0;
+    const audit = async id => db.select().from(schema.auditLog).where(sql`entity_type = 'pto-request' AND entity_id = ${String(id)}`).orderBy(schema.auditLog.id);
+    const lock = async (date, action) => db.insert(schema.timesheetLockEvents).values({
+      targetKey: "leave-test:" + date, startDate: date, endDate: date, startsAt: date + "T00:00:00Z", endsAt: date + "T23:59:59Z",
+      action, actorAccountId: f.owner.id,
+    });
+    const add = { action: "add", employeeId: f.a.id, details };
+    assert.equal((await post("", {})).status, 401);
+    assert.equal((await post(manager, await callBody(manager, add))).status, 403);
+    const crossDept = (await snapshot(owner)).state.ptoRequests.find(row => row.employeeId === f.b.id);
+    assert.ok(crossDept);
+    assert.equal((await history(manager, crossDept.id)).status, 404);
+    await db.insert(schema.accountPermissions).values({ accountId: f.manager.id, permission: "time_off.approve", allowed: true });
+    try {
+      assert.equal((await post(manager, await callBody(manager, { ...add, employeeId: f.b.id }))).status, 404);
+      assert.equal((await post(manager, await callBody(manager, { ...add, employeeId: f.managerEmployee.id }))).status, 403);
+      assert.equal((await post(manager, await callBody(manager, { ...add, details: { ...details, endTime: "08:00" } }))).status, 400);
+      await lock(original, "lock");
+      const lockedAdd = await post(manager, await callBody(manager, add));
+      assert.equal(lockedAdd.status, 409);
+      assert.match((await lockedAdd.json()).error, /pay period is locked/i);
+      await lock(original, "unlock");
+      const create = await callBody(owner, { ...add, details: { ...details, explanation: "Synthetic private employee note" } });
+      const retries = await Promise.all([post(owner, create), post(owner, create)]);
+      assert.deepEqual(retries.map(reply => reply.status), [200, 200]);
+      assert.equal((await post(owner, { ...create, employeeId: f.multi.id })).status, 409);
+      const booked = (await snapshot(owner)).state.ptoRequests.filter(row => row.employeeId === f.a.id && row.startDate === original);
+      assert.equal(booked.length, 1);
+      const [initial] = booked;
+      assert.deepEqual([initial.status, initial.category], ["approved", "pto"]);
+      assert.equal(await accountHours(original), 2.5);
+      const initialHistory = await ok(await history(manager, initial.id));
+      assert.equal(initialHistory.history.length, 1);
+      assert.equal(initialHistory.history[0].actor, f.owner.displayName);
+      assert.equal(initialHistory.history[0].action, "added");
+      assert.doesNotMatch(JSON.stringify(initialHistory), /Synthetic private employee note/);
+
+      const edit = { action: "edit", requestId: initial.id, version: initialHistory.record.version,
+        details: { ...details, startDate: proposed, endDate: proposed, endTime: "10:30" } };
+      assert.equal((await post(manager, await callBody(manager, { ...edit, details: { ...edit.details, explanation: "" } }))).status, 403);
+      assert.equal((await post(manager, await callBody(manager, { ...edit, employeeId: f.b.id }))).status, 400);
+      for (const date of [original, proposed]) {
+        await lock(date, "lock");
+        const lockedEdit = await post(manager, await callBody(manager, edit));
+        assert.equal(lockedEdit.status, 409);
+        assert.match((await lockedEdit.json()).error, /pay period is locked/i);
+        await lock(date, "unlock");
+      }
+      const same = await ok(await history(manager, initial.id));
+      assert.deepEqual(same, initialHistory);
+      await db.run(sql`CREATE TRIGGER fixture_leave_audit_failure BEFORE INSERT ON audit_log WHEN NEW.action = 'time_off.edited' BEGIN SELECT RAISE(ABORT, 'fixture audit failure'); END`);
+      try {
+        const attempt = await callBody(manager, edit);
+        assert.equal((await post(manager, attempt)).status, 503);
+        assert.deepEqual(await ok(await history(manager, initial.id)), initialHistory);
+      } finally { await db.run(sql`DROP TRIGGER fixture_leave_audit_failure`); }
+      await ok(await post(manager, await callBody(manager, edit)));
+      const updated = await ok(await history(owner, initial.id));
+      assert.equal(updated.record.status, "approved");
+      assert.equal(updated.record.explanation, "Synthetic private employee note");
+      assert.equal(updated.record.version, edit.version + 1);
+      assert.deepEqual(updated.history.map(entry => [entry.action, entry.actor]), [["edited", f.manager.displayName], ["added", f.owner.displayName]]);
+      const [edited] = updated.history;
+      assert.deepEqual([edited.before.startDate, edited.after.startDate, edited.before.endTime, edited.after.endTime], [original, proposed, "11:30", "10:30"]);
+      assert.doesNotMatch(JSON.stringify(await audit(initial.id)), /Synthetic private employee note/);
+      assert.equal((await post(manager, await callBody(manager, edit))).status, 409);
+      assert.equal(await accountHours(original), 0);
+      assert.equal(await accountHours(proposed), 1.5);
+
+      const cancel = { action: "cancel", requestId: initial.id, version: updated.record.version };
+      await lock(proposed, "lock");
+      assert.equal((await post(manager, await callBody(manager, cancel))).status, 409);
+      const changeToUnpaid = { ...edit, details: { ...edit.details, category: "unpaid", startDate: original, endDate: original }, version: updated.record.version };
+      assert.equal((await post(manager, await callBody(manager, changeToUnpaid))).status, 409);
+      await lock(proposed, "unlock");
+      await ok(await post(manager, await callBody(manager, cancel)));
+      const removed = await ok(await history(manager, initial.id));
+      assert.equal(removed.record.status, "cancelled");
+      assert.deepEqual(removed.history.map(entry => entry.action), ["cancelled", "edited", "added"]);
+      assert.equal(await accountHours(proposed), 0);
+      assert.equal((await audit(initial.id)).length, 3);
+      await assert.rejects(db.run(sql`UPDATE audit_log SET action = 'redacted' WHERE entity_type = 'pto-request'`));
+    } finally {
+      await db.delete(schema.accountPermissions).where(sql`account_id = ${f.manager.id} AND permission = 'time_off.approve'`);
+    }
+  });
   await t.test("a scoped Manager can change a future shift without erasing notes they cannot read", async () => {
     const before = await snapshot(owner); const ownKey = f.b.id;
     const draft = { upsertedShifts: [{ id: 79001, employeeId: f.a.id, date: "2026-11-12", start: "09:00", end: "17:00", role: f.roleA.name, station: "Floor", notes: "Preserve this private shift note" }], deletedShiftIds: [], affectedEmployeeIds: [f.a.id] };

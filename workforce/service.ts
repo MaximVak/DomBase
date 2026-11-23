@@ -19,6 +19,7 @@ import { readScheduleConflicts } from "./conflicts";
 import { readSchedulePrint } from "./schedule-print";
 import { readAccountantReport } from "./accountant-export";
 import { timeOffChange } from "./time-off";
+import { handleManagerTimeOff } from "./manager-time-off";
 import { conversationChange } from "./messages";
 import { timecardChange } from "./timecards";
 import { settingsChange } from "./settings";
@@ -58,6 +59,7 @@ export function createWorkforceService(db: Database, access: ReturnType<typeof c
       const action = url.pathname.slice("/api/workspace/".length);
       if (action === "timesheet-review") return await handleTimesheetReview(db, ctx, request, { ...options, now: now() });
       if (action === "timesheet-locks") return await handleTimesheetLocks(db, ctx, request, { ...options, now: now() });
+      if (action === "time-off") return await handleManagerTimeOff(db, ctx, request, options.secret, now());
       if (action === "attendance" || action === "assisted-clocks") {
         if (url.search) throw new AuthError(400, "Attendance does not accept employee selectors.");
         if (request.method === "GET") return json(action === "attendance" ? await readAttendance(db, ctx, now()) : await readAssistedClocks(db, ctx));

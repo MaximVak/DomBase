@@ -5407,6 +5407,11 @@ label.enforcement-rule-line {
   transform: translateX(-50%) scale(0.82);
 }
 
+.shift-week-cell.has-content:has(.shift-time-off) .shift-cell-add {
+  position: static;
+  transform: none;
+}
+
 .shift-week-cell:hover .shift-cell-add,
 .shift-week-cell:focus-within .shift-cell-add,
 .shift-cell-add:focus-visible {
@@ -5441,6 +5446,12 @@ label.enforcement-rule-line {
   opacity: 1;
   pointer-events: auto;
   transform: translate(-50%, -50%) scale(1);
+}
+
+.schedule-track:has(.schedule-bar.time-off) .schedule-track-add {
+  left: auto;
+  right: 6px;
+  transform: translateY(-50%);
 }
 
 .shift-week-card,
@@ -5514,9 +5525,10 @@ label.enforcement-rule-line {
 .schedule-time-off-hours dd { margin: 0; font-size: 1.1rem; font-weight: 800; }
 .schedule-time-off-note { margin: 22px 0 10px; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
 .schedule-time-off-requested { margin: 0; color: var(--muted); font-size: 0.95rem; }
-.schedule-time-off-actions { border-top: 1px solid var(--line); padding: 24px; }
+.schedule-time-off-actions { display: flex; flex-wrap: wrap; gap: 8px; border-top: 1px solid var(--line); padding: 16px 24px; }
 .schedule-time-off-actions button { border: 0; border-radius: 15px; padding: 12px 20px; background: #ffeaea; color: #b42323; font: inherit; font-weight: 700; }
 .schedule-time-off-actions button:hover { background: #ffdbdb; }
+.schedule-time-off-actions .edit-approved-time-off { background: #dceeff; color: var(--blue-deep); }
 
 .shift-month-board {
   display: grid;
@@ -9392,6 +9404,8 @@ button[aria-label^="Remove"]:focus-visible,
 .pto-review-actions .approve-action {
   background: var(--green-dark);
 }
+.pto-review-actions .edit-approved-time-off { background: var(--blue-deep); }
+.pto-review-actions .cancel-approved-time-off { background: var(--danger); }
 
 .pto-request-modal {
   display: grid;
@@ -11102,6 +11116,20 @@ button[aria-label^="Remove"]:focus-visible,
 .my-time-off-requests { padding: 0; list-style: none; }
 .my-time-off-requests li { display: flex; flex-wrap: wrap; gap: 4px 12px; padding-block: 12px; border-bottom: 1px solid var(--line); }
 .my-time-off-requests li span:last-child { margin-inline-start: auto; }
+.manager-time-off-dialog { box-sizing: border-box; width: min(540px, calc(100% - 24px)); max-height: calc(100dvh - 32px); overflow: auto; padding: clamp(14px, 4vw, 24px); border: 1px solid var(--line); border-radius: 10px; background: white; color: var(--ink); }
+.manager-time-off-dialog::backdrop { background: rgb(18 33 58 / 48%); }
+.manager-time-off-dialog .modal-heading { align-items: flex-start; }
+.manager-time-off-dialog .modal-heading h2 { margin: 0; font-size: 1.3rem; }
+.manager-time-off-dialog .modal-heading button { min-width: 44px; min-height: 44px; }
+.manager-time-off-form { padding: 0; border: 0; }
+.manager-time-off-dialog .hours-edit-actions { flex-wrap: wrap; }
+.manager-time-off-dialog .hours-edit-actions button { min-height: 44px; }
+.manager-time-off-dialog :is(input, button):focus-visible { outline: 3px solid var(--blue); outline-offset: 3px; }
+.manager-time-off-error { color: #922d24; }
+.manager-time-off-history ol { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.manager-time-off-history h3 { margin-block: 16px 8px; font-size: 1rem; }
+.manager-time-off-history li { display: grid; gap: 4px; padding-block: 8px; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+.manager-time-off-history :is(time, span) { color: var(--muted); font-size: .9rem; }
 
 .team-screen { width: min(100%, 1120px); padding: 24px 16px; margin-inline: auto; color: var(--ink); }
 .team-screen > header, .team-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 20px; flex-wrap: wrap; margin-bottom: 24px; }
