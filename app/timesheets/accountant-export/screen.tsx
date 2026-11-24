@@ -8,12 +8,16 @@ import { accountantCsv, accountantWorkbook } from "./files";
 
 type Format = "csv" | "xls" | "print";
 class ReportAccessError extends Error {}
+class ReportChangedError extends Error {}
 
-async function loadReport(signal?: AbortSignal): Promise<AccountantReport> {
-  const response = await fetch("/api/workspace/accountant-export" + window.location.search, { cache: "no-store", signal });
+async function loadReport(scheduledStartIds: number[] = [], signal?: AbortSignal): Promise<AccountantReport> {
+  const response = await fetch("/api/workspace/accountant-export" + window.location.search, { cache: "no-store", signal,
+    ...(scheduledStartIds.length ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ scheduledStartIds }) } : {}),
+  });
   if (response.status === 401) window.location.replace("/login");
   const payload = await response.json();
   if (response.status === 401 || response.status === 403) throw new ReportAccessError(payload.error || "You do not have accountant export access.");
+  if (response.status === 409) throw new ReportChangedError(payload.error || "Timesheets changed. Review the recorded report and choose again.");
   if (!response.ok) throw new Error(payload.error || "Could not prepare the accountant report.");
   return payload;
 }
@@ -40,6 +44,7 @@ export function AccountantExportScreen() {
   const [report, setReport] = useState<AccountantReport>();
   const [showReference, setShowReference] = useState(false);
   const [weeklyInput, setWeeklyInput] = useState<Record<number, string>>({});
+  const [selectedStarts, setSelectedStarts] = useState<number[]>([]);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
   const [pending, setPending] = useState(true);
@@ -55,33 +60,60 @@ export function AccountantExportScreen() {
   const cells = report ? accountantCells(report, withReference ? weeklyHours : undefined) : [];
   const missingId = report?.rows.filter(row => !row.payrollId.trim()).length ?? 0;
   const reviewCount = report?.rows.filter(row => row.total === null).length ?? 0;
+  const appliedStarts = report?.scheduledStartIds ?? [];
+  const startsDirty = appliedStarts.length !== selectedStarts.length || selectedStarts.some(id => !appliedStarts.includes(id));
+  const exportDisabled = !report?.rows.length || pending || invalid || startsDirty;
 
   useEffect(() => {
     const controller = new AbortController();
-    void loadReport(controller.signal).then(data => { if (!controller.signal.aborted) setReport(data); })
+    void loadReport([], controller.signal).then(data => { if (!controller.signal.aborted) setReport(data); })
       .catch(reason => { if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "Could not load the report."); })
       .finally(() => { if (!controller.signal.aborted) setPending(false); });
     return () => controller.abort();
   }, [reload]);
 
-  async function exportReport(format: Format) {
-    if (!report || !report.rows.length || invalid || saving.current) return;
+  function handleReportError(reason: unknown, fallback: string) {
+    if (reason instanceof ReportAccessError) setReport(undefined);
+    if (reason instanceof ReportChangedError) {
+      setSelectedStarts([]);
+      setReport(undefined);
+      setReload(value => value + 1);
+    }
+    setError(reason instanceof Error ? reason.message : fallback);
+  }
+
+  async function applyScheduledStarts() {
+    if (!startsDirty || saving.current) return;
     saving.current = true;
     setPending(true); setError(""); setStatus("");
     try {
-      const latest = await loadReport();
+      setReport(await loadReport(selectedStarts));
+      setStatus(selectedStarts.length ? "Scheduled starts applied to the report preview." : "Showing recorded clock-in times.");
+    } catch (reason) {
+      handleReportError(reason, "Could not update the report preview.");
+    } finally {
+      saving.current = false;
+      setPending(false);
+    }
+  }
+
+  async function exportReport(format: Format) {
+    if (!report || exportDisabled || saving.current) return;
+    saving.current = true;
+    setPending(true); setError(""); setStatus("");
+    try {
+      const latest = await loadReport(appliedStarts);
       if (JSON.stringify(latest) !== JSON.stringify(report)) {
         setReport(latest);
         setStatus("Timesheets changed. Review the updated report and choose a format again.");
         return;
       }
-      const name = `accountant-timesheets-${report.period.start}-${report.period.end}`;
+      const name = `accountant-timesheets-${report.period.start}-${report.period.end}${appliedStarts.length ? "-scheduled-starts" : ""}`;
       if (format === "print") window.print();
       else if (format === "csv") saveFile(accountantCsv(cells), "text/csv;charset=utf-8", `${name}.csv`);
       else saveFile(await accountantWorkbook(cells), "application/vnd.ms-excel", `${name}.xls`);
     } catch (reason) {
-      if (reason instanceof ReportAccessError) setReport(undefined);
-      setError(reason instanceof Error ? reason.message : "Could not export the report.");
+      handleReportError(reason, "Could not export the report.");
     } finally {
       saving.current = false;
       setPending(false);
@@ -94,9 +126,9 @@ export function AccountantExportScreen() {
       <h1>Accountant export</h1>
       {report ? <p>{report.location} · {payPeriodLabel(report.period)}</p> : null}
       <div className="accountant-actions">
-        <button type="button" disabled={!report?.rows.length || pending || invalid} onClick={() => void exportReport("csv")}>Download CSV</button>
-        <button type="button" disabled={!report?.rows.length || pending || invalid} onClick={() => void exportReport("xls")}>Download Excel (.xls)</button>
-        <button type="button" disabled={!report?.rows.length || pending || invalid} onClick={() => void exportReport("print")}>Print / Save as PDF</button>
+        <button type="button" disabled={exportDisabled} onClick={() => void exportReport("csv")}>Download CSV</button>
+        <button type="button" disabled={exportDisabled} onClick={() => void exportReport("xls")}>Download Excel (.xls)</button>
+        <button type="button" disabled={exportDisabled} onClick={() => void exportReport("print")}>Print / Save as PDF</button>
         {error && !report ? <button type="button" disabled={pending} onClick={() => { setError(""); setPending(true); setReload(value => value + 1); }}>Try again</button> : null}
       </div>
     </header>
@@ -104,6 +136,20 @@ export function AccountantExportScreen() {
     {status ? <p className="accountant-screen-only" role="status">{status}</p> : null}
     {error ? <p className="accountant-screen-only accountant-alert" role="alert">{error}</p> : null}
     {report && <>
+      <details className="accountant-reference accountant-early-starts accountant-screen-only">
+        <summary>Use scheduled starts for early check-ins</summary>
+        {report.earlyCheckIns?.length ? <>
+          <p>Select check-ins where the employee was off duty until the scheduled start. Apply your selections to update the report.</p>
+          <ul>{report.earlyCheckIns.map(entry => <li key={entry.eventId}><label>
+            <input type="checkbox" checked={selectedStarts.includes(entry.eventId)} disabled={pending} onChange={event => {
+              const checked = event.target.checked;
+              setSelectedStarts(current => checked ? [...current, entry.eventId] : current.filter(id => id !== entry.eventId));
+            }} />
+            <span><strong>{entry.employeeName}</strong> · {entry.date} · {entry.recordedTime} → {entry.scheduledTime}</span>
+          </label></li>)}</ul>
+          <div className="accountant-actions"><button type="button" disabled={pending || !startsDirty} onClick={() => void applyScheduledStarts()}>Apply to report</button></div>
+        </> : <p>No eligible early check-ins in this date range.</p>}
+      </details>
       {eligible.length ? <section className="accountant-reference accountant-screen-only" aria-label="Salaried reference options">
         <label className="accountant-reference-toggle"><input type="checkbox" checked={withReference} disabled={pending} onChange={event => setShowReference(event.target.checked)} /> Include salaried reference hours</label>
         {withReference ? <><p>Set weekly hours for each salaried employee. The reference is weekly hours × 52 ÷ {report.periodsPerYear}.</p>
@@ -112,6 +158,7 @@ export function AccountantExportScreen() {
           {invalid ? <p className="accountant-alert" role="alert">Enter weekly hours from 0 to 168 for each salaried employee.</p> : null}</> : null}
       </section> : null}
       <p className="accountant-description">Company-wide hours for the selected dates. Total hours add regular, overtime, double time, and approved paid PTO.</p>
+      {appliedStarts.length ? <p className="accountant-description">Scheduled starts used for {appliedStarts.length} confirmed off-duty early {appliedStarts.length === 1 ? "check-in" : "check-ins"}.</p> : null}
       {report.periodsPerYear === null ? <p className="accountant-description accountant-screen-only">Salaried reference hours are available for a full company pay period.</p> : null}
       {withReference ? <p className="accountant-description">Salaried reference hours are separate from the recorded totals.</p> : null}
       {missingId || reviewCount ? <ul className="accountant-warnings">

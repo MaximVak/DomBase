@@ -17,11 +17,15 @@ export type AccountantRow = {
   salaryEligible: boolean;
 };
 
+export type EarlyCheckIn = { eventId: number; employeeName: string; date: string; recordedTime: string; scheduledTime: string };
+
 export type AccountantReport = {
   period: WorkspacePeriod;
   location: string;
   periodsPerYear: number | null;
   rows: AccountantRow[];
+  earlyCheckIns?: EarlyCheckIn[];
+  scheduledStartIds?: number[];
 };
 
 export type AccountantCell = string | number;

@@ -673,6 +673,54 @@ test("shared workforce operations persist, scope, audit and serialize actual D1 
         OR (account_id = ${f.generalManager.id} AND permission IN ('exports.timesheets', 'time_off.read'))`);
     }
   });
+  await t.test("accountant scheduled starts are opt-in, reprice overtime, and preserve worked and locked time", async () => {
+    const period = { start: "2026-09-14", end: "2026-09-20" };
+    const friday = "2026-09-18";
+    const scheduledStart = friday + "T15:00:00.000Z";
+    const rawStart = friday + "T14:57:00.000Z";
+    const insertPair = async (employee, role, date, from, to, details = { california: true }) => {
+      const occurredAt = date + from;
+      const [event] = await db.insert(schema.clockEvents).values([
+        { employeeId: employee.id, roleName: role.name, eventType: "in", occurredAt, source: "kiosk", deviceId: "test-device", receivedAt: occurredAt, clockDetails: details },
+        { employeeId: employee.id, roleName: role.name, eventType: "out", occurredAt: date + to, source: "system" },
+      ]).returning();
+      return event;
+    };
+    for (const date of ["2026-09-14", "2026-09-15", "2026-09-16", "2026-09-17"]) {
+      await insertPair(f.a, f.roleA, date, "T15:00:00.000Z", "T23:00:00.000Z");
+    }
+    const eligible = await insertPair(f.a, f.roleA, friday, "T14:57:00.000Z", "T23:00:00.000Z", { california: true, scheduledStart });
+    const worked = await insertPair(f.b, f.roleB, friday, "T14:57:00.000Z", "T17:00:00.000Z", { california: true, scheduledStart, earlyWork: true });
+    const older = await insertPair(f.multi, f.roleA, friday, "T14:57:00.000Z", "T17:00:00.000Z");
+    const tooEarly = await insertPair(f.managerEmployee, f.roleA, friday, "T14:54:00.000Z", "T17:00:00.000Z", { california: true, scheduledStart });
+    const route = "accountant-export?" + new URLSearchParams(period);
+    const choose = ids => call(route, owner, { scheduledStartIds: ids });
+    const report = await ok(await call(route, owner));
+    assert.deepEqual(report.earlyCheckIns?.map(entry => entry.eventId), [eligible.id]);
+    assert.equal(report.scheduledStartIds, undefined);
+    assert.equal((await call(route, manager, { scheduledStartIds: [eligible.id] })).status, 403);
+    for (const event of [worked, older, tooEarly]) assert.equal((await choose([event.id])).status, 409);
+    assert.equal((await choose([eligible.id, eligible.id])).status, 400);
+    const altered = await ok(await choose([eligible.id]));
+    const row = (data, employee) => data.rows.find(row => row.employeeId === employee.id);
+    assert.deepEqual(altered.scheduledStartIds, [eligible.id]);
+    assert.deepEqual([row(report, f.a).regular, row(report, f.a).overtime, row(report, f.a).total], [40, 0.05, 40.05]);
+    assert.deepEqual([row(altered, f.a).regular, row(altered, f.a).overtime, row(altered, f.a).total], [40, 0, 40]);
+    assert.deepEqual(row(altered, f.b), row(report, f.b));
+    const [stored] = await db.select().from(schema.clockEvents).where(eq(schema.clockEvents.id, eligible.id));
+    assert.equal(stored.occurredAt, rawStart);
+    const lock = { targetKey: "period:early-start-test", startDate: period.start, endDate: period.end,
+      startsAt: period.start + "T07:00:00.000Z", endsAt: "2026-09-21T07:00:00.000Z", actorAccountId: f.owner.id };
+    await db.insert(schema.timesheetLockEvents).values({ ...lock, action: "lock" });
+    try {
+      assert.equal((await choose([eligible.id])).status, 409);
+      const locked = await ok(await call(route, owner));
+      assert.equal(locked.earlyCheckIns, undefined);
+      assert.deepEqual(row(locked, f.a), row(report, f.a));
+    } finally {
+      await db.insert(schema.timesheetLockEvents).values({ ...lock, action: "unlock" });
+    }
+  });
   await t.test("restarting the local runtime preserves records and FK integrity", async () => {
     await platform.dispose(); platform = await open(); services(); owner = await login(f.owner.email); second = await login(f.secondOwner.email); manager = await login(f.manager.email);
     const view = await snapshot(second); assert.ok(view.state.employees.some(e => e.id === createdId)); assert.ok(view.state.shifts.some(s => s.id === 72001));

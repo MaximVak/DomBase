@@ -328,6 +328,52 @@ test("registered tablets, PIN sessions and action-scoped approvals use isolated 
       await settings({ blockEarlyClockIn: true, breakWaivers: false, unpaidRestOverage: false });
     }
   });
+  await t.test("the five-minute check-in window preserves exact time and captures the published start for the report", async () => {
+    const { nextDate, zonedTimestamp } = await loadServerModule("workforce/time.ts");
+    const zone = "America/Los_Angeles";
+    const today = new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(time));
+    const date = nextDate(nextDate(today));
+    const stamp = wall => zonedTimestamp(date, wall, zone);
+    const [employee] = await db.insert(schema.employees).values({ name: "Fictional early check-in employee", pinHash: "early-check-in-fixture-before-enrollment" }).returning();
+    await db.insert(schema.employeeRoles).values({ employeeId: employee.id, roleId: f.roleA.id });
+    const pin = "812018";
+    await ok(await adm("employee-pin", ownerCookie, { employeeId: employee.id, pin, password }));
+    const [publication] = await db.insert(schema.schedulePublications).values({ version: 555, publishedByAccountId: f.owner.id }).returning();
+    await db.insert(schema.shifts).values([["09:00", "11:00"], ["13:00", "15:00"], ["17:00", "19:00"]].map(([startTime, endTime]) => ({
+      employeeId: employee.id, roleId: f.roleA.id, date, startTime, endTime, publicationId: publication.id,
+    })));
+    let at = stamp("08:55") - 1;
+    const clockService = createKioskService(db, { secret, now: () => at });
+    const send = (action, session, body) => request(clockService, `/api/kiosk/${action}`, session, body);
+    const signedIn = async () => {
+      const response = await send("pin", deviceCookie, { pin, queue: true });
+      return { data: await ok(response), cookie: `${deviceCookie}; ${cookiesOf(response)[0]}` };
+    };
+    const clockIn = { eventType: "in", roleId: f.roleA.id, explanation: "" };
+    const clockOut = { eventType: "out", explanation: "" };
+    let actor = await signedIn();
+    assert.equal((await send("clock", actor.cookie, clockIn)).status, 422);
+    at++;
+    await ok(await send("clock", actor.cookie, clockIn));
+    at = stamp("10:00");
+    await ok(await send("clock", (await signedIn()).cookie, clockOut));
+    at = stamp("12:57");
+    await ok(await send("clock", (await signedIn()).cookie, { ...clockIn, details: { worked: true } }));
+    at = stamp("14:00");
+    await ok(await send("clock", (await signedIn()).cookie, clockOut));
+    at = stamp("16:58");
+    actor = await signedIn();
+    await ok(await send("sync", deviceCookie, { ...clockIn, attemptedAt: at, ticket: actor.data.replay.ticket }));
+    at = stamp("18:00");
+    await ok(await send("clock", (await signedIn()).cookie, clockOut));
+    const starts = (await db.select().from(schema.clockEvents).where(eq(schema.clockEvents.employeeId, employee.id)))
+      .filter(event => event.eventType === "in" && Date.parse(event.occurredAt) >= stamp("08:55"));
+    assert.deepEqual(starts.map(event => [Date.parse(event.occurredAt), event.clockDetails?.scheduledStart, event.clockDetails?.earlyWork]), [
+      [stamp("08:55"), new Date(stamp("09:00")).toISOString(), undefined],
+      [stamp("12:57"), undefined, true],
+      [stamp("16:58"), undefined, undefined],
+    ]);
+  });
   await t.test("assisted clock times, role-scoped attendance and reminders preserve raw entries", async () => {
     const { nextDate, zonedTimestamp } = await loadServerModule("workforce/time.ts");
     const { fieldKey } = await import("./support/workforce-fixture.mjs");

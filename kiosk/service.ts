@@ -17,6 +17,7 @@ import { nextDate, zonedTimestamp } from "../workforce/time";
 import { clockEntryUnlocked } from "../workforce/timesheet-lock-guards";
 import { assistedOutPolicyGuard, insertAssistance, isAutomaticRecovery, planAssistance, shiftBounds } from "./assistance";
 import type { ClockDetails } from "./break-rules";
+import { accountantEarlyWindowMs } from "./break-rules";
 import type { DocumentBucket } from "../documents/types";
 import { clockPhotoGrant, kioskPhotosEnabled, saveClockPhoto } from "./clock-photo";
 
@@ -187,7 +188,7 @@ export function createKioskService(db: KioskOperatorDatabase, options: { secret:
     return { recorded: true, eventType: pending.eventType, ...(assistance ? { assistance: assistance.status } : {}),
       ...(!assistance && pending.eventType === "in" ? { photoEventId: result[0].meta.last_row_id } : {}) };
   }
-  async function planClock(employeeId: number, previous: typeof schema.clockEvents.$inferSelect | null, draft: ClockDraft, clockTime: number) {
+  async function planClock(employeeId: number, previous: typeof schema.clockEvents.$inferSelect | null, draft: ClockDraft, clockTime: number, online = false) {
     const policy = await clockPolicy(db);
     const details: ClockDetails | null = await resolveBreakDetails(db, employeeId, previous, draft, clockTime, policy);
     if (draft.eventType !== "in") {
@@ -211,13 +212,20 @@ export function createKioskService(db: KioskOperatorDatabase, options: { secret:
         return [{ shift, start, end }];
       } catch { return []; }
     }).sort((a, b) => a.start - b.start);
-    const ready = candidates.find(candidate => clockTime >= candidate.start - allowance && clockTime < candidate.end);
+    const matching = candidates.filter(candidate => clockTime >= candidate.start - allowance && clockTime < candidate.end);
+    const ready = matching[0];
     const upcoming = candidates.find(candidate => candidate.shift.date === date && clockTime < candidate.start - allowance);
     if (draft.details?.assisted) {
       const assistance = await planAssistance(db, employeeId, previous, draft, clockTime, policy, ready?.shift ?? null);
       return { roleId, roleName: role.name, shift: ready?.shift ?? null, requiresApproval: false, details: { california: true as const, assistance } };
     }
-    if (ready) return { roleId, roleName: role.name, shift: ready.shift, requiresApproval: false, details: { california: true as const } };
+    if (ready) {
+      const early = ready.start - clockTime;
+      const scheduledStart = online && matching.length === 1 && !draft.details?.worked && early > 0 && early <= accountantEarlyWindowMs
+        ? new Date(ready.start).toISOString() : undefined;
+      return { roleId, roleName: role.name, shift: ready.shift, requiresApproval: false,
+        details: { ...details, ...(scheduledStart ? { scheduledStart } : {}) } };
+    }
     if (upcoming && policy.blockEarlyClockIn && !draft.details?.worked) throw new AuthError(422, "It is too early to clock in.");
     return { roleId, roleName: role.name, shift: upcoming?.shift ?? null,
       requiresApproval: !upcoming || policy.blockEarlyClockIn, details };
@@ -230,7 +238,7 @@ export function createKioskService(db: KioskOperatorDatabase, options: { secret:
     if (ticket && ticket.interactionId !== person.interaction.id) throw expired();
     if ((!eventAllowed(previous?.eventType ?? null, draft.eventType, !!draft.details?.assisted) && !isAutomaticRecovery(previous, draft)) || (ticket && ticket.previousId !== (previous?.id ?? 0))) throw new AuthError(409, "Your clock status changed. Enter your PIN again.");
     const actionAt = now();
-    const plan = await planClock(person.employee.id, previous, draft, actionAt);
+    const plan = await planClock(person.employee.id, previous, draft, actionAt, true);
     const shiftId = draft.eventType === "in" ? plan.shift?.id ?? null : previous?.shiftId ?? null;
     const requiresApproval = plan.requiresApproval;
     const approvalReason = requiresApproval ? plan.shift ? "Early work needs manager approval." : "Clock-in is outside a published shift. A manager must approve it." : "";

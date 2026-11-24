@@ -81,8 +81,8 @@ export function createWorkforceService(db: Database, access: ReturnType<typeof c
         return json(await readSchedulePrint(db, ctx, url, options.fieldKey, now()));
       }
       if (action === "accountant-export") {
-        if (request.method !== "GET") return json({ error: "Method not allowed." }, 405, { Allow: "GET" });
-        return json(await readAccountantReport(db, ctx, url, options.fieldKey, now(), options.stagingAccountantFixtureIds));
+        if (request.method !== "GET" && request.method !== "POST") return json({ error: "Method not allowed." }, 405, { Allow: "GET, POST" });
+        return json(await readAccountantReport(db, ctx, request, options.fieldKey, now(), options.stagingAccountantFixtureIds));
       }
       if (action === "shift-exchanges") {
         if (request.method === "GET") return json(await readManagerExchanges(db, ctx, url, options));
