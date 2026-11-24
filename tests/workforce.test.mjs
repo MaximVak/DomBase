@@ -4,7 +4,7 @@ import { randomBytes } from "node:crypto";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { drizzle } from "drizzle-orm/d1";
-import { eq, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { projectRoot, configPath, runLocalDb } from "../scripts/local-db.mjs";
 import { loadServerModule } from "../scripts/server-runtime.mjs";
 import { seedWorkforceFixture, newEmployee, fieldKey } from "./support/workforce-fixture.mjs";
@@ -641,6 +641,22 @@ test("shared workforce operations persist, scope, audit and serialize actual D1 
       assert.deepEqual(hours(rowFor(day, f.a)), [0, 10, 0, 3, 13]);
       assert.equal(rowFor(day, f.b).salaryEligible, false);
       assert.doesNotMatch(JSON.stringify(report), /7800000|Private test explanation|wageRates|shiftId|\btips\b/i);
+
+      const retired = [f.managerEmployee.id, f.multi.id];
+      const callWithFixtures = ids => request(createWorkforceService(db, access, {
+        secret, fieldKey, now: () => Date.parse("2026-11-10T20:00:00Z"), stagingAccountantFixtureIds: ids,
+      }), "/api/workspace/" + route, accountant);
+      await db.update(schema.employees).set({ active: false, terminated: true, terminationDate: "2026-11-01" }).where(inArray(schema.employees.id, retired));
+      try {
+        assert.deepEqual(await ok(await call(route, accountant)), report);
+        const excluded = await ok(await callWithFixtures(`${f.multi.id}, ${f.a.id}`));
+        assert.deepEqual(excluded, { ...report, rows: report.rows.filter(row => row.employeeId !== f.multi.id) });
+        assert.equal((await callWithFixtures(`${f.multi.id},invalid`)).status, 503);
+        const historical = await ok(await call("state?" + new URLSearchParams(period), owner));
+        assert.equal(historical.state.clockEvents.filter(event => event.employeeId === f.multi.id).length, 2);
+      } finally {
+        await db.update(schema.employees).set({ active: true, terminated: false, terminationDate: null }).where(inArray(schema.employees.id, retired));
+      }
     } finally {
       await db.delete(schema.accountPermissions).where(sql`(account_id = ${f.manager.id} AND permission = 'exports.timesheets')
         OR (account_id = ${f.generalManager.id} AND permission IN ('exports.timesheets', 'time_off.read'))`);

@@ -21,10 +21,20 @@ function readStamp(db: Database, ctx: Context) {
     FROM workforce_state WHERE id=1 AND ${ctx.activeActor()}`);
 }
 
-export async function readAccountantReport(db: Database, ctx: Context, url: URL, fieldKey: string, now: number): Promise<AccountantReport> {
+function stagingFixtureIds(value?: string): ReadonlySet<number> {
+  if (!value?.trim()) return new Set();
+  const ids = value.split(",").map(part => part.trim());
+  if (ids.some(id => !/^[1-9]\d*$/.test(id) || !Number.isSafeInteger(Number(id)))) {
+    throw new AuthError(503, "The staging accountant fixture list is invalid.");
+  }
+  return new Set(ids.map(Number));
+}
+
+export async function readAccountantReport(db: Database, ctx: Context, url: URL, fieldKey: string, now: number, configuredFixtureIds?: string): Promise<AccountantReport> {
   ctx.requirePermission("timesheets.read");
   ctx.requirePermission("exports.timesheets");
   if (!ctx.allDepartments) throw new AuthError(403, "The accountant export requires company-wide Timesheets access.");
+  const fixtures = stagingFixtureIds(configuredFixtureIds);
   if (url.searchParams.size !== 2 || url.searchParams.getAll("start").length !== 1 || url.searchParams.getAll("end").length !== 1) throw new AuthError(400, "Choose the start and end dates for the accountant export.");
   const period = workspacePeriod({ start: url.searchParams.get("start"), end: url.searchParams.get("end") }, now);
   if (period.end > offsetDate(period.start, 30)) throw new AuthError(400, "Choose an export date range of at most 31 days.");
@@ -56,7 +66,10 @@ export async function readAccountantReport(db: Database, ctx: Context, url: URL,
     entries.push({ ...rate, role: role ?? "" });
     rates.set(employeeId, entries);
   }
-  const employees = view.state.employees.map(employee => ({ ...employee, wage: "", wageRates: rates.get(employee.id) ?? [] }));
+  // Exclude explicitly identified retired test people from the report only.
+  const employees = view.state.employees
+    .filter(employee => !fixtures.has(employee.id) || employee.active || !employee.terminated)
+    .map(employee => ({ ...employee, wage: "", wageRates: rates.get(employee.id) ?? [] }));
   const cards = buildTimeCards({ ...dataPeriod, employees, shifts: [], events: view.state.clockEvents, adjustments: view.state.hoursAdjustments, pto: [],
     timeZone: view.basicInfo.timeZone, now, rounding: "actual", weekStart, mandatoryMealBreak: view.settings.mandatoryMealBreak,
     mealBreakAfterHours: view.settings.mealBreakAfterHours, mealBreakMinutes: view.settings.mealBreakMinutes,

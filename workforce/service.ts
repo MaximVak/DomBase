@@ -50,7 +50,7 @@ function currentRecord(view: WorkspaceData, change: Change, employeeKey: number)
   }
   throw new AuthError(400, "Unknown operation.");
 }
-export function createWorkforceService(db: Database, access: ReturnType<typeof createAccessService>, options: { emailEnabled?: boolean; secret: string; fieldKey: string; now?: () => number }) {
+export function createWorkforceService(db: Database, access: ReturnType<typeof createAccessService>, options: { emailEnabled?: boolean; secret: string; fieldKey: string; now?: () => number; stagingAccountantFixtureIds?: string }) {
   const now = options.now ?? Date.now;
   if (options.secret.length < 32) throw new Error("Workspace configuration unavailable.");
   async function handle(request: Request) {
@@ -79,7 +79,7 @@ export function createWorkforceService(db: Database, access: ReturnType<typeof c
       }
       if (action === "accountant-export") {
         if (request.method !== "GET") return json({ error: "Method not allowed." }, 405, { Allow: "GET" });
-        return json(await readAccountantReport(db, ctx, url, options.fieldKey, now()));
+        return json(await readAccountantReport(db, ctx, url, options.fieldKey, now(), options.stagingAccountantFixtureIds));
       }
       if (action === "shift-exchanges") {
         if (request.method === "GET") return json(await readManagerExchanges(db, ctx, url, options));
