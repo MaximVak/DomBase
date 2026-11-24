@@ -1,5 +1,8 @@
 export const kioskCopy = {
   en: {
+    openCamera: "Clock in with a photo", closeCamera: "Close camera", cameraPreview: "Front camera preview",
+    captureAndClockIn: "Take photo and clock in", cameraUnavailable: "The camera is unavailable. You can still clock in below.",
+    clockInPhoto: "Clock-in recorded and photo attached.", clockInPhotoFailed: "Clock-in recorded. The photo could not be attached.",
     assistedIn: "Report a missed clock-in", assistedOut: "Report a missed clock-out", actualDate: "Actual date", actualTime: "Actual time",
     assistanceReason: "Reason for the correction", submitTime: "Submit actual time", assistancePending: "Time reported. A manager can review it.",
     assistanceApproved: "Corrected clock-out recorded and approved.", clockOutReminder: "Your shift has ended. Please clock out.",
@@ -33,6 +36,9 @@ export const kioskCopy = {
     in: "Clock-in recorded.", out: "Clock-out recorded.", break: "Break started.", break_end: "Break ended.", recovery: "The clock stopped unexpectedly. Reopening the clock…",
   },
   es: {
+    openCamera: "Registrar entrada con foto", closeCamera: "Cerrar cámara", cameraPreview: "Vista previa de la cámara frontal",
+    captureAndClockIn: "Tomar foto y registrar entrada", cameraUnavailable: "La cámara no está disponible. Puedes registrar tu entrada abajo.",
+    clockInPhoto: "Se registró la entrada y se adjuntó la foto.", clockInPhotoFailed: "Se registró la entrada. No se pudo adjuntar la foto.",
     assistedIn: "Reportar entrada olvidada", assistedOut: "Reportar salida olvidada", actualDate: "Fecha real", actualTime: "Hora real",
     assistanceReason: "Motivo de la corrección", submitTime: "Enviar hora real", assistancePending: "Se registró la hora. Un gerente puede revisarla.",
     assistanceApproved: "Salida corregida y aprobada.", clockOutReminder: "Tu turno terminó. Registra tu salida.",

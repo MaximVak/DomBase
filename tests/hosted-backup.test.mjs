@@ -57,8 +57,17 @@ test("hosted daily calendar follows Pacific days and DST, including the skipped 
 });
 test("hosted encrypted daily backup restores exact DB/files/keys and leaves live access unchanged", { timeout: 120000 }, async t => {
   const f = await fixture(t);
+  const [owner] = await f.db.select().from(f.schema.accounts);
+  const [device] = await f.db.insert(f.schema.kioskDevices).values({ id: "backup-test-tablet", name: "Fictional backup tablet", registeredByAccountId: owner.id }).returning();
+  const [event] = await f.db.insert(f.schema.clockEvents).values({ employeeId: 900001, eventType: "in", source: "kiosk", deviceId: device.id,
+    occurredAt: "2026-11-09T17:00:00.000Z", receivedAt: "2026-11-09T17:00:01.000Z", idempotencyKey: "backup-test-clock" }).returning();
+  const bytes = Uint8Array.of(255, 216, 255, 224, 0, 2, 255, 217);
+  const sha256 = hash(bytes);
+  const photoKey = `clock-in/${event.id}/${sha256}.jpg`;
+  await f.env.FILES.put(photoKey, bytes, { httpMetadata: { contentType: "image/jpeg" }, customMetadata: { sha256 } });
+  await f.db.insert(f.schema.clockInPhotos).values({ eventId: event.id, objectKey: photoKey, sizeBytes: bytes.length, sha256, readyAt: "2026-11-09T17:00:01.000Z" });
   assert.equal((await runDueBackup(f.env, secrets, { now: Date.parse("2026-11-10T09:00:00Z") })).reason, "before daily start");
-  const first = await runDueBackup(f.env, secrets, { now }); assert.equal(first.completed, true); assert.equal(first.objects, 3); assert.equal(first.tables, 78);
+  const first = await runDueBackup(f.env, secrets, { now }); assert.equal(first.completed, true); assert.equal(first.objects, 4); assert.equal(first.tables, 79);
   const receipt = await f.completion("2026-11-10"); assert.equal(receipt.fingerprint, publicFingerprint(publicKey));
   assert.equal(JSON.stringify(receipt).includes(secrets.AUTH_RATE_LIMIT_SECRET), false); assert.equal(JSON.stringify(receipt).includes("fictional.pdf"), false);
   assert.equal((await runDueBackup(f.env, secrets, { now: now + 60000 })).reason, "already completed");
@@ -70,12 +79,17 @@ test("hosted encrypted daily backup restores exact DB/files/keys and leaves live
   const manifestBytes = await f.readPart(receipt.manifest.key); assert.equal(Buffer.from(manifestBytes).includes(Buffer.from(secrets.AUTH_PRIVATE_FIELD_KEY)), false);
   const independent = new Map();
   const copyEnv = { ...f.env, BACKUP_B2: JSON.stringify({ bucket: "isolated-native-backups", region: "us-west-004", keyId: "fictionalkey123", applicationKey: "fictionalapplicationkey123456" }) };
-  await runOffsiteCopy(copyEnv, { now, clientFactory: () => ({ copy: async (key, bytes) => { independent.set(key, bytes.slice()); } }) });
+  const clientFactory = () => ({ copy: async (key, bytes) => { independent.set(key, bytes.slice()); } });
+  await runOffsiteCopy(copyEnv, { now, clientFactory });
+  await runOffsiteCopy(copyEnv, { now: now + 60000, clientFactory });
   assert.ok(independent.has(offsitePrefix + `daily/${receipt.localDay}.json`));
   // Recovery reads only the independent copy; it cannot fall back to R2.
   const copiedReceipt = JSON.parse(new TextDecoder().decode(independent.get(offsitePrefix + `daily/${receipt.localDay}.json`)));
   const payload = await recoverHostedBundle(copiedReceipt, async key => independent.get(offsitePrefix + key), privateKey); const target = await f.destination();
   const result = await restoreIntoEmpty({ database: target.env.DB, bucket: target.env.FILES, payload }); assert.equal(result.exactDatabase, true); assert.equal(result.exactFiles, true);
+  const photo = await target.env.FILES.get(photoKey);
+  assert.deepEqual(new Uint8Array(await photo.arrayBuffer()), bytes);
+  assert.equal(photo.customMetadata.sha256, sha256);
   const { decryptSsn } = await loadServerModule("workforce/private.ts"); const profile = (await target.env.DB.prepare("SELECT ssn_encrypted FROM employee_profiles WHERE employee_id=900001").all()).results[0]; assert.equal(decryptSsn(profile.ssn_encrypted, 900001, payload.secrets.AUTH_PRIVATE_FIELD_KEY), "000-45-6789");
   await invalidateRecoveredAccess(target.env.DB); const { createAuthService } = await loadServerModule("auth/service.ts"); const { createAccessService } = await loadServerModule("access/service.ts"); const { createDocumentService } = await loadServerModule("documents/service.ts");
   const recovered = drizzle(target.env.DB, { schema: f.schema }); const auth = createAuthService(recovered, { secret: secrets.AUTH_RATE_LIMIT_SECRET });

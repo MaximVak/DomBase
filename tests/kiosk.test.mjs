@@ -30,7 +30,7 @@ test("registered tablets, PIN sessions and action-scoped approvals use isolated 
   let time = Date.now(); let db; let auth; let access; let admin; let kiosk;
   function services() {
     db = drizzle(platform.env.DB, { schema }); auth = createAuthService(db, { secret, now: () => time });
-    access = createAccessService(db, auth); admin = createKioskAdmin(db, access, secret); kiosk = createKioskService(db, { secret, now: () => time });
+    access = createAccessService(db, auth); admin = createKioskAdmin(db, access, secret); kiosk = createKioskService(db, { secret, now: () => time, bucket: platform.env.FILES });
   }
   services(); const f = await seedKioskFixture(db, schema, loadServerModule, password);
   const request = (service, path, cookie = "", body, headers = {}) => service.handle(new Request(`${origin}${path}`, {
@@ -114,16 +114,42 @@ test("registered tablets, PIN sessions and action-scoped approvals use isolated 
     assert.equal((await clock("pin", deviceCookie, { pin: employeePin, employeeId: f.b.id, accessLevel: "owner" })).status, 400);
   });
   await t.test("a manager PIN approves exactly one bound clock request then ends the person session", async () => {
+    await db.insert(schema.business).values({ id: 1, companyName: "Fictional kiosk test", locationName: "Test only" }).onConflictDoNothing();
+    await db.insert(schema.locationSettings).values({ businessId: 1, clockInPhotos: true }).onConflictDoUpdate({ target: schema.locationSettings.businessId, set: { clockInPhotos: true } });
+    const cameraPin = await ok(await clock("pin", deviceCookie, { pin: employeePin, breaks: true }));
+    assert.equal(cameraPin.clockInPhotos, true);
     const p = await person(); const response = await clock("clock", p.cookie, { eventType: "in", roleId: f.roleA.id, explanation: "Approved test clock-in" });
     assert.equal(response.status, 202); const pending = await response.json(); assert.equal(pending.approvalRequired, true);
     assert.equal((await clock("approve", p.cookie, { requestId: pending.requestId, pin: employeePin })).status, 401);
     const wrongDevicePerson = await person(employeePin, device2);
     assert.equal((await clock("approve", wrongDevicePerson.cookie, { requestId: pending.requestId, pin: managerPin })).status, 409);
-    const success = await clock("approve", p.cookie, { requestId: pending.requestId, pin: managerPin }); await ok(success);
+    const success = await clock("approve", p.cookie, { requestId: pending.requestId, pin: managerPin, photo: true });
+    const { photoGrant } = await ok(success);
     assert.ok(cookiesOf(success).some(cookie => cookie === "dombase-kiosk-person="));
     assert.equal((await clock("approve", p.cookie, { requestId: pending.requestId, pin: managerPin })).status, 401);
     const [event] = await db.select().from(schema.clockEvents).where(eq(schema.clockEvents.idempotencyKey, pending.requestId));
     assert.equal(event.employeeId, f.a.id); assert.equal(event.recordedByAccountId, f.manager.id); assert.equal(event.deviceId, deviceId); assert.equal(event.source, "kiosk"); assert.equal(event.occurredAt, new Date(time).toISOString());
+    assert.ok(photoGrant.startsWith(`${event.id}.`));
+    const image = Uint8Array.of(255, 216, 255, 224, 0, 2, 255, 217);
+    const upload = (cookie, bytes = image, requestOrigin = origin) => kiosk.handle(new Request(`${origin}/api/kiosk/clock-photo`, {
+      method: "POST", headers: { Cookie: cookie, Origin: requestOrigin, "Content-Type": "image/jpeg", "X-Clock-Photo-Grant": photoGrant }, body: bytes,
+    }));
+    assert.equal((await upload(device2)).status, 403);
+    assert.equal((await upload(deviceCookie, image, "https://elsewhere.test")).status, 403);
+    assert.equal((await upload(deviceCookie)).status, 200);
+    assert.equal((await upload(deviceCookie)).status, 200);
+    assert.equal((await upload(deviceCookie, Uint8Array.of(255, 216, 255, 225, 0, 2, 255, 217))).status, 409);
+    const workforce = createWorkforceService(db, access, { secret, fieldKey: randomBytes(32).toString("base64url"), now: () => time, bucket: platform.env.FILES });
+    const path = `/api/workspace/clock-photo?event=${event.id}`;
+    assert.equal((await request(workforce, path)).status, 401);
+    assert.equal((await request(workforce, path, deviceCookie)).status, 403);
+    const imageResponse = await request(workforce, path, managerCookie);
+    assert.equal(imageResponse.status, 200);
+    assert.equal(imageResponse.headers.get("cache-control"), "private, no-store");
+    assert.deepEqual(new Uint8Array(await imageResponse.arrayBuffer()), image);
+    const photoState = await ok(await request(workforce, "/api/workspace/state", managerCookie));
+    assert.equal(photoState.state.clockEvents.find(row => row.id === event.id)?.photoEventId, event.id);
+    await db.update(schema.locationSettings).set({ clockInPhotos: false }).where(eq(schema.locationSettings.businessId, 1));
     const grants = await db.select().from(schema.kioskApprovalSessions); assert.equal(grants.length, 1); assert.ok(grants[0].usedAt); assert.equal(grants[0].targetId, pending.requestId);
     const audits = await db.select().from(schema.auditLog).where(eq(schema.auditLog.action, "kiosk.clock_approved")); assert.equal(audits.length, 1);
     await assert.rejects(db.update(schema.clockEvents).set({ occurredAt: "2020-01-01" }).where(eq(schema.clockEvents.id, event.id)));

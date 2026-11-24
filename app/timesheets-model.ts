@@ -1,6 +1,6 @@
 import { hourlyRate, rateFor } from "../team/rules";
 import { defaultOvertimePolicy } from "./schedule-enforcement";
-import type { OvertimePolicy } from "./schedule-enforcement";
+import type { HolidayPolicy, OvertimePolicy } from "./schedule-enforcement";
 import { priceWorkweek } from "./timesheets-overtime";
 import type { WorkweekScope } from "./timesheets-overtime";
 import type { WageRate } from "../team/rules";
@@ -13,7 +13,7 @@ import { timeCardNotes } from "../workforce/timecard-notes";
 import { scheduleClockPreview, scheduleShiftBounds } from "./timesheets-display";
 import { approvedLeaveMinutesByDay, type LeaveDates } from "../workforce/leave-duration";
 export type TimesheetEmployee = { id: number; name: string; role: string; wage: string; active: boolean; terminated?: boolean; terminationDate?: string; wageRates?: WageRate[]; jobs?: { id: number; name: string }[]; payrollId?: string; legalFirstName?: string; legalMiddleName?: string; legalLastName?: string };
-export type TimesheetEvent = Pick<ClockEvent, "id" | "employeeId" | "type" | "at" | "explanation" | "automatic" | "role" | "cardId" | "shiftId" | "clockDetails" | "assistedStatus" | "noteAuthor" | "carriedNotes">;
+export type TimesheetEvent = Pick<ClockEvent, "id" | "employeeId" | "type" | "at" | "explanation" | "automatic" | "role" | "cardId" | "shiftId" | "clockDetails" | "assistedStatus" | "noteAuthor" | "carriedNotes" | "photoEventId">;
 export type TimesheetShift = { shiftType?: "work" | "day_off"; employeeId: number; date: string; start: string; end: string; role: string };
 export type TimesheetAdjustment = { id: number; employeeId: number; date: string; hours: number };
 export type TimesheetPto = LeaveDates & { employeeId: number; compensation: string; status: string };
@@ -31,9 +31,10 @@ export const timesheetColumns = [
   { id: "qualifiedOt", label: "Qualified OT" }, { id: "spread", label: "Spread of hours" }, { id: "split", label: "Split shifts" },
   { id: "wages", label: "Est. Wages" }, { id: "cashTips", label: "Cash tips" }, { id: "creditTips", label: "Credit tips" },
   { id: "pto", label: "PTO" }, { id: "blueLaw", label: "Blue law hours" }, { id: "sick", label: "FFCRA – paid sick" },
-  { id: "others", label: "FFCRA – others" }, { id: "child", label: "FFCRA – child" }, { id: "holiday", label: "Holiday pay" },
+  { id: "others", label: "FFCRA – others" }, { id: "child", label: "FFCRA – child" }, { id: "holiday", label: "Holiday pay" }, { id: "holidayPremium", label: "Est. holiday premium" },
 ] as const;
 export type ColumnId = typeof timesheetColumns[number]["id"];
+export const holidayColumns = ["holiday", "holidayPremium"] as const;
 export const defaultTimesheetColumns: ColumnId[] = ["role", "card", "roundedCard", "roundedHours", "issues", "scheduled", "regular", "breaks", "mealPremium", "restPremium", "premiumPay", "ot", "doubleOt", "qualifiedOt", "wages", "pto"];
 export type TimeCard = {
   id: string; employeeId: number; date: string; role: string; start?: string; end?: string; eventIds: number[];
@@ -41,6 +42,7 @@ export type TimeCard = {
   scheduleStart?: string; scheduleEnd?: string;
   issues: string[]; notes: string[]; adjustment: number; metrics: Record<string, number | null>;
   wageLabel?: string;
+  photoEventId?: number;
 };
 const HOUR = 3600000;
 export type BreakPremiumPolicy = { mealLimit: number; restLimit: number; companyWide: boolean; dataPeriod?: { start: string; end: string } };
@@ -74,7 +76,7 @@ export function hourlyWage(value: string): number | null {
   return Number.isFinite(amount) && amount > 0 ? amount : null;
 }
 const overlap = (start: number, end: number, a: number, b: number) => Math.max(0, Math.min(end, b) - Math.max(start, a));
-function metrics(): Record<string, number | null> { return { scheduled: 0, actual: 0, roundedHours: 0, scheduleHours: 0, variance: 0, paid: 0, regular: 0, breaks: 0, restBreaks: 0, mealPremium: 0, restPremium: 0, premiumPay: 0, ot: 0, doubleOt: 0, qualifiedOt: null, spread: 0, split: 0, wages: null, pto: 0 }; }
+function metrics(): Record<string, number | null> { return { scheduled: 0, actual: 0, roundedHours: 0, scheduleHours: 0, variance: 0, paid: 0, regular: 0, breaks: 0, restBreaks: 0, mealPremium: 0, restPremium: 0, premiumPay: 0, ot: 0, doubleOt: 0, qualifiedOt: null, spread: 0, split: 0, wages: null, pto: 0, holiday: null, holidayPremium: null }; }
 const premiumHours = (card: TimeCard) => (card.metrics.mealPremium ?? 0) + (card.metrics.restPremium ?? 0);
 function cardWageRate(rates: WageRate[], card: TimeCard) {
   const ids = new Set(rates.filter(rate => rate.roleId !== null && rate.role === card.role && rate.effectiveDate <= card.date).map(rate => rate.roleId));
@@ -105,10 +107,12 @@ export function buildTimeCards(input: {
   start: string; end: string; now: number; rounding: Rounding; weekStart: number; mandatoryMealBreak: boolean; mealBreakAfterHours: number; mealBreakMinutes?: number;
   breakPremiumPolicy?: BreakPremiumPolicy; timeZone?: string;
   workedOnly?: boolean;
-  overtimePolicy?: OvertimePolicy; overtimeScope?: WorkweekScope;
+  overtimePolicy?: OvertimePolicy; overtimeScope?: WorkweekScope; holidayPolicy?: HolidayPolicy;
   schedulePreview?: { shifts: PublishedTimesheetShift[]; minutes: HoursRoundingMinutes };
 }): TimeCard[] {
   const output: TimeCard[] = [];
+  const holidayPolicy = input.holidayPolicy?.holidayPayEnabled ? input.holidayPolicy : undefined;
+  const holidays = new Map(holidayPolicy?.holidays.map(holiday => [holiday.date, holiday.name]));
   const contextStart = weekStartFor(input.start, input.weekStart);
   const contextEnd = addDays(weekStartFor(input.end, input.weekStart), 6);
   const clockDate = (value: number) => workDate(value, input.timeZone);
@@ -116,6 +120,7 @@ export function buildTimeCards(input: {
   for (const employee of input.employees) {
     const cards: TimeCard[] = [];
     const uncertainCards = new Set<TimeCard>();
+    const confirmedCards = new Set<TimeCard>();
     const events = input.events.filter(event => event.employeeId === employee.id).sort((a, b) => Date.parse(a.at) - Date.parse(b.at) || a.id - b.id);
     const preview = input.schedulePreview;
     const publishedShifts = preview ? scheduleShiftBounds(preview.shifts.filter(shift => shift.employeeId === employee.id), stamp, date => addDays(date, 1)) : [];
@@ -163,6 +168,7 @@ export function buildTimeCards(input: {
         const breakMs = breaks.reduce((total, item) => total + overlap(Math.max(item.start, start), Math.min(item.end, end), dayStart, dayEnd), 0);
         const shift = input.shifts.find(shift => shift.shiftType !== "day_off" && shift.employeeId === employee.id && shift.date === date);
         const card: TimeCard = { id: `clock-${session[0].id}-${date}`, employeeId: employee.id, date, role: session[0].role || shift?.role || employee.role || "Unassigned", start: session[0].at, end: closed ? session[session.length - 1].at : undefined, eventIds: session.map(event => event.id), issues: [], notes: timeCardNotes(session).map(note => note.text), adjustment: 0, metrics: metrics() };
+        card.photoEventId = session[0].photoEventId;
         card.metrics.actual = Math.max(0, elapsed - breakMs) / HOUR;
         if (roundedStart !== undefined) card.roundedStart = new Date(roundedStart).toISOString();
         if (roundedStart !== undefined && roundedEnd !== undefined) {
@@ -195,6 +201,7 @@ export function buildTimeCards(input: {
           }
         }
         if (unconfirmedBreak || unconfirmedClock || !california) uncertainCards.add(card);
+        if (closed && !unconfirmedBreak && !unconfirmedClock) confirmedCards.add(card);
         cards.push(card);
       }
       previousEnd = end;
@@ -288,14 +295,24 @@ export function buildTimeCards(input: {
       const group = weeks.get(week) ?? [];
       for (const [index, card] of day.entries()) {
         // Apply positive adjustments once and distribute negative adjustments without going below zero.
-        const raw = Math.min(remaining, Math.max(0, (card.metrics.actual ?? 0) + (index === 0 ? Math.max(0, adjustment) : 0)));
+        const recorded = card.metrics.actual ?? 0;
+        const raw = Math.min(remaining, Math.max(0, recorded + (index === 0 ? Math.max(0, adjustment) : 0)));
         remaining = Math.max(0, remaining - raw);
         card.metrics.actual = raw;
         card.metrics.paid = raw + (card.metrics.pto ?? 0) + premiumHours(card);
         card.metrics.variance = raw - (card.metrics.scheduled ?? 0);
         card.metrics.split = index === 0 ? Math.max(0, day.filter(other => other.start).length - 1) : 0;
         const rate = employee.wageRates ? cardWageRate(employee.wageRates, card) ?? null : undefined;
-        group.push({ card, hours: raw, rate, hourly: rate === undefined ? legacyRate : hourlyRate(rate ?? undefined) });
+        const hourly = rate === undefined ? legacyRate : hourlyRate(rate ?? undefined);
+        if (holidayPolicy) {
+          const name = holidays.get(date);
+          const salaried = rate?.basis === "annual_salary" || (rate === undefined && /salary|year|month|week|annual/i.test(employee.wage));
+          const holidayHours = name && confirmedCards.has(card) && !salaried ? Math.min(raw, recorded) : 0;
+          card.metrics.holiday = holidayHours;
+          card.metrics.holidayPremium = holidayHours && hourly === null ? null : holidayHours * (hourly ?? 0) * (holidayPolicy.holidayPayMultiplier - 1);
+          if (holidayHours && name) card.notes.push(name);
+        }
+        group.push({ card, hours: raw, rate, hourly });
       }
       weeks.set(week, group);
     }

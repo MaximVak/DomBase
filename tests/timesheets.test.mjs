@@ -102,6 +102,32 @@ test("accountant CSV and native Excel preserve fixed columns, text IDs and edita
   assert.equal(sheet.A3.f, undefined);
 });
 
+test("holiday premium uses eligible recorded hourly time and leaves overtime and wages intact", () => {
+  const start = "2026-08-03";
+  const end = "2026-08-04";
+  const events = eventsFor(start, "16:00", "02:00", 0, 1, true);
+  events[0].photoEventId = 42;
+  const holidayPolicy = { holidayPayEnabled: true, holidayPayMultiplier: 1.5, holidays: [{ date: end, name: "Fictional holiday" }] };
+  const input = { ...base, start, end, events };
+  const actual = buildTimeCards(input);
+  const holiday = buildTimeCards({ ...input, holidayPolicy });
+  assert.deepEqual(holiday.map(card => card.metrics.holiday), [0, 2]);
+  assert.deepEqual(holiday.map(card => card.metrics.holidayPremium), [0, 20]);
+  assert.deepEqual(holiday.map(card => card.photoEventId), [42, 42]);
+  for (const key of ["actual", "paid", "regular", "ot", "doubleOt", "wages"]) {
+    assert.deepEqual(holiday.map(card => card.metrics[key]), actual.map(card => card.metrics[key]));
+  }
+  const longDay = { ...base, start, end, events: eventsFor(end, "08:00", "18:00", 60), holidayPolicy };
+  const [long] = buildTimeCards(longDay);
+  assert.equal(long.metrics.holiday, 9);
+  assert.equal(long.metrics.ot, 1);
+  assert.equal(long.metrics.holidayPremium, 90);
+  const [open] = buildTimeCards({ ...longDay, events: longDay.events.slice(0, 1) });
+  assert.equal(open.metrics.holiday, 0);
+  const [salaried] = buildTimeCards({ ...longDay, employees: [{ ...employees[0], wage: "$60,000 per year" }] });
+  assert.equal(salaried.metrics.holiday, 0);
+});
+
 test("time cards deduct meal breaks, preserve raw hours, and round the preview", () => {
   const events = eventsFor("2026-08-03", "09:00", "17:07", 30);
   const actual = buildTimeCards({ ...base, events });
@@ -409,7 +435,7 @@ test("summary aggregates employee totals, preserves payroll IDs, and distinguish
   const staff = [{ ...employees[0], name: "Alex Van Peshkov", payrollId: "007", legalFirstName: "Alexander", legalMiddleName: "V", legalLastName: "Peshkov" }, { id: 2, name: "Other Member", wage: "", role: "Sales", active: true }];
   const cards = buildTimeCards({ ...base, employees: staff, events: [...eventsFor("2026-08-03", "09:00", "17:00", 30), ...eventsFor("2026-08-04", "09:00", "17:00", 30, 10), ...eventsFor("2026-08-04", "09:00", "17:00", 30, 20).map(event => ({ ...event, employeeId: 2 }))] });
   const rows = summaryRows(staff, cards);
-  assert.equal(summaryColumns.length, 32);
+  assert.equal(summaryColumns.length, 33);
   assert.equal(defaultSummaryColumns.length, 9);
   assert.equal(rows[0].values.first, "Alex");
   assert.equal(rows[0].values.last, "Van Peshkov");

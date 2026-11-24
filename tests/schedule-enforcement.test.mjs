@@ -8,6 +8,8 @@ const source = await readFile(new URL("../app/schedule-enforcement.ts", import.m
 const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext } });
 const rules = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString("base64")}`);
 const defaults = rules.defaultScheduleEnforcement;
+const { loadServerModule } = await import("../scripts/server-runtime.mjs");
+const { equal } = await loadServerModule("workforce/contract.ts");
 const eventsSource = await readFile(new URL("../app/schedule-events.ts", import.meta.url), "utf8");
 const eventsCode = ts.transpileModule(eventsSource, { compilerOptions: { module: ts.ModuleKind.ESNext } }).outputText;
 const scheduleEvents = await import(`data:text/javascript;base64,${Buffer.from(eventsCode).toString("base64")}`);
@@ -37,7 +39,7 @@ function runtime(extra = {}) {
     "clippedDuration", "overlapDuration", "startOfNextDay", "saveMessagesSettings", "createTeamConversation", "sendTeamMessage",
     "messagePtoRequestEmployee", "messageRosterEmployee", "saveAccountProfile", "hasEmployeeWithName", "normalizeEmployeeName",
     "formatPhoneNumberInput", "formatWageInput", "isManagerEmployee"];
-  const context = vm.createContext({ ...rules, ...scheduleEvents, ...accountProfile, Date, console, newRecordId: () => Math.floor(Math.random() * 1000000000) + 100000,
+  const context = vm.createContext({ ...rules, ...scheduleEvents, ...accountProfile, Date, console, equal, newRecordId: () => Math.floor(Math.random() * 1000000000) + 100000,
     automaticClockOutExplanation: "Automatically clocked out two hours after the scheduled shift ended.",
     scheduleEnforcementStorageKey: "test-enforcement",
     operationalAlertLookbackMs: 7 * 24 * 60 * 60 * 1000,

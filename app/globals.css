@@ -2895,6 +2895,11 @@ label.enforcement-rule-line {
 .overtime-holiday-date > span { position: absolute; left: 12px; top: 8px; font-size: 20px; }
 .overtime-holiday-date input { padding-left: 38px; }
 .overtime-holiday-entry > button { height: 42px; padding: 0 12px; border: 0; border-radius: 12px; background: #f3f5f9; color: var(--muted); }
+.overtime-holiday-entry > button:not(:disabled) { color: var(--ink); cursor: pointer; }
+.overtime-holidays { list-style: none; padding: 0; margin: 14px 0 0; }
+.overtime-holidays li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 10px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.overtime-holidays li div { display: flex; gap: 8px; margin-left: auto; }
+.overtime-holidays li button { padding: 4px 8px; }
 .settings-overtime-panel .overtime-history { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 30px; padding: 10px 16px; border: 0; border-radius: 12px; background: #eaf0f7; color: var(--muted); text-align: left; }
 
 .settings-breaks-panel h4 { margin: 0 0 24px; font-size: 1.25rem; }
@@ -11057,6 +11062,10 @@ button[aria-label^="Remove"]:focus-visible,
 .kiosk-notice { color: #174c38; background: #edf8f1; padding: 12px; border-radius: 6px; }
 .kiosk-status { color: var(--text); background: var(--page-bg, #f4f7f9); padding: .75rem; border-radius: 6px; }
 .kiosk-actions { display: grid; gap: 12px; }
+.kiosk-camera { display: grid; gap: 8px; }
+.kiosk-camera video { display: block; width: min(100%, 240px); margin-inline: auto; border-radius: 8px; background: #1e293b; }
+.ts-clock-photo { display: grid; justify-items: start; gap: 8px; margin-block: 10px; }
+.ts-clock-photo img { display: block; width: auto; max-width: min(100%, 240px); max-height: 240px; border-radius: 8px; }
 .kiosk-admin-screen { max-width: 760px; margin: 0 auto; padding: 32px 16px; display: grid; gap: 24px; }
 .kiosk-admin-screen header h1 { font-size: 1.75rem; margin: 20px 0 8px; }
 .kiosk-admin-screen header a { color: var(--blue); font-weight: 700; }

@@ -21,7 +21,7 @@ export function formatHours(hours: number, display: HoursDisplay) {
 
 export function formatTimesheetMetric(column: string, value: number | null | undefined, display: HoursDisplay = "decimal") {
   if (value == null) return "—";
-  if (column === "wages" || column === "premiumPay") return value.toLocaleString("en-US", { style: "currency", currency: "USD" });
+  if (column === "wages" || column === "premiumPay" || column === "holidayPremium") return value.toLocaleString("en-US", { style: "currency", currency: "USD" });
   return timeMetrics.has(column) ? formatHours(value, display) : value.toFixed(2);
 }
 

@@ -4,11 +4,13 @@ import type { HoursRoundingMinutes } from "../workforce/model";
 
 type TimeClockOptionsProps = {
   roundClockPunches: boolean;
+  clockInPhotos: boolean;
   roundingMinutes: HoursRoundingMinutes;
   canManage: boolean;
   dirty: boolean;
   message: string;
   onToggleRounding: (enabled: boolean) => void;
+  onToggleClockInPhotos: (enabled: boolean) => void;
   onRoundingMinutes: (minutes: HoursRoundingMinutes) => void;
   onSave: (event: FormEvent<HTMLFormElement>) => void;
   onLaunch: () => void;
@@ -65,7 +67,7 @@ function ClockIllustration({ kind }: { kind: "mobile" | "tablet" | "web" }) {
   );
 }
 
-export function TimeClockOptionsPanel({ roundClockPunches, roundingMinutes, canManage, dirty, message, onToggleRounding, onRoundingMinutes, onSave, onLaunch }: TimeClockOptionsProps) {
+export function TimeClockOptionsPanel({ roundClockPunches, roundingMinutes, clockInPhotos, canManage, dirty, message, onToggleRounding, onToggleClockInPhotos, onRoundingMinutes, onSave, onLaunch }: TimeClockOptionsProps) {
   return (
     <form className="panel settings-enforcement-panel settings-time-clock-panel" onSubmit={onSave}>
       <div className="settings-panel-heading">
@@ -116,6 +118,8 @@ export function TimeClockOptionsPanel({ roundClockPunches, roundingMinutes, canM
         <div className="time-clock-option-content">
           <h4 id="tablet-clock-title">Tablet Time Clock</h4>
           <p>Register a shared tablet for employee PIN clock-in, clock-out and breaks. Manager approvals use a separate PIN.</p>
+          <label className="enforcement-rule-line"><input type="checkbox" checked={clockInPhotos} disabled={!canManage} onChange={event => onToggleClockInPhotos(event.target.checked)} /><span>Offer a clock-in photo on registered tablets</span></label>
+          <p>Employees can attach a photo when connected. Authorized managers can view it on the time card.</p>
           <a className="time-clock-link" href="/kiosk-admin">Manage tablets and PINs</a>
           <div className="time-clock-nested-options">
             <div>

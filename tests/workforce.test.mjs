@@ -93,11 +93,16 @@ test("shared workforce operations persist, scope, audit and serialize actual D1 
     assert.deepEqual([before.settings.breakPremiums, before.settings.mealPremiumLimit, before.settings.restPremiumLimit], [true, 1, 1]);
     assert.deepEqual([before.settings.overtimeDailyHours, before.settings.overtimeWeeklyHours, before.settings.overtimeDoubleHours, before.settings.overtimeSeventhDayEnabled], [8, 40, 12, true]);
     assert.equal(before.settings.roundClockPunches, false);
+    assert.equal(before.settings.clockInPhotos, false);
+    assert.equal(before.settings.holidayPayEnabled, false);
     const settings = { ...before.settings, noShowMinutes: 12, restPremiumLimit: 2, roundClockPunches: true, hoursRoundingMinutes: 10,
+      clockInPhotos: true, holidayPayEnabled: true, holidayPayMultiplier: 1.65, holidays: [{ date: "2027-01-18", name: "Fictional Staff Day" }],
       overtimeDailyHours: 8.5, overtimeWeeklyHours: 38, overtimeDoubleEnabled: false, overtimeMultiplier: 1.75 };
     await ok(await call("commit", owner, saveBody(before, [{ entity: "settings", id: 1, before: { ...before.settings, hoursRoundingMinutes: before.state.hoursRoundingMinutes }, after: settings }], newToken())));
     const savedSettings = (await snapshot(second)).settings;
     assert.equal(savedSettings.roundClockPunches, true);
+    assert.equal(savedSettings.clockInPhotos, true);
+    assert.deepEqual([savedSettings.holidayPayEnabled, savedSettings.holidayPayMultiplier, savedSettings.holidays], [true, 1.65, settings.holidays]);
     assert.equal(savedSettings.noShowMinutes, 12);
     assert.equal(savedSettings.restPremiumLimit, 2);
     assert.equal(savedSettings.mealPremiumLimit, 1);
@@ -109,6 +114,8 @@ test("shared workforce operations persist, scope, audit and serialize actual D1 
     assert.equal((await call("commit", owner, saveBody(current, [{ entity: "settings", id: 1, before: currentSettings, after: badIncrement }], newToken()))).status, 400);
     const invalid = { ...currentSettings, overtimeDoubleEnabled: true, overtimeDoubleHours: 7 };
     assert.equal((await call("commit", owner, saveBody(current, [{ entity: "settings", id: 1, before: currentSettings, after: invalid }], newToken()))).status, 400);
+    const invalidHolidays = { ...currentSettings, holidays: [{ date: "2027-02-29", name: "Invalid Date" }] };
+    assert.equal((await call("commit", owner, saveBody(current, [{ entity: "settings", id: 1, before: currentSettings, after: invalidHolidays }], newToken()))).status, 400);
     assert.equal((await call("commit", owner, saveBody(current, [{ entity: "business", id: 1, before: current.basicInfo, after: changed }], newToken()))).status, 403);
     const receipts = { opened: current.opened[f.b.id] ?? [], dismissed: current.dismissed[f.b.id] ?? [] };
     await ok(await call("commit", owner, saveBody(current, [{ entity: "notifications", id: 1, before: receipts, after: { opened: ["request-123"], dismissed: ["request-123"] } }], newToken())));
@@ -367,6 +374,10 @@ test("shared workforce operations persist, scope, audit and serialize actual D1 
     assert.equal((await read(owner)).history.length, 1);
     assert.match((await (await changeCard()).json()).error, /time card is locked/i);
     assert.match((await (await changeCard({ operation: "delete" })).json()).error, /time card is locked/i);
+    const lockedSnapshot = await snapshot(owner);
+    const lockedSettings = { ...lockedSnapshot.settings, hoursRoundingMinutes: lockedSnapshot.state.hoursRoundingMinutes };
+    const holidays = [...lockedSettings.holidays, { date: day.start, name: "Fictional locked holiday" }];
+    assert.equal((await call("commit", owner, saveBody(lockedSnapshot, [{ entity: "settings", id: 1, before: lockedSettings, after: { ...lockedSettings, holidays } }], newToken()))).status, 409);
     await db.insert(schema.accountPermissions).values({ accountId: f.manager.id, permission: "timesheets.manage", allowed: true });
     try {
       assert.equal((await send(manager, await body(manager, "unlock", [key(raw[2])]))).status, 403);

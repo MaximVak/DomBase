@@ -17,13 +17,15 @@ import { nextDate, zonedTimestamp } from "../workforce/time";
 import { clockEntryUnlocked } from "../workforce/timesheet-lock-guards";
 import { assistedOutPolicyGuard, insertAssistance, isAutomaticRecovery, planAssistance, shiftBounds } from "./assistance";
 import type { ClockDetails } from "./break-rules";
+import type { DocumentBucket } from "../documents/types";
+import { clockPhotoGrant, kioskPhotosEnabled, saveClockPhoto } from "./clock-photo";
 
 type Person = { interaction: typeof schema.kioskInteractions.$inferSelect; employee: typeof schema.employees.$inferSelect };
 type Approval = { accountId: number; sessionVersion: number; credentialRevision: string };
 const clockSeconds = (interaction: Person["interaction"]) => Math.round((Date.parse(interaction.expiresAt) - Date.parse(interaction.createdAt)) / 1000);
 const expired = () => new AuthError(401, "Enter your employee PIN again.");
 
-export function createKioskService(db: KioskOperatorDatabase, options: { secret: string; now?: () => number }) {
+export function createKioskService(db: KioskOperatorDatabase, options: { secret: string; now?: () => number; bucket?: DocumentBucket }) {
   if (options.secret.length < 32) throw new Error("Kiosk configuration is unavailable.");
   const now = options.now ?? Date.now;
   const stamp = () => new Date(now()).toISOString();
@@ -92,10 +94,11 @@ export function createKioskService(db: KioskOperatorDatabase, options: { secret:
     ]);
     if (results[1].meta.changes !== 1) throw expired();
     await releaseAttempt(db, deviceAttempt); await releaseAttempt(db, pinAttempt);
-    const [event, roles] = await Promise.all([lastEvent(employee.id), rolesFor(employee.id)]);
+    const [event, roles, photos] = await Promise.all([lastEvent(employee.id), rolesFor(employee.id), options.bucket && breaks ? kioskPhotosEnabled(db) : false]);
     return json({ employee: { id: employee.id, name: employee.name }, roles, state: event?.eventType ?? "out", expiresAt,
       ...(breaks ? { breakView: await kioskBreakView(db, employee.id, event, now()), serverTime: now(),
         assist: await assistanceView(employee.id, event) } : {}),
+      ...(photos ? { clockInPhotos: true } : {}),
       ...(offline ? { offline: prepareOfflineAuthorization(options.secret, device, employee.id, employee.pinVersion, event?.id ?? 0, now(), seconds) } : {}),
       ...(queue ? { replay: { ticket: makeReplayTicket(options.secret, device, id, event?.id ?? 0), serverTime: now() } } : {}),
     }, 200, { "Set-Cookie": kioskCookie(new URL(request.url), "person", token, seconds) });
@@ -181,7 +184,8 @@ export function createKioskService(db: KioskOperatorDatabase, options: { secret:
       if (!await db.get(sql`SELECT 1 WHERE ${unlocked}`)) throw new AuthError(409, "This time is locked. Ask a manager to review your clock report.");
       throw new AuthError(409, "The clock or access changed. Enter your PIN and try again.");
     }
-    return { recorded: true, eventType: pending.eventType, ...(assistance ? { assistance: assistance.status } : {}) };
+    return { recorded: true, eventType: pending.eventType, ...(assistance ? { assistance: assistance.status } : {}),
+      ...(!assistance && pending.eventType === "in" ? { photoEventId: result[0].meta.last_row_id } : {}) };
   }
   async function planClock(employeeId: number, previous: typeof schema.clockEvents.$inferSelect | null, draft: ClockDraft, clockTime: number) {
     const policy = await clockPolicy(db);
@@ -219,7 +223,7 @@ export function createKioskService(db: KioskOperatorDatabase, options: { secret:
       requiresApproval: !upcoming || policy.blockEarlyClockIn, details };
   }
   async function prepareClock(device: RegisteredDevice, person: Person, body: Record<string, unknown>) {
-    exactKeys(body, ["eventType", "roleId", "explanation", "ticket", "details", "offline"]);
+    exactKeys(body, ["eventType", "roleId", "explanation", "ticket", "details", "offline", "photo"]);
     const draft = clockDraft(body);
     const previous = await lastEvent(person.employee.id);
     const ticket = body.ticket === undefined ? null : readReplayTicket(options.secret, device, body.ticket);
@@ -243,7 +247,7 @@ export function createKioskService(db: KioskOperatorDatabase, options: { secret:
     return pending;
   }
   async function approve(device: RegisteredDevice, person: Person, body: Record<string, unknown>) {
-    exactKeys(body, ["requestId", "pin", "offline"]);
+    exactKeys(body, ["requestId", "pin", "offline", "photo"]);
     if (!tokenIsValid(body.requestId) || !pinIsValid(body.pin)) throw new AuthError(401, "Invalid manager approval PIN.");
     const [pending] = await db.select().from(schema.kioskClockRequests).where(and(eq(schema.kioskClockRequests.id, body.requestId), eq(schema.kioskClockRequests.interactionId, person.interaction.id), eq(schema.kioskClockRequests.requiresApproval, true), isNull(schema.kioskClockRequests.completedAt), isNull(schema.kioskClockRequests.cancelledAt), sql`${schema.kioskClockRequests.expiresAt} > ${stamp()}`)).limit(1);
     if (!pending) throw new AuthError(409, "This approval request is no longer available. Enter your employee PIN again.");
@@ -265,10 +269,11 @@ export function createKioskService(db: KioskOperatorDatabase, options: { secret:
   async function handle(request: Request) {
     try {
       const url = new URL(request.url); const action = url.pathname.slice("/api/kiosk/".length);
-      if (!["status", "pin", "lock", "clock", "approve", "sync", "offline-sync"].includes(action)) throw new AuthError(404, "Not found.");
+      if (!["status", "pin", "lock", "clock", "approve", "sync", "offline-sync", "clock-photo"].includes(action)) throw new AuthError(404, "Not found.");
       const device = await deviceFor(request);
       if (action === "status" && request.method === "GET") return json({ registered: true, deviceName: device.device.name, ...(url.searchParams.get("offline") === "1" ? { offlineDevice: offlineDeviceTag(options.secret, device) } : {}), ...await devicePinLockouts(db, options.secret, device.device.id, now()) });
       if (request.method !== "POST") return json({ error: "Method not allowed." }, 405, { Allow: action === "status" ? "GET" : "POST" });
+      if (action === "clock-photo") return await saveClockPhoto(db, options.bucket, device, options.secret, request, now());
       const body = await readAuthBody(request);
       if (action === "lock") { exactKeys(body, []); await lock(device); return json({ locked: true }, 200, { "Set-Cookie": kioskCookie(url, "person", "", 0) }); }
       if (action === "pin") { exactKeys(body, ["pin", "queue", "breaks", "offline"]); return await signIn(request, device, body.pin, body.queue === true, body.breaks === true, body.offline === true); }
@@ -287,7 +292,10 @@ export function createKioskService(db: KioskOperatorDatabase, options: { secret:
       } else throw new AuthError(405, "Method not allowed.");
       const latest = body.offline === true && !result.assistance ? await lastEvent(person.employee.id).catch(() => null) : null;
       const offline = latest ? prepareOfflineAuthorization(options.secret, device, person.employee.id, person.employee.pinVersion, latest.id, now(), clockSeconds(person.interaction)) : undefined;
-      return json({ ...result, ...(offline ? { offline, offlineState: latest?.eventType } : {}) }, 200, { "Set-Cookie": kioskCookie(url, "person", "", 0) });
+      const { photoEventId, ...recorded } = result;
+      const photoGrant = body.photo === true && photoEventId && options.bucket && await kioskPhotosEnabled(db).catch(() => false)
+        ? clockPhotoGrant(options.secret, device, photoEventId, now()) : undefined;
+      return json({ ...recorded, ...(photoGrant ? { photoGrant } : {}), ...(offline ? { offline, offlineState: latest?.eventType } : {}) }, 200, { "Set-Cookie": kioskCookie(url, "person", "", 0) });
     } catch (error) {
       if (error instanceof KioskRateLimitError) return json({ error: error.message, retryAfterSeconds: error.retryAfterSeconds, limitScope: error.limitScope }, error.status, { "Retry-After": String(error.retryAfterSeconds) });
       if (error instanceof AuthError) return json({ error: error.message }, error.status);

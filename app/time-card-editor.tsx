@@ -6,6 +6,7 @@ import type { TimeCardBreak, TimeCardDraft, TimeCardEdit, TimesheetEmployee } fr
 import type { TimeCardNote } from "../workforce/model";
 import type { LockEvent } from "../workforce/timesheet-lock-types";
 import { LockHistoryEntry } from "./timesheet-locks";
+import { ClockInPhoto } from "./time-card-photo";
 
 export function RecordedTimeCardNotes({ notes }: { notes: TimeCardNote[] }) {
   return <ul>{notes.map(note => <li key={`${note.author}:${note.text}`}><strong>{note.author === "employee" ? "Employee note" : note.author === "manager" ? "Manager note" : "Recorded note"}</strong><p>{note.text}</p></li>)}</ul>;
@@ -20,6 +21,7 @@ type Props = {
   lockHistory?: LockEvent[];
   locked?: boolean;
   notes?: TimeCardNote[];
+  photoEventId?: number;
   today: string;
   now: number;
   error: string;
@@ -113,9 +115,9 @@ export function TimeCardEditor(props: Props) {
               onChange={event => onChange({ ...draft, confirmBreakRecord: event.target.checked })} required />I’ve confirmed the worked time and breaks on this card</label>}
           </div>
         </section>
-        <section className="ts-card-section ts-card-validation" aria-labelledby="ts-card-validation-title">
-          <SectionIcon name="pin" /><div className="ts-card-section-content"><h3 id="ts-card-validation-title">Photo &amp; GPS validation (0)</h3><span className="sr-only">No photo or GPS records are available for this card.</span></div>
-        </section>
+        {props.photoEventId ? <section className="ts-card-section ts-card-validation" aria-labelledby="ts-card-validation-title">
+          <div className="ts-card-section-content"><h3 id="ts-card-validation-title">Clock-in photo</h3><ClockInPhoto key={props.photoEventId} eventId={props.photoEventId} /></div>
+        </section> : null}
         <section className="ts-card-section ts-card-history-section" aria-label="Time card edit history">
           <SectionIcon name="history" /><details className="ts-card-history ts-card-section-content"><summary><h3>Edit history ({history.length + lockHistory.length})</h3><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 9 7 7 7-7" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg></summary><div className="ts-card-history-entries">{lockHistory.map(entry => <article key={`lock:${entry.id}`}><LockHistoryEntry entry={entry} /></article>)}{history.map(edit => <article key={edit.id}><strong>{edit.actor}</strong><time dateTime={edit.at}>{new Date(edit.at).toLocaleString()}</time><p>{edit.before || "New time card"} → {edit.after}</p></article>)}{history.length || lockHistory.length ? null : <p>No changes saved yet.</p>}</div></details>
         </section>

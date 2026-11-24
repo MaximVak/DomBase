@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import type { ReactNode } from "react";
-import { hourlyWage, timesheetCsv, totalMetrics } from "./timesheets-model";
+import { holidayColumns, hourlyWage, timesheetCsv, totalMetrics } from "./timesheets-model";
 import type { TimeCard, TimesheetEmployee } from "./timesheets-model";
 import { displayMetricKey, formatTimesheetMetric, schedulePreviewLabel, schedulePreviewNote } from "./timesheets-display";
 import type { ClockDisplay, HoursDisplay } from "./timesheets-display";
@@ -28,7 +28,7 @@ export const summaryColumns = [
   { id: "cashTips", label: "Cash tips" }, { id: "creditTips", label: "Credit tips" },
   { id: "pto", label: "PTO" }, { id: "sick", label: "FFCRA – paid sick" },
   { id: "others", label: "FFCRA – others" }, { id: "child", label: "FFCRA – child" },
-  { id: "blueLaw", label: "Blue law hours" }, { id: "holiday", label: "Holiday pay" },
+  { id: "blueLaw", label: "Blue law hours" }, { id: "holiday", label: "Holiday pay" }, { id: "holidayPremium", label: "Est. holiday premium" },
 ];
 export const defaultSummaryColumns = ["first", "last", "payroll", "wage", "regular", "ot", "doubleOt", "qualifiedOt", "pto"];
 const premiumColumns = ["mealPremium", "restPremium", "premiumPay"];
@@ -62,7 +62,7 @@ type Props = {
   employees: TimesheetEmployee[]; cards: TimeCard[];
   dateControl: ReactNode; start: string; end: string; rounding: string | number; filtered: boolean;
   clockDisplay?: ClockDisplay; hoursDisplay?: HoursDisplay; displayControl?: ReactNode; accountantExport?: ReactNode;
-  canExport?: boolean; showBreakPremiums?: boolean; onEditingChange?: (editing: boolean) => void;
+  canExport?: boolean; showBreakPremiums?: boolean; showHoliday?: boolean; onEditingChange?: (editing: boolean) => void;
   onBack: () => void; onPayrollId?: (employeeId: number, payrollId: string) => Promise<boolean>;
 };
 export function TimesheetsSummary(props: Props) {
@@ -98,7 +98,7 @@ export function TimesheetsSummary(props: Props) {
   const clockDisplay = props.clockDisplay ?? "actual";
   const showRoundedClock = props.rounding !== "actual";
   const showSchedule = clockDisplay === "schedule";
-  const defaultColumns = [...defaultSummaryColumns, ...(props.showBreakPremiums ? premiumColumns : []), "roundedHours"];
+  const defaultColumns = [...defaultSummaryColumns, ...(props.showBreakPremiums ? premiumColumns : []), ...(props.showHoliday ? holidayColumns : []), "roundedHours"];
   const [columns, setColumns] = useState(defaultColumns);
   const [sort, setSort] = useState({ id: "first", direction: 1 });
   const [printMode, setPrintMode] = useState<"current" | "all">("current");
@@ -118,7 +118,7 @@ export function TimesheetsSummary(props: Props) {
     return () => window.removeEventListener("afterprint", resetPrint);
   }, []);
   const orderedColumns = columnOrder.filter(id => (props.showBreakPremiums || !premiumColumns.includes(id))
-    && (showRoundedClock || showSchedule || id !== "roundedHours")).map(id => summaryColumns.find(column => column.id === id)!);
+    && (props.showHoliday || id !== "holidayPremium") && (showRoundedClock || showSchedule || id !== "roundedHours")).map(id => summaryColumns.find(column => column.id === id)!);
   const activeColumns = orderedColumns.filter(column => columns.includes(column.id));
   const ledgerWidths = activeColumns.map(column => column.id === "payroll" ? 200 : column.id === "role" ? 190 : textColumns.includes(column.id) ? 140 : 130);
   const ledgerMinWidth = ledgerWidths.reduce((sum, width) => sum + width, 0);

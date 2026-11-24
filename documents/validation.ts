@@ -4,13 +4,13 @@ export function sameOrigin(request: Request) {
   const origin = new URL(request.url).origin;
   if (request.headers.get("origin") !== origin || ![null, "same-origin", "none"].includes(request.headers.get("sec-fetch-site"))) throw new AuthError(403, "Request origin is not allowed.");
 }
-export async function fileBytes(request: Request) {
+export async function fileBytes(request: Request, maxBytes = maxFileBytes, tooLarge = "Files must be 10 MB or smaller.") {
   sameOrigin(request);
   const length = request.headers.get("content-length");
-  if (length && (!/^\d+$/.test(length) || Number(length) > maxFileBytes)) throw new AuthError(413, "Files must be 10 MB or smaller.");
+  if (length && (!/^\d+$/.test(length) || Number(length) > maxBytes)) throw new AuthError(413, tooLarge);
   const reader = request.body?.getReader(); if (!reader) throw new AuthError(400, "Choose a file.");
   const chunks: Uint8Array[] = []; let size = 0;
-  while (true) { const { value, done } = await reader.read(); if (done) break; size += value.byteLength; if (size > maxFileBytes) { await reader.cancel(); throw new AuthError(413, "Files must be 10 MB or smaller."); } chunks.push(value); }
+  while (true) { const { value, done } = await reader.read(); if (done) break; size += value.byteLength; if (size > maxBytes) { await reader.cancel(); throw new AuthError(413, tooLarge); } chunks.push(value); }
   if (!size) throw new AuthError(400, "Empty files cannot be uploaded.");
   const bytes = new Uint8Array(size); let offset = 0; for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; } return bytes;
 }

@@ -13,7 +13,13 @@ export const defaultOvertimePolicy = {
 
 export type OvertimePolicy = typeof defaultOvertimePolicy;
 
-export type ScheduleEnforcement = OvertimePolicy & {
+export type Holiday = { date: string; name: string };
+export type HolidayPolicy = { holidayPayEnabled: boolean; holidayPayMultiplier: number; holidays: Holiday[] };
+export const holidayFields = ["holidayPayEnabled", "holidayPayMultiplier", "holidays"] as const;
+export const holidayMultiplierBounds = { min: 1, max: 5, step: 0.01 };
+
+export type ScheduleEnforcement = OvertimePolicy & HolidayPolicy & {
+  clockInPhotos: boolean;
   workWeekStart: number;
   minRestHours: number;
   availabilityReviewDays: number;
@@ -60,6 +66,10 @@ export type ScheduleEnforcement = OvertimePolicy & {
 
 export const defaultScheduleEnforcement: ScheduleEnforcement = {
   ...defaultOvertimePolicy,
+  clockInPhotos: false,
+  holidayPayEnabled: false,
+  holidayPayMultiplier: 1.5,
+  holidays: [],
   workWeekStart: 1,
   minRestHours: 10,
   availabilityReviewDays: 90,
@@ -107,7 +117,7 @@ export const defaultScheduleEnforcement: ScheduleEnforcement = {
 export const alertsPermissionsFields = ["notifyScheduleChanges", "employeesOwnScheduleOnly", "requireAvailabilityApproval", "restrictManagerDepartments", "noShowAlerts", "noShowMinutes"] as const;
 export const eventsTradesFields = ["enableScheduleEvents"] as const;
 export const overtimePolicyFields = Object.keys(defaultOvertimePolicy) as (keyof OvertimePolicy)[];
-export const overtimeFields = ["workWeekStart", ...overtimePolicyFields] as const;
+export const overtimeFields = ["workWeekStart", ...overtimePolicyFields, ...holidayFields] as const;
 export const breakPolicyFields = ["blockEarlyClockIn", "blockEarlyBreakReturn", "breakWaivers", "missedBreakReports", "unpaidRestOverage", "paidRestMinutes"] as const;
 export const breakPremiumFields = ["breakPremiums", "mealPremiumLimit", "restPremiumLimit"] as const;
 export const attendancePolicyFields = ["lateAttendanceAlerts", "assistedClockIn", "assistedClockOut", "clockOutReminders", "clockOutReminderEmail", "clockOutReminderFirst", "clockOutReminderSecond", "clockOutReminderThird"] as const;
@@ -174,6 +184,29 @@ export function normalizeScheduleEnforcement(value: unknown): ScheduleEnforcemen
   if (!value || typeof value !== "object") return result;
   const input = value as Record<string, unknown>;
   for (const key of Object.keys(result) as (keyof ScheduleEnforcement)[]) {
+    if (key === "holidays") {
+      const entries = input[key];
+      if (!Array.isArray(entries) || entries.length > 366) continue;
+      const dates = new Set<string>();
+      const holidays: Holiday[] = [];
+      for (const entry of entries) {
+        const date = entry?.date;
+        const name = entry?.name;
+        if (typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date) || dates.has(date) ||
+          !Number.isFinite(Date.parse(date)) || new Date(date).toISOString().slice(0, 10) !== date ||
+          typeof name !== "string" || !name.trim() || name.length > 100) break;
+        dates.add(date);
+        holidays.push({ date, name: name.trim() });
+      }
+      if (holidays.length === entries.length) result.holidays = holidays;
+      continue;
+    }
+    if (key === "holidayPayMultiplier") {
+      const rate = input[key];
+      const { min, max, step } = holidayMultiplierBounds;
+      if (typeof rate === "number" && rate >= min && rate <= max && Math.abs(rate / step - Math.round(rate / step)) < 1e-7) result[key] = rate;
+      continue;
+    }
     if (typeof result[key] === "boolean") {
       if (typeof input[key] === "boolean") Object.assign(result, { [key]: input[key] });
       continue;

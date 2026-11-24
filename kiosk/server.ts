@@ -12,6 +12,6 @@ export async function handleKiosk(request: Request) {
       const auth = createAuthService(db, { secret });
       return await createKioskAdmin(db, createAccessService(db, auth), secret).handle(request);
     }
-    return await createKioskService(db, { secret }).handle(request);
+    return await createKioskService(db, { secret, bucket: env.FILES }).handle(request);
   } catch { return json({ error: "The time clock is temporarily unavailable. Try again shortly." }, 503); }
 }

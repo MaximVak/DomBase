@@ -6,19 +6,21 @@ import { kioskCopy } from "./copy";
 import type { KioskLanguage } from "./copy";
 import { BreakReportForm } from "./break-report";
 import { AssistanceForm } from "./assistance-form";
+import { ClockCamera } from "./clock-camera";
 import type { ReportedTime } from "../../kiosk/assistance";
 
 export type ClockPerson = {
   employee: { id: number; name: string }; roles: { id: number; name: string }[];
   state: "in" | "out" | "break" | "break_end"; expiresAt: string; serverTime?: number; local?: boolean;
   replay?: { ticket: string; serverTime: number };
+  clockInPhotos?: boolean;
   assist?: { in: boolean; out: boolean; recovery: boolean; reminder: boolean; date: string };
   breakView?: { issues: BreakIssue[]; active?: { kind: BreakKind; availableAt: number; extensionAt: number } };
 };
 
-export function ClockPanel({ person, language, busy, offlineBlocked, earlyClockBlocked, onClock, onCancel }: {
-  person: ClockPerson; language: KioskLanguage; busy: boolean; offlineBlocked: boolean; earlyClockBlocked: boolean;
-  onClock: (input: ClockInput) => Promise<void>; onCancel: () => void;
+export function ClockPanel({ person, language, busy, online, offlineBlocked, earlyClockBlocked, onClock, onCancel }: {
+  person: ClockPerson; language: KioskLanguage; busy: boolean; online: boolean; offlineBlocked: boolean; earlyClockBlocked: boolean;
+  onClock: (input: ClockInput, photo?: Blob) => Promise<void>; onCancel: () => void;
 }) {
   const text = kioskCopy[language];
   const [roleId, setRoleId] = useState(String(person.roles[0]?.id ?? ""));
@@ -74,6 +76,7 @@ export function ClockPanel({ person, language, busy, offlineBlocked, earlyClockB
     <label htmlFor="kiosk-explanation">{text.note}
       <textarea id="kiosk-explanation" value={explanation} maxLength={1000} disabled={busy} onChange={event => setExplanation(event.target.value)} />
     </label>
+    {off && person.clockInPhotos && online && !earlyClockBlocked && !busy ? <ClockCamera language={language} disabled={!roleId} onCapture={photo => void onClock(input("in"), photo)} /> : null}
     {onBreak && remaining > 0 ? <p>{text.remaining} <span role="timer" aria-live="off">{Math.floor(remaining / 60)}:{String(remaining % 60).padStart(2, "0")}</span></p> : null}
     {onBreak && askExtension ? <label className="kiosk-check"><input type="checkbox" checked={extension} disabled={disabled} onChange={event => setExtension(event.target.checked)} />{text.offDutyExtension}</label> : null}
     <div className="kiosk-actions">

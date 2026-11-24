@@ -35,6 +35,7 @@ export function KioskScreen() {
   const clearApprovalCooldown = useCallback(() => setCooldowns(current => ({ ...current, approve: null })), []);
   const [epoch, setEpoch] = useState(0);
   const generation = useRef(0);
+  const pendingPhoto = useRef<Blob | undefined>(undefined);
   const controller = useRef<AbortController | null>(null);
   const active = useRef(false);
   const working = useRef(false);
@@ -53,6 +54,7 @@ export function KioskScreen() {
   const reset = useCallback((confirmation: KioskText | null = null) => {
     generation.current += 1;
     controller.current?.abort();
+    pendingPhoto.current = undefined;
     active.current = false;
     working.current = false;
     offlinePerson.current = null;
@@ -160,11 +162,12 @@ export function KioskScreen() {
     return true;
   }
 
-  async function submit(action: "pin" | "approve" | "clock", body: { pin: string; queue?: boolean; breaks?: boolean; requestId?: string } | ClockInput, clockInput?: ClockInput) {
+  async function submit(action: "pin" | "approve" | "clock", body: { pin: string; queue?: boolean; breaks?: boolean; requestId?: string } | ClockInput, clockInput?: ClockInput, photo?: Blob) {
     if (working.current || document.hidden) return;
     const cooldown = action === "clock" ? null : cooldowns[action];
     if (cooldown?.scope === "device" && cooldown.until > Date.now()) return;
     const version = generation.current;
+    if (action === "clock") pendingPhoto.current = photo;
     const abort = new AbortController();
     controller.current = abort;
     active.current = true; working.current = true;
@@ -212,6 +215,7 @@ export function KioskScreen() {
         return;
       }
       const payload = { ...body, ...(queued ? { ticket: queued.ticket } : {}),
+        ...(pendingPhoto.current && action !== "pin" ? { photo: true } : {}),
         ...((action === "pin" && available) || cached ? { offline: true } : {}) };
       const response = await kioskPost(action, payload, abort.signal);
       const data = await response.json();
@@ -242,7 +246,7 @@ export function KioskScreen() {
         receivedAt.current = performance.now();
         setCooldowns(current => ({ ...current, pin: null }));
         setPerson({ employee: data.employee, roles: data.roles, state: data.state, expiresAt: data.expiresAt,
-          replay: data.replay, breakView: data.breakView, serverTime: data.serverTime, assist: data.assist });
+          replay: data.replay, breakView: data.breakView, serverTime: data.serverTime, assist: data.assist, clockInPhotos: data.clockInPhotos === true });
         setPhase("person");
       } else if (data.approvalRequired) {
         setPending({ id: data.requestId, early: data.reason === kioskCopy.en.earlyApproval }); setPhase("approval");
@@ -252,7 +256,16 @@ export function KioskScreen() {
           if (version !== generation.current) return;
         }
         if (action === "approve") setCooldowns(current => ({ ...current, approve: null }));
-        reset(data.assistance === "approved" ? "assistanceApproved" : data.assistance === "pending" ? "assistancePending" : data.eventType);
+        let confirmation: KioskText = data.assistance === "approved" ? "assistanceApproved" : data.assistance === "pending" ? "assistancePending" : data.eventType;
+        if (pendingPhoto.current && data.eventType === "in") {
+          const attached = typeof data.photoGrant === "string" && await fetch("/api/kiosk/clock-photo", {
+            method: "POST", cache: "no-store", headers: { "Content-Type": "image/jpeg", "X-Clock-Photo-Grant": data.photoGrant },
+            body: pendingPhoto.current, signal: AbortSignal.any([abort.signal, AbortSignal.timeout(4000)]),
+          }).then(response => response.ok, () => false);
+          if (version !== generation.current) return;
+          confirmation = attached ? "clockInPhoto" : "clockInPhotoFailed";
+        }
+        reset(confirmation);
       }
     } catch {
       if (version === generation.current) {
@@ -290,7 +303,7 @@ export function KioskScreen() {
       {phase === "unregistered" ? <><h2>{text.register}</h2><p>{text.registrationHint}</p></> : null}
       {phase === "pin" && cooldowns.pin ? <PinLockout value={cooldowns.pin} language={language} onExpired={clearPinCooldown} /> : null}
       {phase === "pin" ? <PinForm key={epoch} language={language} busy={busy} offline={!online && !offlineReady} locked={cooldowns.pin?.scope === "device"} describedBy={cooldowns.pin ? "kiosk-lockout" : undefined} onSubmit={pin => submit("pin", { pin, queue: available, breaks: true })} /> : null}
-      {phase === "person" && person ? <ClockPanel person={person} language={language} busy={busy} earlyClockBlocked={message === "earlyClock"} offlineBlocked={!online && !((person.replay || person.local) && available)} onClock={input => submit("clock", input, input)} onCancel={() => reset()} /> : null}
+      {phase === "person" && person ? <ClockPanel person={person} language={language} busy={busy} online={online} earlyClockBlocked={message === "earlyClock"} offlineBlocked={!online && !((person.replay || person.local) && available)} onClock={(input, photo) => submit("clock", input, input, photo)} onCancel={() => reset()} /> : null}
       {phase === "approval" && pending ? <><h2>{text.approval}</h2><p>{pending.early ? text.earlyApproval : text.approvalReason}</p>{cooldowns.approve ? <PinLockout value={cooldowns.approve} language={language} manager onExpired={clearApprovalCooldown} /> : null}
         <PinForm key={"manager-" + epoch} language={language} manager busy={busy} offline={!online} locked={cooldowns.approve?.scope === "device"} describedBy={cooldowns.approve ? "kiosk-lockout" : undefined} onSubmit={pin => submit("approve", { requestId: pending.id, pin })} /><button type="button" onClick={() => reset()}>{text.cancel}</button>
       </> : null}

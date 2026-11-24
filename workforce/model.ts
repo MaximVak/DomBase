@@ -158,6 +158,7 @@ export type PublishedTimesheetShift = Pick<Shift, "id" | "employeeId" | "date" |
 
 export type ClockEvent = {
   id: number;
+  photoEventId?: number;
   employeeId: number;
   type: "in" | "out" | "break" | "break_end";
   at: string;

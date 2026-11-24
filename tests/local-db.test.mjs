@@ -98,7 +98,7 @@ test("local migrations and Drizzle share D1 data across runtime restarts", { tim
     await db.insert(schema.locationSettings).values({ businessId: 1 });
     const [settings] = await db.select().from(schema.locationSettings);
     const { defaultScheduleEnforcement } = await loadSchema("../app/schedule-enforcement.ts");
-    for (const [key, value] of Object.entries(defaultScheduleEnforcement)) assert.equal(settings[key], value, key);
+    for (const [key, value] of Object.entries(defaultScheduleEnforcement)) assert.deepEqual(settings[key], value, key);
     assert.equal((await db.select().from(schema.business))[0].timeZone, "America/Los_Angeles");
     await assert.rejects(db.insert(schema.business).values({ id: 2, companyName: "Other", locationName: "Other" }));
     await assert.rejects(db.update(schema.locationSettings).set({ workWeekStart: 8 }));

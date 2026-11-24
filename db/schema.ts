@@ -200,6 +200,10 @@ export const business = sqliteTable("business", {
 
 export const locationSettings = sqliteTable("location_settings", {
   businessId: integer("business_id").primaryKey().references(() => business.id),
+  clockInPhotos: integer("clock_in_photos", { mode: "boolean" }).notNull().default(false),
+  holidayPayEnabled: integer("holiday_pay_enabled", { mode: "boolean" }).notNull().default(false),
+  holidayPayMultiplier: real("holiday_pay_multiplier").notNull().default(1.5),
+  holidays: text("holidays", { mode: "json" }).$type<import("../app/schedule-enforcement").Holiday[]>().notNull().default(sql`'[]'`),
   workWeekStart: integer("work_week_start").notNull().default(1),
   overtimeDailyEnabled: integer("overtime_daily_enabled", { mode: "boolean" }).notNull().default(true),
   overtimeWeeklyEnabled: integer("overtime_weekly_enabled", { mode: "boolean" }).notNull().default(true),
@@ -264,6 +268,14 @@ export const locationSettings = sqliteTable("location_settings", {
   check("location_settings_timing_check", sql`${table.lateMinutes} BETWEEN 1 AND 120 AND ${table.earlyClockInMinutes} BETWEEN 0 AND 120 AND ${table.noShowMinutes} BETWEEN 0 AND 120 AND ${table.automaticClockOutMinutes} BETWEEN 1 AND 1440 AND ${table.mealBreakAfterHours} BETWEEN 1 AND 24`),
   check("location_settings_rounding_check", sql`${table.hoursRoundingMinutes} IN (5, 10, 15) AND ${table.kioskIdleSeconds} BETWEEN 5 AND 600`),
 ]);
+
+export const clockInPhotos = sqliteTable("clock_in_photos", {
+  eventId: integer("event_id").primaryKey().references(() => clockEvents.id),
+  objectKey: text("object_key").notNull().unique(),
+  sizeBytes: integer("size_bytes").notNull(),
+  sha256: text("sha256").notNull(),
+  readyAt: text("ready_at"),
+}, table => [check("clock_in_photos_size_check", sql`${table.sizeBytes} BETWEEN 1 AND 131072`)]);
 
 export const employeeProfiles = sqliteTable("employee_profiles", {
   employeeId: integer("employee_id").primaryKey().references(() => employees.id),

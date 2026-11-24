@@ -1,8 +1,9 @@
+import { useState } from "react";
 import type { FormEvent, ReactNode } from "react";
-import { defaultOvertimePolicy, overtimeNumbers } from "./schedule-enforcement";
-import type { OvertimeNumber, OvertimePolicy } from "./schedule-enforcement";
+import { defaultOvertimePolicy, holidayMultiplierBounds, overtimeNumbers } from "./schedule-enforcement";
+import type { HolidayPolicy, OvertimeNumber, OvertimePolicy } from "./schedule-enforcement";
 
-type Options = OvertimePolicy & { workWeekStart: number };
+type Options = OvertimePolicy & HolidayPolicy & { workWeekStart: number };
 
 const unavailable = "Not available yet";
 
@@ -22,6 +23,16 @@ export function OvertimeOptionsPanel({ settings, dirty, message, canManage, onCh
   onChange: (changes: Partial<Options>) => void;
   onSave: (event: FormEvent<HTMLFormElement>) => void;
 }) {
+  const [holidayDate, setHolidayDate] = useState("");
+  const [holidayName, setHolidayName] = useState("");
+  const [editingDate, setEditingDate] = useState<string>();
+  const duplicate = settings.holidays.some(holiday => holiday.date === holidayDate && holiday.date !== editingDate);
+  function clearHoliday() { setHolidayDate(""); setHolidayName(""); setEditingDate(undefined); }
+  function addHoliday() {
+    if (!holidayDate || !holidayName.trim() || duplicate) return;
+    onChange({ holidays: [...settings.holidays.filter(holiday => holiday.date !== editingDate), { date: holidayDate, name: holidayName.trim() }].sort((a, b) => a.date.localeCompare(b.date)) });
+    clearHoliday();
+  }
   const threshold = (field: OvertimeNumber, label: string, enabled = true) => (
     <label className="enforcement-field-row">
       <span>{label}</span>
@@ -105,18 +116,26 @@ export function OvertimeOptionsPanel({ settings, dirty, message, canManage, onCh
         <h4 id="holiday-pay-title">Holiday pay rates</h4>
         <div className="enforcement-rules">
           <div className="enforcement-rule">
-            <div className="enforcement-rule-line overtime-placeholder" title={unavailable}>
-              <input type="checkbox" disabled aria-label="Enable holiday pay rate" />
-              <span>Enable holiday pay rate</span><InactiveNumber label="Holiday pay multiplier" value={1.5} /><span>× regular hourly rate</span>
+            <div className="enforcement-rule-line">
+              <label><input type="checkbox" checked={settings.holidayPayEnabled} disabled={!canManage} onChange={event => onChange({ holidayPayEnabled: event.target.checked })} /> Enable holiday pay rate</label>
+              <input className="overtime-number" type="number" aria-label="Holiday pay multiplier" {...holidayMultiplierBounds} value={settings.holidayPayMultiplier} disabled={!canManage || !settings.holidayPayEnabled} onChange={event => onChange({ holidayPayMultiplier: Number(event.target.value) })} required />
+              <span>× regular hourly rate</span>
             </div>
-            <p>Note: Any hours worked as holiday pay will not count towards overtime calculation.</p>
+            <p>Holiday hours count toward overtime. Timesheets shows a separate estimated holiday premium for hourly work.</p>
           </div>
         </div>
         <div className="overtime-holiday-entry">
-          <label><span>Date</span><div className="overtime-holiday-date"><span aria-hidden="true">▦</span><input aria-label="Holiday date" placeholder="Choose a date" disabled title={unavailable} /></div></label>
-          <label><span>Holiday name</span><input placeholder="Holiday name" disabled title={unavailable} /></label>
-          <button type="button" disabled title={unavailable}>＋ Add</button>
+          <label><span>Date</span><input type="date" aria-label="Holiday date" value={holidayDate} onChange={event => setHolidayDate(event.target.value)} disabled={!canManage} /></label>
+          <label><span>Holiday name</span><input maxLength={100} value={holidayName} onChange={event => setHolidayName(event.target.value)} disabled={!canManage} /></label>
+          <button type="button" disabled={!canManage || !holidayDate || !holidayName.trim() || duplicate || (!editingDate && settings.holidays.length >= 366)} onClick={addHoliday}>{editingDate ? "Update" : "Add"}</button>
+          {editingDate ? <button type="button" onClick={clearHoliday}>Cancel</button> : null}
         </div>
+        {duplicate ? <p role="status">There is already a holiday on this date.</p> : null}
+        {settings.holidays.length ? <ul className="overtime-holidays">{settings.holidays.map(holiday => <li key={holiday.date}>
+          <time dateTime={holiday.date}>{new Date(`${holiday.date}T12:00:00`).toLocaleDateString()}</time><span>{holiday.name}</span>
+          {canManage ? <div><button type="button" aria-label={`Edit ${holiday.name}`} onClick={() => { setHolidayDate(holiday.date); setHolidayName(holiday.name); setEditingDate(holiday.date); }}>Edit</button>
+            <button type="button" aria-label={`Remove ${holiday.name}`} onClick={() => { onChange({ holidays: settings.holidays.filter(item => item.date !== holiday.date) }); if (holiday.date === editingDate) clearHoliday(); }}>Remove</button></div> : null}
+        </li>)}</ul> : null}
       </section>
       <button className="overtime-history" type="button" disabled title={unavailable}><span aria-hidden="true">◷</span> View overtime settings history</button>
       {message ? <p className="enforcement-save-message" role="status">{message}</p> : null}

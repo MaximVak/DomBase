@@ -24,6 +24,8 @@ import { managerLeaveScope, readLeaveBalances } from "./leave-balances";
 import { conversationChange } from "./messages";
 import { timecardChange } from "./timecards";
 import { settingsChange } from "./settings";
+import { readClockPhoto } from "./clock-photos";
+import type { DocumentBucket } from "../documents/types";
 import { canonical, equal } from "./contract";
 import type { Change, WorkspaceData, Entity } from "./contract";
 import type { Database } from "./context";
@@ -50,7 +52,7 @@ function currentRecord(view: WorkspaceData, change: Change, employeeKey: number)
   }
   throw new AuthError(400, "Unknown operation.");
 }
-export function createWorkforceService(db: Database, access: ReturnType<typeof createAccessService>, options: { emailEnabled?: boolean; secret: string; fieldKey: string; now?: () => number; stagingAccountantFixtureIds?: string }) {
+export function createWorkforceService(db: Database, access: ReturnType<typeof createAccessService>, options: { emailEnabled?: boolean; secret: string; fieldKey: string; now?: () => number; stagingAccountantFixtureIds?: string; bucket?: DocumentBucket }) {
   const now = options.now ?? Date.now;
   if (options.secret.length < 32) throw new Error("Workspace configuration unavailable.");
   async function handle(request: Request) {
@@ -60,6 +62,7 @@ export function createWorkforceService(db: Database, access: ReturnType<typeof c
       const action = url.pathname.slice("/api/workspace/".length);
       if (action === "timesheet-review") return await handleTimesheetReview(db, ctx, request, { ...options, now: now() });
       if (action === "timesheet-locks") return await handleTimesheetLocks(db, ctx, request, { ...options, now: now() });
+      if (action === "clock-photo") return await readClockPhoto(db, ctx, request, options.bucket);
       if (action === "time-off") return await handleManagerTimeOff(db, ctx, request, options.secret, now());
       if (action === "leave-balances") {
         ctx.requirePermission("time_off.read");

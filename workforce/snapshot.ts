@@ -5,11 +5,12 @@ import type { SQLWrapper } from "drizzle-orm";
 import * as s from "../db/schema";
 import { normalizeScheduleEnforcement } from "../app/schedule-enforcement";
 import { defaultInfo, emptyState } from "./contract";
-import type { WorkspaceData, StaffState } from "./contract";
+import type { WorkspaceData } from "./contract";
 import type { Context, Database } from "./context";
 import { decryptSsn } from "./private";
 import { timeCardNotes } from "./timecard-notes";
 import { currentRawPunch, projectClockEvents, timestamp } from "./clock-projection";
+import { clockRoleScope } from "./clock-photos";
 const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 import { workspacePeriod, offsetDate } from "./period";
 import type { WorkspacePeriod } from "./period";
@@ -45,8 +46,7 @@ export async function workspaceSnapshot(db: Database, ctx: Context, fieldKey: st
     WHERE cm.conversation_id = ${s.conversations.id} AND cm.employee_id = ${ctx.account.employeeId ?? -1}
     AND cm.left_at IS NULL AND ce.active = 1 AND ce.terminated = 0)`;
   const memberConversation = db.select({ id: s.conversations.id }).from(s.conversations).where(and(member, isNull(s.conversations.archivedAt), allowed(p["messages.read"])));
-  const clockScope = ctx.allDepartments ? sql`1 = 1` : sql`EXISTS (SELECT 1 FROM roles r JOIN departments d ON d.id = r.department_id
-    WHERE r.name = ${s.clockEvents.roleName} AND r.archived = 0 AND d.archived = 0 AND ${deptScope(sql`d.id`)})`;
+  const clockScope = clockRoleScope(ctx, s.clockEvents.roleName);
   const ownEmployee = ctx.account.employeeId ?? -1;
   const privateScope = (column: SQLWrapper) => and(canEmployee(column), or(allowed(p["team.read"] && p["team.private.read"]), sql`${column} = ${ownEmployee}`));
   // Unique SQL names keep D1's positional result mapping intact when several
@@ -57,7 +57,7 @@ export async function workspaceSnapshot(db: Database, ctx: Context, fieldKey: st
     terminationNote: p["team.read"] && p["team.private.read"] ? s.employees.terminationNote : sql<string | null>`NULL`.as("termination_note"), eligibleForRehire: p["team.read"] && p["team.private.read"] ? s.employees.eligibleForRehire : sql<boolean | null>`NULL`.as("eligible_for_rehire"), version: s.employees.version };
   // D1's read batch provides one transactionally consistent multi-table snapshot.
   const [revision, businesses, settingsRows, accounts, employees, departments, roles, assignments, managers, employeeSettings, profiles, wages, notes, history, certificates, labels,
-    shifts, publications, drafts, draftChanges, draftEmployees, events, rawClocks, cards, edits, adjustments, policies, policyAssignments, pto, availability, slots, conversations, members, messages, reads, notices, receipts, photos, teamConfig, openRows, openDraftRows, openRequestRows, exchangeRequestRows, timesheetSchedule, timesheetLeave] = await db.batch([
+    shifts, publications, drafts, draftChanges, draftEmployees, events, rawClocks, cards, editRows, adjustments, policies, policyAssignments, pto, availability, slots, conversations, members, messages, reads, notices, receipts, photos, teamConfig, openRows, openDraftRows, openRequestRows, exchangeRequestRows, timesheetSchedule, timesheetLeave] = await db.batch([
     db.select().from(s.workforceState), db.select().from(s.business), db.select().from(s.locationSettings),
     db.select({ id: s.accounts.id, employeeId: s.accounts.employeeId, name: s.accounts.displayName, level: s.accounts.accessLevel, disabledAt: s.accounts.disabledAt, loginEnabled: s.accounts.loginEnabled }).from(s.accounts),
     db.select(employeeFields).from(s.employees).where(and(canEmployee(s.employees.id), or(allowed(hasTeam), eq(s.employees.id, ownEmployee)))).orderBy(s.employees.id),
@@ -78,9 +78,16 @@ export async function workspaceSnapshot(db: Database, ctx: Context, fieldKey: st
     db.select().from(s.scheduleDraftChanges).where(sql`${allowed(p["schedule.manage"])} AND EXISTS (SELECT 1 FROM schedule_drafts sd WHERE sd.id = ${s.scheduleDraftChanges.draftId} AND sd.owner_account_id = ${ctx.account.id}) AND ${ctx.roleFilter(s.scheduleDraftChanges.roleId)}`),
     db.select().from(s.scheduleDraftEmployees).where(sql`EXISTS (SELECT 1 FROM schedule_drafts sd WHERE sd.id = ${s.scheduleDraftEmployees.draftId} AND sd.owner_account_id = ${ctx.account.id}) AND ${employeeScope(s.scheduleDraftEmployees.employeeId)}`),
     db.select().from(s.scheduleEvents).where(and(allowed(p["schedule.read"]), dates(s.scheduleEvents.date))).orderBy(s.scheduleEvents.date),
-    db.select({ event: s.clockEvents, assistance: s.assistedClockReports }).from(s.clockEvents).leftJoin(s.assistedClockReports, eq(s.assistedClockReports.eventId, s.clockEvents.id)).where(and(allowed(p["timesheets.read"]), employeeScope(s.clockEvents.employeeId), clockScope, clockIds, currentRawPunch)).orderBy(s.clockEvents.id),
+    db.select({ event: s.clockEvents, assistance: s.assistedClockReports, photoEventId: sql<number | null>`${s.clockInPhotos.eventId}`.as("photo_event_id") }).from(s.clockEvents)
+      .leftJoin(s.assistedClockReports, eq(s.assistedClockReports.eventId, s.clockEvents.id))
+      .leftJoin(s.clockInPhotos, and(eq(s.clockInPhotos.eventId, s.clockEvents.id), sql`${s.clockInPhotos.readyAt} IS NOT NULL`))
+      .where(and(allowed(p["timesheets.read"]), employeeScope(s.clockEvents.employeeId), clockScope, clockIds, currentRawPunch)).orderBy(s.clockEvents.id),
     db.select().from(s.timeCards).where(and(allowed(p["timesheets.read"]), employeeScope(s.timeCards.employeeId), cardDates(s.timeCards.workDate), ctx.allDepartments ? sql`1 = 1` : ctx.roleFilter(s.timeCards.roleId))),
-    db.select().from(s.timeCardEdits).where(sql`${allowed(p["timesheets.read"])} AND ${employeeScope(s.timeCardEdits.employeeId)} AND EXISTS (SELECT 1 FROM time_cards tc WHERE tc.id = ${s.timeCardEdits.cardId} AND ${cardDates(sql`tc.work_date`)} AND ${ctx.allDepartments ? sql`1 = 1` : ctx.roleFilter(sql`tc.role_id`)})`).orderBy(s.timeCardEdits.cardId, s.timeCardEdits.revision),
+    db.select({ edit: s.timeCardEdits, photoEventId: sql<number | null>`CASE WHEN ${s.timeCardEdits.revision} = 1 THEN (
+      SELECT photo.event_id FROM json_each(${s.timeCardEdits.before}, '$.eventIds') source
+      JOIN clock_in_photos photo ON photo.event_id = source.value JOIN clock_events c ON c.id = photo.event_id
+      WHERE photo.ready_at IS NOT NULL AND c.employee_id = ${s.timeCardEdits.employeeId} AND ${clockRoleScope(ctx, sql`c.role_name`)} LIMIT 1) END`.as("photo_event_id") })
+      .from(s.timeCardEdits).where(sql`${allowed(p["timesheets.read"])} AND ${employeeScope(s.timeCardEdits.employeeId)} AND EXISTS (SELECT 1 FROM time_cards tc WHERE tc.id = ${s.timeCardEdits.cardId} AND ${cardDates(sql`tc.work_date`)} AND ${ctx.allDepartments ? sql`1 = 1` : ctx.roleFilter(sql`tc.role_id`)})`).orderBy(s.timeCardEdits.cardId, s.timeCardEdits.revision),
     db.select().from(s.hoursAdjustments).where(and(allowed(p["timesheets.read"] && ctx.allDepartments), employeeScope(s.hoursAdjustments.employeeId), dates(s.hoursAdjustments.date))).orderBy(s.hoursAdjustments.id),
     db.select().from(s.ptoPolicies).where(and(allowed(p["time_off.read"]), eq(s.ptoPolicies.archived, false))).orderBy(s.ptoPolicies.id),
     db.select().from(s.ptoAssignments).where(and(allowed(p["time_off.read"]), employeeScope(s.ptoAssignments.employeeId))),
@@ -109,6 +116,7 @@ export async function workspaceSnapshot(db: Database, ctx: Context, fieldKey: st
         eq(s.ptoRequests.status, "approved"), eq(s.ptoRequests.compensation, "paid"), isNull(s.ptoRequests.archivedAt),
         sql`${s.ptoRequests.startDate} <= ${period.end} AND ${s.ptoRequests.endDate} >= ${period.start}`)),
   ]);
+  const edits = editRows.map(({ edit, photoEventId }) => ({ ...edit, photoEventId }));
   const business = businesses[0]; const settings = normalizeScheduleEnforcement(settingsRows[0]);
   const owner = accounts.find(row => row.id === business?.primaryOwnerAccountId);
   const basicInfo = { ...defaultInfo, ...Object.fromEntries(Object.keys(defaultInfo).filter(key => key !== "accountOwner").map(key => [key, business?.[key as keyof typeof business] ?? defaultInfo[key as keyof typeof defaultInfo]])), accountOwner: owner?.name ?? "" };

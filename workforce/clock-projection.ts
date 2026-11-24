@@ -11,10 +11,10 @@ export const currentRawPunch = sql`NOT EXISTS (SELECT 1 FROM time_cards tc JOIN 
     JOIN json_each(ed.before, '$.eventIds') removed
     WHERE tc.employee_id = ${s.clockEvents.employeeId} AND removed.value = ${s.clockEvents.id})`;
 
-type RawClock = { event: typeof s.clockEvents.$inferSelect; assistance: typeof s.assistedClockReports.$inferSelect | null };
-type ClockEdit = Pick<typeof s.timeCardEdits.$inferSelect, "before" | "after" | "cardId">;
+type RawClock = { event: typeof s.clockEvents.$inferSelect; assistance: typeof s.assistedClockReports.$inferSelect | null; photoEventId?: number | null };
+type ClockEdit = Pick<typeof s.timeCardEdits.$inferSelect, "before" | "after" | "cardId"> & { photoEventId?: number | null };
 export function projectClockEvents(rawClocks: RawClock[], edits: ClockEdit[], showShift = false): ClockEvent[] {
-  const projected: ClockEvent[] = rawClocks.map(({ event: row, assistance }) => {
+  const projected: ClockEvent[] = rawClocks.map(({ event: row, assistance, photoEventId }) => {
     const resolved = assistance && (assistance.status !== "pending" || row.eventType === "in");
     const clockAt = resolved ? assistance.decidedTime ?? assistance.requestedAt : row.occurredAt;
     const explanation = assistance?.reason ?? row.explanation;
@@ -22,12 +22,14 @@ export function projectClockEvents(rawClocks: RawClock[], edits: ClockEdit[], sh
       role: row.roleName || undefined, explanation: explanation || undefined, automatic: row.automatic,
       ...(explanation && (assistance || row.source === "kiosk" || row.source === "offline") ? { noteAuthor: "employee" as const } : {}),
       cardId: row.cardId ?? undefined, ...(showShift && row.shiftId !== null ? { shiftId: row.shiftId } : {}), ...(row.clockDetails ? { clockDetails: row.clockDetails } : {}),
-      ...(assistance ? { assistedStatus: assistance.status } : {}) };
+      ...(assistance ? { assistedStatus: assistance.status } : {}), ...(photoEventId ? { photoEventId } : {}) };
   });
   const revisedCards = new Map<number, ClockEvent[]>();
   for (const edit of edits) {
     if (!Array.isArray(edit.before.eventIds) || !Array.isArray(edit.after.events)) continue;
-    const events = edit.after.events as ClockEvent[];
+    const events = [...edit.after.events as ClockEvent[]];
+    const photoEventId = edit.photoEventId ?? revisedCards.get(edit.cardId)?.[0]?.photoEventId;
+    if (events.length && photoEventId) events[0] = { ...events[0], photoEventId };
     if (events.length && !events[0].carriedNotes) {
       const before = Array.isArray(edit.before.events) ? edit.before.events as ClockEvent[] : [];
       const notes = timeCardNotes([...(revisedCards.get(edit.cardId) ?? []), ...before]);

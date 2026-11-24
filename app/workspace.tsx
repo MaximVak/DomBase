@@ -273,7 +273,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
   const ptoHistoryEmployeeFilterRef = useRef<HTMLDivElement>(null);
   const [activeCalendarTab, setActiveCalendarTab] = useState<CalendarTab>("today");
   const [activeHoursTab, setActiveHoursTab] = useState<CalendarTab>("today");
-  const [clockRoundingDraft, setClockRoundingDraft] = useState<{ enabled: boolean; minutes: HoursRoundingMinutes } | null>(null);
+  const [clockRoundingDraft, setClockRoundingDraft] = useState<{ enabled: boolean; minutes: HoursRoundingMinutes; photos: boolean } | null>(null);
   const [clockRoundingMessage, setClockRoundingMessage] = useState("");
   const [authMessage, setAuthMessage] = useState("");
 
@@ -852,10 +852,10 @@ export default function Home({ account }: { account: DashboardAccount }) {
   const isScheduleEnforcementDirty = scheduleEnforcementFields.some(field => scheduleEnforcementDraft[field] !== scheduleEnforcement[field]);
   const isAlertsPermissionsDirty = alertsPermissionsFields.some(field => scheduleEnforcementDraft[field] !== scheduleEnforcement[field]);
   const isEventsTradesDirty = eventsTradesFields.some(field => scheduleEnforcementDraft[field] !== scheduleEnforcement[field]);
-  const savedClockRounding = { enabled: scheduleEnforcement.roundClockPunches, minutes: state.hoursRoundingMinutes };
+  const savedClockRounding = { enabled: scheduleEnforcement.roundClockPunches, minutes: state.hoursRoundingMinutes, photos: scheduleEnforcement.clockInPhotos };
   const clockRounding = clockRoundingDraft ?? savedClockRounding;
-  const clockRoundingDirty = clockRounding.enabled !== savedClockRounding.enabled || clockRounding.minutes !== savedClockRounding.minutes;
-  const isOvertimeDirty = overtimeFields.some(field => scheduleEnforcementDraft[field] !== scheduleEnforcement[field]);
+  const clockRoundingDirty = !equal(clockRounding, savedClockRounding);
+  const isOvertimeDirty = overtimeFields.some(field => !equal(scheduleEnforcementDraft[field], scheduleEnforcement[field]));
   const isBreaksComplianceDirty = breaksComplianceFields.some(field => scheduleEnforcementDraft[field] !== scheduleEnforcement[field]);
   const isMessagesSettingsDirty = messagesSettingsFields.some(field => scheduleEnforcementDraft[field] !== scheduleEnforcement[field]);
   const canViewScheduleEvents = !isPublicSchedule || !scheduleEnforcement.employeesOwnScheduleOnly;
@@ -1478,8 +1478,8 @@ export default function Home({ account }: { account: DashboardAccount }) {
     const error = overtimePolicyError(candidate);
     if (error) { setOvertimeMessage(error); return; }
     const saved = normalizeScheduleEnforcement(candidate);
-    if (overtimeFields.some(field => saved[field] !== candidate[field])) {
-      setOvertimeMessage("Choose valid overtime thresholds and multipliers."); return;
+    if (overtimeFields.some(field => !equal(saved[field], candidate[field]))) {
+      setOvertimeMessage("Check the thresholds, rates, and holiday dates."); return;
     }
     const ok = await shared.save([{ entity: "settings", id: 1, before: { ...scheduleEnforcement, hoursRoundingMinutes: state.hoursRoundingMinutes }, after: { ...saved, hoursRoundingMinutes: state.hoursRoundingMinutes } }]);
     setOvertimeMessage(ok ? "Overtime settings saved." : "Settings were not confirmed. Check the shared-data message above.");
@@ -2317,10 +2317,10 @@ export default function Home({ account }: { account: DashboardAccount }) {
   async function saveClockRounding(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const previous = { ...scheduleEnforcement, hoursRoundingMinutes: state.hoursRoundingMinutes };
-    const after = { ...previous, roundClockPunches: clockRounding.enabled, hoursRoundingMinutes: clockRounding.minutes };
+    const after = { ...previous, roundClockPunches: clockRounding.enabled, hoursRoundingMinutes: clockRounding.minutes, clockInPhotos: clockRounding.photos };
     const saved = await shared.save([{ entity: "settings", id: 1, before: previous, after }]);
-    if (saved) setClockRoundingDraft(current => current?.enabled === clockRounding.enabled && current.minutes === clockRounding.minutes ? null : current);
-    setClockRoundingMessage(saved ? "Clock rounding saved." : "Clock rounding could not be saved. Check the shared-data message above.");
+    if (saved) setClockRoundingDraft(current => equal(current, clockRounding) ? null : current);
+    setClockRoundingMessage(saved ? "Time clock options saved." : "Time clock options could not be saved. Check the shared-data message above.");
   }
 
   async function saveTimeCard(draft: TimeCardDraft) {
@@ -3748,6 +3748,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                 <TimeClockOptionsPanel
                   roundClockPunches={clockRounding.enabled}
                   roundingMinutes={clockRounding.minutes}
+                  clockInPhotos={clockRounding.photos}
                   canManage={shared.data.permissions["settings.manage"] && shared.data.scheduleEstimateScopeComplete === true}
                   dirty={clockRoundingDirty}
                   message={clockRoundingMessage}
@@ -3757,6 +3758,10 @@ export default function Home({ account }: { account: DashboardAccount }) {
                   }}
                   onRoundingMinutes={minutes => {
                     setClockRoundingDraft(current => ({ ...(current ?? savedClockRounding), minutes }));
+                    setClockRoundingMessage("");
+                  }}
+                  onToggleClockInPhotos={photos => {
+                    setClockRoundingDraft(current => ({ ...(current ?? savedClockRounding), photos }));
                     setClockRoundingMessage("");
                   }}
                   onSave={saveClockRounding}
@@ -5395,6 +5400,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
               mealBreakMinutes={scheduleEnforcement.mealBreakMinutes}
               timeZone={basicInfo.timeZone}
               overtimePolicy={scheduleEnforcement}
+              holidayPolicy={scheduleEnforcement}
               overtimeScope={{ companyWide: shared.data.scheduleEstimateScopeComplete === true, dataPeriod: shared.data.period }}
               breakPremiumPolicy={scheduleEnforcement.breakPremiums ? {
                 mealLimit: scheduleEnforcement.mealPremiumLimit, restLimit: scheduleEnforcement.restPremiumLimit,

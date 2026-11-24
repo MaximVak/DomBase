@@ -56,4 +56,10 @@ export function checkFileInventory(snapshot, objects) {
     if (required && !object) throw new Error("A published or retained document is missing; no complete backup can be made.");
     if (object && (object.size !== file.size_bytes || file.sha256 && object.sha256 !== file.sha256)) throw new Error("Document bytes do not match the database checksum.");
   }
+  const objectByKey = new Map(objects.map(object => [object.key, object]));
+  for (const photo of rowsOf(snapshot, "clock_in_photos")) {
+    const object = objectByKey.get(photo.object_key);
+    if (photo.ready_at && !object) throw new Error("A clock-in photo is missing; no complete backup can be made.");
+    if (object && (object.size !== photo.size_bytes || object.sha256 !== photo.sha256)) throw new Error("Clock-in photo bytes do not match the database checksum.");
+  }
 }
