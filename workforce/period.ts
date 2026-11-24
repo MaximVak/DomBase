@@ -17,3 +17,8 @@ export function requestPeriod(url: URL, now = Date.now()) {
 export function offsetDate(date: string, days: number) {
   return new Date(Date.parse(`${date}T12:00:00Z`) + days * 86400000).toISOString().slice(0, 10);
 }
+
+export function weekStart(date: string, weekday: number) {
+  const day = new Date(date + "T12:00:00Z").getUTCDay();
+  return offsetDate(date, -((day - weekday + 7) % 7));
+}

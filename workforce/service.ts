@@ -36,7 +36,7 @@ import { createAttendanceNotices, readAttendance } from "./attendance";
 import { readAssistedClocks, decideAssistedClock } from "./assisted-clock";
 import { handleTimesheetReview } from "./timesheet-review";
 import { handleTimesheetLocks } from "./timesheet-locks";
-import { dashboardNotificationFlags, handleNotificationPreferences } from "./notification-preferences";
+import { dashboardNotificationFlags, handleNotificationPreferences, managerNotificationAccess } from "./notification-preferences";
 
 const entities: Entity[] = ["employee", "department", "schedule-event", "schedule-draft", "schedule-publish", "open-shift-draft", "timecard", "hours-adjustment", "pto-request", "pto-policy", "availability", "conversation", "settings", "business", "notifications"];
 function currentRecord(view: WorkspaceData, change: Change, employeeKey: number): unknown {
@@ -53,7 +53,7 @@ function currentRecord(view: WorkspaceData, change: Change, employeeKey: number)
   }
   throw new AuthError(400, "Unknown operation.");
 }
-export function createWorkforceService(db: Database, access: ReturnType<typeof createAccessService>, options: { emailEnabled?: boolean; smsEnabled?: boolean; secret: string; fieldKey: string; now?: () => number; stagingAccountantFixtureIds?: string; bucket?: DocumentBucket }) {
+export function createWorkforceService(db: Database, access: ReturnType<typeof createAccessService>, options: { emailEnabled?: boolean; smsEnabled?: boolean; managerEmailEnabled?: boolean; secret: string; fieldKey: string; now?: () => number; stagingAccountantFixtureIds?: string; bucket?: DocumentBucket }) {
   const now = options.now ?? Date.now;
   if (options.secret.length < 32) throw new Error("Workspace configuration unavailable.");
   async function handle(request: Request) {
@@ -107,8 +107,8 @@ export function createWorkforceService(db: Database, access: ReturnType<typeof c
         const p = ctx.permissions;
         return await handleNotificationPreferences(db, {
           account: ctx.account, guard: ctx.activeActor(), contextToken: rateKey(options.secret, `notification-preferences:${ctx.account.id}:${ctx.account.employeeId}:${ctx.sessionId}`),
-          manager: { attendance: p["schedule.read"] && p["timesheets.read"], timeOff: p["time_off.read"] && (p["team.manage"] || p["schedule.manage"] || p["time_off.approve"]), schedule: p["schedule.manage"], messaging: p["messages.read"] },
-        }, request, options.secret, now(), !!options.smsEnabled);
+          manager: managerNotificationAccess(p),
+        }, request, options.secret, now(), !!options.smsEnabled, !!options.managerEmailEnabled);
       }
       if (action === "publish-preview") {
         if (request.method !== "POST") return json({ error: "Method not allowed." }, 405, { Allow: "POST" });

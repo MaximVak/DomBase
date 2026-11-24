@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { notificationSpec } from "../workforce/notification-preferences-model";
+import { managerEmailEvents, notificationSpec } from "../workforce/notification-preferences-model";
 import type { NotificationChannel, NotificationChoices, NotificationEvent, NotificationPreferences as Preferences } from "../workforce/notification-preferences-model";
 
 const channels = { inApp: "In-app", email: "Email", sms: "Text (SMS)" };
@@ -100,6 +100,8 @@ export function NotificationPreferences({ endpoint, onSaved }: { endpoint: Endpo
       </fieldset>}
       {[...sections].map(([title, rows]) => <fieldset className="notification-settings-group" disabled={pending} key={title}>
         <legend>{title}</legend>
+        {!data.managerEmailConfigured && rows.some(row => managerEmailEvents.some(event => event === row.id))
+          && <p>Manager email delivery is pending setup. Your choices are saved.</p>}
         {rows.map(row => {
           const spec = notificationSpec(row.id);
           return <div className="notification-settings-row" key={row.id} role="group" aria-label={spec.label}>

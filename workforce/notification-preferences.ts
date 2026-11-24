@@ -1,5 +1,6 @@
 import { and, eq, sql } from "drizzle-orm";
 import type { SQL, SQLWrapper } from "drizzle-orm";
+import type { PermissionMap } from "../access/policy";
 import * as s from "../db/schema";
 import { AuthError, json, readAuthBody } from "../auth/http";
 import { rateKey, tokenIsValid } from "../auth/crypto";
@@ -16,6 +17,12 @@ type PreferenceContext = {
   account: { id: number; employeeId: number | null }; guard: SQL; contextToken: string;
   manager?: { attendance: boolean; timeOff: boolean; schedule: boolean; messaging: boolean };
 };
+
+export function managerNotificationAccess(p: PermissionMap) {
+  return { attendance: p["schedule.read"] && p["timesheets.read"],
+    timeOff: p["time_off.read"] && (p["team.manage"] || p["schedule.manage"] || p["time_off.approve"]),
+    schedule: p["schedule.manage"], messaging: p["messages.read"] };
+}
 
 function channelPath(event: NotificationEvent, channel: NotificationChannel) {
   return `$.events.${event}.${channel}`;
@@ -136,9 +143,9 @@ async function savePreferences(db: Database, ctx: PreferenceContext, body: Recor
   return readPreferences(db, ctx);
 }
 
-export async function handleNotificationPreferences(db: Database, ctx: PreferenceContext, request: Request, secret: string, now: number, smsConfigured: boolean) {
+export async function handleNotificationPreferences(db: Database, ctx: PreferenceContext, request: Request, secret: string, now: number, smsConfigured: boolean, managerEmailConfigured = false) {
   if (new URL(request.url).search) throw new AuthError(400, "Preferences do not accept account selectors.");
-  if (request.method === "GET") return json({ ...await readPreferences(db, ctx), smsConfigured });
-  if (request.method === "POST") return json({ ...await savePreferences(db, ctx, await readAuthBody(request, 8192), secret, now), smsConfigured });
+  if (request.method === "GET") return json({ ...await readPreferences(db, ctx), smsConfigured, ...(ctx.manager ? { managerEmailConfigured } : {}) });
+  if (request.method === "POST") return json({ ...await savePreferences(db, ctx, await readAuthBody(request, 8192), secret, now), smsConfigured, ...(ctx.manager ? { managerEmailConfigured } : {}) });
   return json({ error: "Method not allowed." }, 405, { Allow: "GET, POST" });
 }

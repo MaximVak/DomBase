@@ -232,6 +232,13 @@
       "when": 1795495320500,
       "tag": "0032_stage6_employee_notice_delivery",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1795497383517,
+      "tag": "0033_stage6_manager_email_delivery",
+      "breakpoints": true
     }
   ]
 }

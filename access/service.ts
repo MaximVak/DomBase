@@ -22,6 +22,26 @@ export type Context = {
   allDepartments: boolean;
 };
 
+export type DepartmentScope = Pick<Context, "allDepartments" | "departmentIds">;
+
+// Resource filters are built from stored assignments, never request IDs/roles.
+export function roleScope(ctx: DepartmentScope, roleId: SQLWrapper): SQL {
+  if (ctx.allDepartments) return sql`1 = 1`;
+  if (!ctx.departmentIds.length) return sql`0 = 1`;
+  return sql`EXISTS (SELECT 1 FROM roles r JOIN departments d ON d.id = r.department_id
+    WHERE r.id = ${roleId} AND r.archived = 0 AND d.archived = 0
+    AND d.id IN (SELECT value FROM json_each(${JSON.stringify(ctx.departmentIds)})))`;
+}
+
+export function employeeScope(ctx: DepartmentScope, employeeId: SQLWrapper): SQL {
+  if (ctx.allDepartments) return sql`1 = 1`;
+  if (!ctx.departmentIds.length) return sql`0 = 1`;
+  return sql`EXISTS (SELECT 1 FROM employee_roles er JOIN roles r ON r.id = er.role_id
+    JOIN departments d ON d.id = r.department_id WHERE er.employee_id = ${employeeId}
+    AND er.active = 1 AND r.archived = 0 AND d.archived = 0
+    AND d.id IN (SELECT value FROM json_each(${JSON.stringify(ctx.departmentIds)})))`;
+}
+
 function positiveId(value: string) {
   if (!/^[1-9]\d*$/.test(value) || !Number.isSafeInteger(Number(value))) throw new AuthError(404, "Not found.");
   return Number(value);
@@ -58,22 +78,6 @@ export function createAccessService(db: Database, auth: Auth) {
 
   function requireOwner(ctx: Context) {
     if (ctx.account.accessLevel !== "owner") throw new AuthError(403, "Only an Owner can manage account access.");
-  }
-
-  // Resource filters are built from stored assignments, never request IDs/roles.
-  function roleScope(ctx: Context, roleId: SQLWrapper): SQL {
-    if (ctx.allDepartments) return sql`1 = 1`;
-    if (!ctx.departmentIds.length) return sql`0 = 1`;
-    return sql`EXISTS (SELECT 1 FROM roles r JOIN departments d ON d.id = r.department_id
-      WHERE r.id = ${roleId} AND r.archived = 0 AND d.archived = 0 AND ${inArray(sql`d.id`, ctx.departmentIds)})`;
-  }
-
-  function employeeScope(ctx: Context, employeeId: SQLWrapper): SQL {
-    if (ctx.allDepartments) return sql`1 = 1`;
-    if (!ctx.departmentIds.length) return sql`0 = 1`;
-    return sql`EXISTS (SELECT 1 FROM employee_roles er JOIN roles r ON r.id = er.role_id
-      JOIN departments d ON d.id = r.department_id WHERE er.employee_id = ${employeeId}
-      AND er.active = 1 AND r.archived = 0 AND d.archived = 0 AND ${inArray(sql`d.id`, ctx.departmentIds)})`;
   }
 
   async function requireEmployee(ctx: Context, employeeId: number, permission: Permission) {

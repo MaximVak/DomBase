@@ -14,8 +14,10 @@ import { dispatchClockReminderEmails } from "../workforce/clock-reminder-email";
 import { dispatchInvitationEmails } from "../team/email";
 import { dispatchEmployeeNotices, runEmployeeReminderDelivery, smsAvailable } from "../workforce/employee-notice-delivery";
 import type { EmployeeNoticeEnv } from "../workforce/employee-notice-delivery";
+import { runManagerEmailDelivery } from "../workforce/manager-email";
+import type { ManagerEmailEnv } from "../workforce/manager-email";
 
-interface Env extends Omit<BackupScheduleEnv, "AUTH_PRIVATE_FIELD_KEY">, EmployeeNoticeEnv {
+interface Env extends Omit<BackupScheduleEnv, "AUTH_PRIVATE_FIELD_KEY">, EmployeeNoticeEnv, ManagerEmailEnv {
   ASSETS: Fetcher;
   DB: D1Database;
   FILES?: DocumentBucket;
@@ -50,6 +52,7 @@ const worker = {
       await Promise.all([
         dispatchClockReminderEmails(db, env, now).catch(() => console.error("Clock reminder email is temporarily unavailable.")),
         runEmployeeReminderDelivery(db, env, now).catch(() => console.error("Employee reminder delivery is temporarily unavailable.")),
+        runManagerEmailDelivery(db, env, now).catch(() => console.error("Manager email delivery is temporarily unavailable.")),
       ]);
     }).then(recorded => {
       // Scheduled-only, non-personal evidence that background work ran without a browser.

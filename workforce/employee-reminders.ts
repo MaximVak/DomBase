@@ -8,7 +8,7 @@ import { allocateWorkedTime } from "../app/timesheets-overtime";
 import { rateFor } from "../team/rules";
 import type { WageRate } from "../team/rules";
 import type { Database } from "./context";
-import { offsetDate } from "./period";
+import { offsetDate, weekStart } from "./period";
 import { zonedTimestamp } from "./time";
 import { employeeNotificationAllowed } from "./notification-preferences";
 import { employeeReminderLeadMinutes, shiftStartLeadMinutes } from "./employee-notice-model";
@@ -30,9 +30,9 @@ type ReminderPlan = {
   email: boolean; sms: boolean;
 };
 
-async function reminderCandidates(db: Database, date: string, email: boolean, sms: boolean, after: number, only?: number) {
+async function reminderCandidates(db: Database, date: string, email: boolean, sms: boolean, after: number, only: number | undefined, managerOvertime: boolean) {
   const flags = channels.flatMap(event => [
-    email && event !== "clockOut" ? employeeNotificationAllowed(sql`e.id`, event, "email") : sql`0`,
+    managerOvertime && event === "overtimeReminder" ? sql`1` : email && event !== "clockOut" ? employeeNotificationAllowed(sql`e.id`, event, "email") : sql`0`,
     sms ? employeeNotificationAllowed(sql`e.id`, event, "sms") : sql`0`,
   ]);
   return db.all<Candidate>(sql`SELECT sh.id,e.id AS employeeId,r.id AS roleId,r.name AS role,sh.date,sh.start_time AS startTime,sh.end_time AS endTime,e.email,e.phone,
@@ -49,7 +49,7 @@ async function reminderCandidates(db: Database, date: string, email: boolean, sm
     LEFT JOIN clock_events session ON session.id=(SELECT MAX(c.id) FROM clock_events c WHERE c.employee_id=e.id AND c.event_type IN ('in','out'))
     WHERE sh.shift_type='work' AND sh.publication_id IS NOT NULL AND sh.archived_at IS NULL AND sh.id>${after}
     AND (${only ?? null} IS NULL OR sh.id=${only ?? null}) AND e.active=1 AND e.terminated=0 AND r.archived=0 AND d.archived=0
-    AND COALESCE(prefs.send_location_alerts,1)=1
+    AND (${managerOvertime} AND session.event_type='in' AND session.shift_id=sh.id OR NOT ${managerOvertime} AND COALESCE(prefs.send_location_alerts,1)=1)
     AND (sh.date BETWEEN ${offsetDate(date, -1)} AND ${offsetDate(date, 1)} OR (session.event_type='in' AND session.shift_id=sh.id))
     ORDER BY sh.id LIMIT 400`);
 }
@@ -87,11 +87,6 @@ async function clockHistory(db: Database, employeeIds: number[], week: string, t
     rates.set(wage.employeeId, rows);
   }
   return { events: history, wages: rates };
-}
-
-function weekStart(date: string, weekday: number) {
-  const day = new Date(date + "T12:00:00Z").getUTCDay();
-  return offsetDate(date, -((day - weekday + 7) % 7));
 }
 
 function calculateReminderPlans(row: Candidate, policy: ClockPolicy, today: string, week: string, history: BreakEvent[], wages: WageRate[], now: number) {
@@ -152,15 +147,15 @@ function calculateReminderPlans(row: Candidate, policy: ClockPolicy, today: stri
   return result;
 }
 
-export async function employeeReminderPlans(db: Database, now: number, email: boolean, sms: boolean, only?: number): Promise<ReminderPlan[]> {
-  if (!email && !sms) return [];
+async function reminderPlans(db: Database, now: number, email: boolean, sms: boolean, only?: number, managerOvertime = false): Promise<ReminderPlan[]> {
+  if (!email && !sms && !managerOvertime) return [];
   const policy = await clockPolicy(db);
   const today = workplaceDate(now, policy.zone);
   const week = weekStart(today, policy.workWeekStart);
   const plans: ReminderPlan[] = [];
   let after = 0;
   for (let page = 0; page < (only ? 1 : 5); page++) {
-    const rows = await reminderCandidates(db, today, email, sms, after, only);
+    const rows = await reminderCandidates(db, today, email, sms, after, only, managerOvertime);
     const active = rows.filter(row => row.sessionId && row.lastShift === row.id && !row.uncertainStart
       && (JSON.parse(row.reminderChannels) as number[]).slice(6).some(Boolean));
     const history = await clockHistory(db, [...new Set(active.map(row => row.employeeId))], week, today, policy, now);
@@ -169,4 +164,12 @@ export async function employeeReminderPlans(db: Database, now: number, email: bo
     after = rows.at(-1)!.id;
   }
   return plans;
+}
+
+export function employeeReminderPlans(db: Database, now: number, email: boolean, sms: boolean, only?: number) {
+  return reminderPlans(db, now, email, sms, only);
+}
+
+export function managerOvertimePlans(db: Database, now: number, shiftId?: number) {
+  return reminderPlans(db, now, false, false, shiftId, true);
 }

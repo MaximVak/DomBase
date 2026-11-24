@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import { check, foreignKey, index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 import type { ActionDetails, ClockDetails } from "../kiosk/break-rules";
-import type { NotificationChoices } from "../workforce/notification-preferences-model";
+import type { ManagerEmailEvent, NotificationChoices } from "../workforce/notification-preferences-model";
 import type { EmployeeNoticeEvent } from "../workforce/employee-notice-model";
 
 // One database serves one company/location. Additional locations are out of scope.
@@ -1027,6 +1027,24 @@ export const employeeNoticeDeliveries = sqliteTable("employee_notice_deliveries"
     AND ${table.state} IN ('pending','sending','accepted','uncertain','cancelled') AND ${table.channel} IN ('sms','email')
     AND ((${table.event}='schedule' AND ${table.publicationId} IS NOT NULL AND ${table.shiftId} IS NULL AND ${table.channel}='sms')
       OR (${table.event}<>'schedule' AND ${table.publicationId} IS NULL AND ${table.shiftId} IS NOT NULL))`),
+]);
+
+export const managerEmailDeliveries = sqliteTable("manager_email_deliveries", {
+  accountId: integer("account_id").notNull().references(() => accounts.id),
+  event: text("event").$type<ManagerEmailEvent>().notNull(),
+  occurrence: text("occurrence").notNull(),
+  target: text("target").notNull(),
+  destinationHash: text("destination_hash").notNull(),
+  expiresAt: text("expires_at").notNull(),
+  state: text("state", { enum: ["pending", "sending", "accepted", "uncertain", "cancelled"] }).notNull().default("pending"),
+  leaseToken: text("lease_token"),
+  leaseUntil: text("lease_until"),
+  ...timestamps(),
+}, table => [
+  primaryKey({ columns: [table.accountId, table.event, table.occurrence] }),
+  index("manager_email_queue_idx").on(table.state, table.createdAt),
+  check("manager_email_values_check", sql`${table.event} IN ('lateArrival','noShow','managerOvertime','timeOffRequest','dailySummary','weeklySummary')
+    AND ${table.state} IN ('pending','sending','accepted','uncertain','cancelled')`),
 ]);
 
 export const scheduleEmails = sqliteTable("schedule_emails", {
