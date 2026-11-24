@@ -27,7 +27,7 @@ export async function settingsChange(r: RecordContext, change: Change) {
   }
   const data = v.object(change.after); v.keys(data, [...Object.keys(r.view.settings), "hoursRoundingMinutes"]);
   const { hoursRoundingMinutes, ...rest } = data;
-  for (const field of [...breakPolicyFields, ...attendancePolicyFields, ...breakPremiumFields, ...overtimePolicyFields, ...holidayFields, "roundClockPunches", "clockInPhotos"] as const) {
+  for (const field of [...breakPolicyFields, ...attendancePolicyFields, ...breakPremiumFields, ...overtimePolicyFields, ...holidayFields, "roundClockPunches", "clockInPhotos", "enableCompanyChannels"] as const) {
     if (!(field in rest)) rest[field] = r.view.settings[field];
   }
   const settings = normalizeScheduleEnforcement(rest);

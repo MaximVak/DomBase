@@ -1,11 +1,13 @@
 import type { FormEvent } from "react";
 
-export function MessagesSettingsPanel({ enabled, dirty, message, today, onChange, onSave }: {
+export function MessagesSettingsPanel({ enabled, channels, dirty, message, today, onChange, onChannelsChange, onSave }: {
   enabled: boolean;
+  channels: boolean;
   dirty: boolean;
   message: string;
   today: string;
   onChange: (enabled: boolean) => void;
+  onChannelsChange: (enabled: boolean) => void;
   onSave: (event: FormEvent<HTMLFormElement>) => void;
 }) {
   const end = new Date(`${today}T12:00:00`);
@@ -37,6 +39,13 @@ export function MessagesSettingsPanel({ enabled, dirty, message, today, onChange
             <p>Enables 1:1 and group messages between employees and managers.</p>
           </div>
         </div>
+      </div>
+      <div className="messages-settings-conversations">
+        <h4>Company channels</h4>
+        <label className="enforcement-rule-line">
+          <input type="checkbox" checked={channels} disabled={!enabled} onChange={event => onChannelsChange(event.target.checked)} />
+          <span>Enable Company and Managers channels</span>
+        </label>
       </div>
       <div className="messages-settings-download">
         <h4>Need to download message logs?</h4>

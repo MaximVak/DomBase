@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { PhotoUpload } from "../photo-upload";
 import { PersonalProfileForm } from "./profile-form";
+import { PinnedAnnouncements } from "../messages/channels/home";
 import type { MyProfile, PersonalProfile } from "../../self/profile";
 function requestId() { return btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); }
 export function MyProfileScreen() {
@@ -74,7 +75,8 @@ export function MyProfileScreen() {
   }
   return <main className="my-profile-screen">
     <header><div><p className="my-profile-brand">DomBase</p><h1>My profile</h1></div><button type="button" disabled={pending} onClick={logout}>Sign out</button></header>
-    <nav aria-label="My account"><a href="/me/schedule">My schedule</a> <a href="/me/availability">My availability</a> <a href="/me/time-off">Request time off</a> <a href="/messages">Messages</a></nav>
+    <nav aria-label="My account"><a href="/me/schedule">My schedule</a> <a href="/me/availability">My availability</a> <a href="/me/time-off">Request time off</a> <a href="/messages">Messages</a> <a href="/messages/channels">Channels</a></nav>
+    {profile && <PinnedAnnouncements />}
     {message ? <p role="status">{message}</p> : null}
     {error ? <div className="my-profile-error"><p role="alert">{error}</p><button type="button" disabled={pending} onClick={reload}>Reload saved profile</button></div> : null}
     {profile ? <><p><a href="/community">My achievements, reminders &amp; shout-outs</a></p><PhotoUpload employeeId={profile.employeeId} fileId={profile.photoFileId} self canEdit={!pending && !blocked} onSaved={reload} /><PersonalProfileForm key={epoch} profile={profile} busy={pending} blocked={blocked} onSave={save} onReload={reload} /></>

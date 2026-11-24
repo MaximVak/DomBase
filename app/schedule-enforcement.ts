@@ -62,6 +62,7 @@ export type ScheduleEnforcement = OvertimePolicy & HolidayPolicy & {
   clockOutReminderSecond: number;
   clockOutReminderThird: number;
   enableTeamMessaging: boolean;
+  enableCompanyChannels: boolean;
 };
 
 export const defaultScheduleEnforcement: ScheduleEnforcement = {
@@ -112,6 +113,7 @@ export const defaultScheduleEnforcement: ScheduleEnforcement = {
   clockOutReminderSecond: 60,
   clockOutReminderThird: 120,
   enableTeamMessaging: true,
+  enableCompanyChannels: true,
 };
 
 export const alertsPermissionsFields = ["notifyScheduleChanges", "employeesOwnScheduleOnly", "requireAvailabilityApproval", "restrictManagerDepartments", "noShowAlerts", "noShowMinutes"] as const;
@@ -122,7 +124,7 @@ export const breakPolicyFields = ["blockEarlyClockIn", "blockEarlyBreakReturn", 
 export const breakPremiumFields = ["breakPremiums", "mealPremiumLimit", "restPremiumLimit"] as const;
 export const attendancePolicyFields = ["lateAttendanceAlerts", "assistedClockIn", "assistedClockOut", "clockOutReminders", "clockOutReminderEmail", "clockOutReminderFirst", "clockOutReminderSecond", "clockOutReminderThird"] as const;
 export const breaksComplianceFields = ["mealBreakAfterHours", "mealBreakMinutes", "mandatoryMealBreak", "blockEarlyBreakReturn", "breakWaivers", "missedBreakReports", "unpaidRestOverage", "paidRestMinutes", ...breakPremiumFields] as const;
-export const messagesSettingsFields = ["enableTeamMessaging"] as const;
+export const messagesSettingsFields = ["enableTeamMessaging", "enableCompanyChannels"] as const;
 export const scheduleEnforcementFields = ["workWeekStart", "minRestHours", "availabilityReviewDays", "scheduleStartHour", "scheduleEndHour", "lateMinutes", "earlyClockInMinutes", "blockEarlyClockIn", "requireEarlyClockInExplanation", "requireLateClockInExplanation", "requireClockOutExplanation", "requireUnscheduledExplanation", "noShowAlerts", "noShowMinutes", "automaticClockOut", "automaticClockOutMinutes", ...attendancePolicyFields] as const;
 
 const overtimeNumbers = {

@@ -12,13 +12,16 @@ import type { MessengerActor } from "./context";
 import { downloadMessengerFile, uploadMessengerFile } from "./files";
 import { history, inbox, searchMessages } from "./read";
 import { createConversation, markConversation, roster, sendMessage } from "./write";
+import type { ChannelActor } from "./channel-access";
+import { channelIds } from "./channel-model";
+import { homeAnnouncements, postToChannel, readAnnouncementReceipts, readChannel, updateAnnouncement } from "./channels";
 
 type Auth = Pick<ReturnType<typeof createAuthService>, "getSession">;
 type Access = Pick<ReturnType<typeof createAccessService>, "workspaceContext">;
 type SelfAccess = Pick<ReturnType<typeof createSelfService>, "authorize">;
 
-export function createMessengerService(db: Database, auth: Auth, access: Access, self: SelfAccess, options: { secret: string; bucket?: DocumentBucket; now?: () => number }) {
-  async function authorize(request: Request, url: URL): Promise<MessengerActor> {
+export function createMessengerService(db: Database, auth: Auth, access: Access, self: SelfAccess, options: { secret: string; bucket?: DocumentBucket; now?: () => number; announcementEmail?: boolean }) {
+  async function authorize(request: Request, url: URL): Promise<ChannelActor & { personal?: MessengerActor }> {
     if (url.protocol !== "https:" && !isLoopback(url.hostname)) throw new AuthError(403, "HTTPS is required.");
     if (await registeredDevice(db, request.headers.get("cookie"), url)) throw new AuthError(403, "Use your own device to open messages.");
     const session = await auth.getSession(readSessionCookie(request.headers.get("cookie"), url));
@@ -26,18 +29,19 @@ export function createMessengerService(db: Database, auth: Auth, access: Access,
     if (session.account.accessLevel === "employee") {
       const ctx = await self.authorize(request);
       const account = ctx.account;
-      return { account, activeActor: () => ctx.guard, employeeScope: () => sql`1`, roleScope: () => sql`1`, scheduleScope: "own",
+      const activeActor = () => ctx.guard;
+      return { account, activeActor, canPublish: false, personal: { account, activeActor, employeeScope: () => sql`1`, roleScope: () => sql`1`, scheduleScope: "own",
         departmentScope: department => sql`EXISTS (SELECT 1 FROM employee_roles er JOIN roles r ON r.id=er.role_id
-          WHERE er.employee_id=${account.employeeId} AND er.active=1 AND r.archived=0 AND r.department_id=${department})` };
+          WHERE er.employee_id=${account.employeeId} AND er.active=1 AND r.archived=0 AND r.department_id=${department})` } };
     }
     const ctx = await access.workspaceContext(request);
     ctx.requirePermission("messages.read");
     const { id, employeeId } = ctx.account;
-    if (!employeeId) throw new AuthError(403, "Link your dashboard account to an employee profile before messaging.");
-    return { account: { id, employeeId }, employeeScope: ctx.employeeFilter, roleScope: ctx.roleFilter,
-      activeActor: () => sql`${ctx.activeActor()} AND EXISTS (SELECT 1 FROM employees WHERE id=${employeeId} AND active=1 AND terminated=0)`,
+    const activeActor = () => sql`${ctx.activeActor()} AND (${employeeId} IS NULL OR EXISTS (SELECT 1 FROM employees WHERE id=${employeeId} AND active=1 AND terminated=0))`;
+    return { account: ctx.account, activeActor, canPublish: ctx.account.accessLevel !== "manager",
+      personal: employeeId ? { account: { id, employeeId }, employeeScope: ctx.employeeFilter, roleScope: ctx.roleFilter, activeActor,
       departmentScope: department => ctx.allDepartments ? sql`1` : sql`${department} IN (SELECT value FROM json_each(${JSON.stringify(ctx.departmentIds)}))`,
-      scheduleScope: ctx.permissions["schedule.read"] ? "department" : "none" };
+      scheduleScope: ctx.permissions["schedule.read"] ? "department" : "none" } : undefined };
   }
   const unavailable = () => json({ error: "Method not allowed." }, 405);
   const id = (url: URL, key: string) => {
@@ -48,11 +52,34 @@ export function createMessengerService(db: Database, auth: Auth, access: Access,
   return { async handle(request: Request) {
     try {
       const url = new URL(request.url);
-      const actor = await authorize(request, url);
-      if (!await db.get(sql`SELECT 1 WHERE ${actor.activeActor()}`)) throw new AuthError(403, "Messaging is unavailable for this account.");
-      if (!await db.get(sql`SELECT 1 WHERE ${messagingEnabled}`)) throw new AuthError(403, "Team messaging is turned off.");
+      const viewer = await authorize(request, url);
+      if (!await db.get(sql`SELECT 1 WHERE ${viewer.activeActor()}`)) throw new AuthError(403, "Messaging is unavailable for this account.");
       const now = (options.now ?? Date.now)();
       const route = url.pathname.slice("/api/messenger/".length);
+      if (route.startsWith("channels/")) {
+        const emailAvailable = !!options.announcementEmail;
+        if (route === "channels/actions") {
+          if (request.method !== "POST") return unavailable();
+          const body = await readAuthBody(request, 32768);
+          const action = v.oneOf(body.action, ["post", "announce", "read", "pin"]);
+          if (action === "post" || action === "announce") return json(await postToChannel(db, viewer, body, { secret: options.secret, now, emailAvailable }), 201);
+          return json(await updateAnnouncement(db, viewer, body, now));
+        }
+        if (request.method !== "GET") return unavailable();
+        if (route === "channels/home") return json({ posts: await homeAnnouncements(db, viewer) });
+        if (route === "channels/receipts") return json(await readAnnouncementReceipts(db, viewer, id(url, "post")));
+        if (route === "channels/feed") {
+          const channel = v.oneOf(url.searchParams.get("channel"), channelIds);
+          const before = url.searchParams.has("before") ? id(url, "before") : undefined;
+          const anchor = url.searchParams.has("anchor") ? id(url, "anchor") : undefined;
+          if (before && anchor) throw new AuthError(400, "Choose one post position.");
+          return json(await readChannel(db, viewer, channel, emailAvailable, before, anchor));
+        }
+        throw new AuthError(404, "Channel unavailable.");
+      }
+      const actor = viewer.personal;
+      if (!actor) throw new AuthError(403, "Link your dashboard account to an employee profile before messaging.");
+      if (!await db.get(sql`SELECT 1 WHERE ${messagingEnabled}`)) throw new AuthError(403, "Team messaging is turned off.");
       if (route === "actions") {
         if (request.method !== "POST") return unavailable();
         if (url.search) throw new AuthError(400, "Send the message details in the request body.");

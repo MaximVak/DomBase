@@ -17,3 +17,5 @@ export { createTeamInsights } from "../../team/insights";
 export { createCommunityService } from "../../community/service";
 
 export { createBackupStatusService } from "../../backup/status";
+export { createMessengerService } from "../../messenger/service";
+export { dispatchAnnouncementEmails } from "../../messenger/announcement-email";

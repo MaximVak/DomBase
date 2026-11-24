@@ -134,6 +134,7 @@ export function TeamMessenger({ back, initial }: { back: string; initial?: numbe
   return <main className="team-messenger">
     <header className="messenger-header">
       <div><a href={back}>{back === "/me" ? "← My profile" : "← Dashboard"}</a><h1>Team messenger</h1></div>
+      <a href="/messages/channels">Company channels</a>
       {data && <button type="button" className="primary-action" onClick={() => { setCreating(true); setError(""); }}>New conversation</button>}
     </header>
     {error && <p className="messenger-error" role="alert">{error} <button type="button" onClick={() => { setError(""); void reload(); }}>Retry</button></p>}

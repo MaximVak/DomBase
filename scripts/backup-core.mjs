@@ -103,8 +103,8 @@ export async function restoreIntoEmpty({ database, bucket, payload }) {
 }
 export async function invalidateRecoveredAccess(database, now = Date.now()) {
   const stamp = new Date(now).toISOString();
-  const outboundQueues = ["employee_notice_deliveries", "manager_email_deliveries"];
-  const recoveredTables = new Set((await database.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('team_invitations','employee_notice_deliveries','manager_email_deliveries')").all()).results.map(row => row.name));
+  const outboundQueues = ["employee_notice_deliveries", "manager_email_deliveries", "channel_announcement_recipients"];
+  const recoveredTables = new Set((await database.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('team_invitations','employee_notice_deliveries','manager_email_deliveries','channel_announcement_recipients')").all()).results.map(row => row.name));
   await database.batch([
     ...(recoveredTables.has("team_invitations") ? [database.prepare("UPDATE team_invitations SET revoked_at=?, updated_at=? WHERE revoked_at IS NULL AND used_at IS NULL").bind(stamp, stamp)] : []),
     ...outboundQueues.filter(table => recoveredTables.has(table)).map(table =>

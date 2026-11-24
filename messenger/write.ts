@@ -28,8 +28,8 @@ export async function roster(db: Database, actor: MessengerActor): Promise<Messe
   return { people, departments, canGroupBySchedule: actor.scheduleScope !== "none" };
 }
 
-async function commit<T>(db: Database, actor: MessengerActor, guard: SQL, body: Record<string, unknown>, secret: string, now: number,
-  prepare: (tx: WorkspaceTransaction) => Promise<T>, result: (key: string) => Promise<T>): Promise<T> {
+export async function commitMessengerWrite<T>(db: Database, actor: { account: { id: number } }, guard: SQL, body: Record<string, unknown>, secret: string, now: number,
+  prepare: (tx: WorkspaceTransaction) => Promise<T>, result: (key: string) => Promise<T>, entity = "conversation"): Promise<T> {
   if (!tokenIsValid(body.id)) throw new AuthError(400, "Invalid message request identifier.");
   const key = body.id;
   const hash = "messenger:" + rateKey(secret, canonical(body));
@@ -47,7 +47,7 @@ async function commit<T>(db: Database, actor: MessengerActor, guard: SQL, body: 
     const tx = new WorkspaceTransaction(db, { account: actor.account, activeActor: () => sql`${guard}
       AND NOT EXISTS(SELECT 1 FROM workforce_commits WHERE id=${key})` }, key, new Date(now).toISOString());
     const ready = await prepare(tx);
-    if (await tx.commit(revision.revision, hash, ["conversation"])) return ready;
+    if (await tx.commit(revision.revision, hash, [entity])) return ready;
     const retry = await previous();
     if (retry !== undefined) return retry;
   }
@@ -85,7 +85,7 @@ export async function createConversation(db: Database, actor: MessengerActor, bo
       WHERE sh.employee_id=e.id AND r.archived=0 AND d.archived=0 AND ${published} AND ${actor.roleScope(sql`sh.role_id`)})`;
     name ||= "Schedule " + date;
   }
-  return commit(db, actor, scope, body, secret, now, async tx => {
+  return commitMessengerWrite(db, actor, scope, body, secret, now, async tx => {
     const others = await db.all<{ id: number }>(sql`SELECT e.id FROM employees e WHERE e.id<>${own} AND ${active} AND ${members} AND ${scope} ORDER BY e.id LIMIT 100`);
     if (!others.length || others.length >= 100) throw new AuthError(400, "Choose a group with between 1 and 99 other teammates.");
     const eligible = sql`SELECT e.id FROM employees e WHERE ${active} AND (e.id=${own} OR (${members})) AND ${scope}`;
@@ -109,7 +109,7 @@ export async function sendMessage(db: Database, actor: MessengerActor, bucket: D
     || new Set(attachmentIds).size !== attachmentIds.length) throw new AuthError(400, "Write a message or add an attachment. Select each mention and attachment once.");
   const guard = conversationAccess(actor, sql`${conversation}`);
   const stored = message || (attachmentIds.length === 1 ? "Shared an attachment." : "Shared attachments.");
-  return commit(db, actor, guard, body, secret, now, async tx => {
+  return commitMessengerWrite(db, actor, guard, body, secret, now, async tx => {
     const members = sql`cm.conversation_id=${conversation} AND cm.left_at IS NULL AND ${within(sql`cm.employee_id`, mentionIds)}`;
     const mentions = mentionIds.length ? await db.all<{ id: number; name: string }>(sql`SELECT e.id,e.name FROM conversation_members cm JOIN employees e ON e.id=cm.employee_id
       WHERE ${members} AND ${active} AND ${guard}`) : [];

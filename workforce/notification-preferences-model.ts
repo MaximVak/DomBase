@@ -20,7 +20,7 @@ export const notificationTypes = [
   { id: "timeOffRequest", label: "Employee time off requests", group: "Manager alerts", channels: { inApp: true, email: false }, planned: [] },
   { id: "dailySummary", label: "Daily summary", group: "Manager alerts", channels: { email: false }, planned: [] },
   { id: "weeklySummary", label: "Weekly summary", group: "Manager alerts", channels: { email: false }, planned: [] },
-  { id: "announcement", label: "Announcement email copies", group: "Messaging", channels: { email: false }, planned: ["email"] },
+  { id: "announcement", label: "Announcement email copies", group: "Messaging", channels: { email: false }, planned: [] },
   { id: "mention", label: "Message mentions", group: "Messaging", channels: { inApp: true }, planned: [] },
 ] as const;
 

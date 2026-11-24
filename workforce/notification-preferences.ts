@@ -28,7 +28,7 @@ function channelPath(event: NotificationEvent, channel: NotificationChannel) {
   return `$.events.${event}.${channel}`;
 }
 
-export function accountNotificationAllowed(accountId: number, event: NotificationEvent, channel: NotificationChannel) {
+export function accountNotificationAllowed(accountId: number | SQLWrapper, event: NotificationEvent, channel: NotificationChannel) {
   const fallback = notificationSpec(event).channels[channel] === true;
   const value = sql`(SELECT json_extract(p.choices, ${channelPath(event, channel)}) FROM account_notification_preferences p WHERE p.account_id=${accountId})`;
   if (channel !== "sms") return sql`COALESCE(${value},${fallback})=1`;

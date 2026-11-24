@@ -257,6 +257,7 @@ export const locationSettings = sqliteTable("location_settings", {
   clockOutReminderSecond: integer("clock_out_reminder_second").notNull().default(60),
   clockOutReminderThird: integer("clock_out_reminder_third").notNull().default(120),
   enableTeamMessaging: integer("enable_team_messaging", { mode: "boolean" }).notNull().default(true),
+  enableCompanyChannels: integer("enable_company_channels", { mode: "boolean" }).notNull().default(true),
   hoursRoundingMinutes: integer("hours_rounding_minutes").notNull().default(15),
   roundClockPunches: integer("round_clock_punches", { mode: "boolean" }).notNull().default(false),
   kioskIdleSeconds: integer("kiosk_idle_seconds").notNull().default(30),
@@ -832,6 +833,39 @@ export const messageReads = sqliteTable("message_reads", {
   primaryKey({ columns: [table.messageId, table.employeeId] }),
   foreignKey({ columns: [table.messageId, table.conversationId], foreignColumns: [messages.id, messages.conversationId] }),
   foreignKey({ columns: [table.conversationId, table.employeeId], foreignColumns: [conversationMembers.conversationId, conversationMembers.employeeId] }),
+]);
+
+export const channelPosts = sqliteTable("channel_posts", {
+  id: id(),
+  requestKey: text("request_key").notNull().unique(),
+  authorAccountId: integer("author_account_id").notNull().references(() => accounts.id),
+  channel: text("channel", { enum: ["company", "managers"] }).notNull(),
+  title: text("title"),
+  body: text("body").notNull(),
+  pinnedAt: text("pinned_at"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, table => [
+  index("channel_posts_timeline_idx").on(table.channel, table.createdAt, table.id),
+  index("channel_posts_pins_idx").on(table.pinnedAt),
+  check("channel_posts_values_check", sql`${table.channel} IN ('company','managers') AND length(trim(${table.body})) BETWEEN 1 AND 4000
+    AND ((${table.title} IS NOT NULL AND length(trim(${table.title})) BETWEEN 1 AND 120) OR (${table.title} IS NULL AND ${table.pinnedAt} IS NULL))`),
+]);
+
+export const channelAnnouncementRecipients = sqliteTable("channel_announcement_recipients", {
+  postId: integer("post_id").notNull().references(() => channelPosts.id),
+  accountId: integer("account_id").notNull().references(() => accounts.id),
+  readAt: text("read_at"),
+  destinationHash: text("destination_hash"),
+  expiresAt: text("expires_at"),
+  state: text("state", { enum: ["pending", "sending", "accepted", "uncertain", "cancelled"] }),
+  leaseToken: text("lease_token"),
+  leaseUntil: text("lease_until"),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, table => [
+  primaryKey({ columns: [table.postId, table.accountId] }),
+  index("announcement_email_queue_idx").on(table.state, table.updatedAt),
+  check("announcement_email_values_check", sql`(${table.state} IS NULL AND ${table.destinationHash} IS NULL AND ${table.expiresAt} IS NULL)
+    OR (${table.state} IS NOT NULL AND ${table.state} IN ('pending','sending','accepted','uncertain','cancelled') AND ${table.destinationHash} IS NOT NULL AND ${table.expiresAt} IS NOT NULL)`),
 ]);
 
 // One row per recipient/source; receipts do not require a second copy of a notice.

@@ -38,6 +38,7 @@ import { TimeClockOptionsPanel } from "./time-clock-options";
 import { OvertimeOptionsPanel } from "./overtime-options";
 import { BreaksCompliancePanel } from "./breaks-compliance";
 import { MessagesSettingsPanel } from "./messages-settings";
+import { PinnedAnnouncements } from "./messages/channels/home";
 import { EmployeeReliabilityPanel } from "./team/employee-reliability";
 import { defaultPayCalendar, periodFor, retainedThrough } from "../team/rules";
 import { PayrollSettingsPanel } from "./pay-period-settings";
@@ -3172,6 +3173,8 @@ export default function Home({ account }: { account: DashboardAccount }) {
                         <span aria-hidden="true">&times;</span>
                       </button>
                       <a className="open-team-messenger" href={selectedConversationId ? "/messages?conversation=" + selectedConversationId : "/messages"}>Open team messenger</a>
+                      {!isPtoMessageContext && scheduleEnforcement.enableTeamMessaging && scheduleEnforcement.enableCompanyChannels &&
+                        <a className="open-team-messenger" href="/messages/channels">Company channels</a>}
                       {isCreatingConversation && ptoMessageEmployeeId !== null ? (
                         <div className="conversation-view pto-draft-conversation">
                           <div className="message-popout-heading">
@@ -3856,11 +3859,16 @@ export default function Home({ account }: { account: DashboardAccount }) {
               ) : activeSettingsTab === "Messages" ? (
                 <MessagesSettingsPanel
                   enabled={scheduleEnforcementDraft.enableTeamMessaging}
+                  channels={scheduleEnforcementDraft.enableCompanyChannels}
                   dirty={isMessagesSettingsDirty}
                   message={messagesSettingsMessage}
                   today={today}
                   onChange={enabled => {
                     setScheduleEnforcementDraft(current => ({ ...current, enableTeamMessaging: enabled }));
+                    setMessagesSettingsMessage("");
+                  }}
+                  onChannelsChange={enabled => {
+                    setScheduleEnforcementDraft(current => ({ ...current, enableCompanyChannels: enabled }));
                     setMessagesSettingsMessage("");
                   }}
                   onSave={saveMessagesSettings}
@@ -3933,6 +3941,8 @@ export default function Home({ account }: { account: DashboardAccount }) {
 
           {activeView === "dashboard" && !isPublicSchedule && (
             <div className="content-grid dashboard-content">
+                {shared.data.permissions["messages.read"] && scheduleEnforcement.enableTeamMessaging && scheduleEnforcement.enableCompanyChannels &&
+                  <PinnedAnnouncements />}
                 <section className="panel main-panel">
                   <PanelHeading eyebrow="Clock" title="Time clock" />
                   <div className="clock-card">

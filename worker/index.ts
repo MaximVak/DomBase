@@ -7,6 +7,8 @@ import * as schema from "../db/schema";
 import { runScheduledMaintenance } from "../workforce/maintenance";
 import { cleanupDocumentUploads } from "../documents/maintenance";
 import { cleanupMessengerUploads } from "../messenger/files";
+import { dispatchAnnouncementEmails } from "../messenger/announcement-email";
+import type { AnnouncementEmailEnv } from "../messenger/announcement-email";
 import { scheduleHostedBackup } from "../backup/schedule";
 import type { BackupScheduleEnv } from "../backup/schedule";
 import type { DocumentBucket } from "../documents/types";
@@ -18,7 +20,7 @@ import type { EmployeeNoticeEnv } from "../workforce/employee-notice-delivery";
 import { runManagerEmailDelivery } from "../workforce/manager-email";
 import type { ManagerEmailEnv } from "../workforce/manager-email";
 
-interface Env extends Omit<BackupScheduleEnv, "AUTH_PRIVATE_FIELD_KEY">, EmployeeNoticeEnv, ManagerEmailEnv {
+interface Env extends Omit<BackupScheduleEnv, "AUTH_PRIVATE_FIELD_KEY">, EmployeeNoticeEnv, ManagerEmailEnv, AnnouncementEmailEnv {
   ASSETS: Fetcher;
   DB: D1Database;
   FILES?: DocumentBucket;
@@ -49,6 +51,7 @@ const worker = {
     ctx.waitUntil(dispatchScheduleEmails(db, env).catch(() => { console.error("Schedule email status is temporarily unavailable."); }));
     ctx.waitUntil(dispatchInvitationEmails(db, env).catch(() => { console.error("Invitation email queue is temporarily unavailable."); }));
     const now = Date.now();
+    ctx.waitUntil(dispatchAnnouncementEmails(db, env, now).catch(() => console.error("Announcement email delivery is temporarily unavailable.")));
     ctx.waitUntil(runScheduledMaintenance(db, now, async () => {
       await Promise.all([
         dispatchClockReminderEmails(db, env, now).catch(() => console.error("Clock reminder email is temporarily unavailable.")),
@@ -67,7 +70,7 @@ const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
-    if (["/", "/login", "/setup", "/access", "/kiosk-admin", "/me", "/me/schedule", "/me/availability", "/team", "/team/reports", "/community", "/messages", "/invite", "/backups"].includes(url.pathname)) {
+    if (["/", "/login", "/setup", "/access", "/kiosk-admin", "/me", "/me/schedule", "/me/availability", "/team", "/team/reports", "/community", "/messages", "/messages/channels", "/invite", "/backups"].includes(url.pathname)) {
       try {
         if (await registeredDevice(drizzle(env.DB, { schema }), request.headers.get("cookie"), url)) {
           return new Response(null, { status: 303, headers: { Location: "/kiosk", "Cache-Control": "private, no-store", "Referrer-Policy": "no-referrer" } });
@@ -93,7 +96,7 @@ const worker = {
     if (request.method === "POST" && url.pathname === "/api/workspace/commit" && response.ok && smsAvailable(env)) {
       ctx.waitUntil(dispatchEmployeeNotices(drizzle(env.DB, { schema }), env, Date.now(), "schedule").catch(() => console.error("Schedule text status is temporarily unavailable.")));
     }
-    if (["/", "/login", "/setup", "/access", "/kiosk", "/kiosk-admin", "/me", "/me/schedule", "/me/availability", "/team", "/team/reports", "/community", "/messages", "/invite", "/backups"].includes(url.pathname) || /^\/api\/(auth|access|workforce|workspace|documents|kiosk|kiosk-admin|self|team|community|messenger|invitations|backups)\//.test(url.pathname)) {
+    if (["/", "/login", "/setup", "/access", "/kiosk", "/kiosk-admin", "/me", "/me/schedule", "/me/availability", "/team", "/team/reports", "/community", "/messages", "/messages/channels", "/invite", "/backups"].includes(url.pathname) || /^\/api\/(auth|access|workforce|workspace|documents|kiosk|kiosk-admin|self|team|community|messenger|invitations|backups)\//.test(url.pathname)) {
       const headers = new Headers(response.headers);
       headers.delete("X-Schedule-Dispatch");
       headers.set("Cache-Control", "private, no-store");

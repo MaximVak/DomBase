@@ -1,0 +1,59 @@
+.channel-page {
+  max-width: 54rem;
+  margin: 0 auto;
+  padding: clamp(.75rem, 3vw, 2rem);
+  color: var(--foreground);
+}
+.channel-page-heading, .channel-post-header, .channel-post-actions, .channel-navigation {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem .75rem;
+  align-items: center;
+}
+.channel-page-heading, .channel-post-header { justify-content: space-between; }
+.channel-page-heading h1, .channel-page-heading h2, .channel-post-header h3 { margin: .25rem 0; }
+.channel-navigation { margin: 1rem 0; }
+.channel-page button:not(.primary-action), .pinned-announcements button {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: .5rem;
+  color: var(--ink);
+  min-height: 2.5rem;
+  padding: .375rem .625rem;
+}
+.channel-navigation button[aria-current="page"] {
+  background: var(--blue-deep);
+  border-color: var(--blue-deep);
+  color: var(--panel);
+}
+.channel-section, .channel-post {
+  min-width: 0;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  border-radius: .75rem;
+  padding: .75rem 1rem;
+}
+.channel-section, .channel-posts, .channel-composer fieldset {
+  display: grid;
+  gap: .75rem;
+}
+.channel-section > button { justify-self: start; }
+.channel-posts { margin: 0; padding: 0; list-style: none; }
+.channel-post { overflow-wrap: anywhere; }
+.channel-post[data-highlighted="true"] { outline: 2px solid var(--blue-accent); }
+.channel-post-header time, .channel-meta, .channel-receipts li span:last-child { color: var(--muted); font-size: .875rem; }
+.channel-meta { margin: .25rem 0; }
+.channel-body { white-space: pre-wrap; margin: .5rem 0; }
+.channel-composer fieldset { min-width: 0; border: 1px solid var(--line); border-radius: .5rem; padding: .75rem; }
+.channel-composer fieldset > legend { font-weight: 700; }
+.channel-composer textarea, .channel-composer select, .channel-composer input:not([type="checkbox"]) { min-width: 0; width: 100%; }
+.channel-composer .primary-action { justify-self: start; }
+.channel-options { display: grid; gap: .375rem; }
+.channel-receipts { margin-top: .625rem; border-top: 1px solid var(--line); padding-top: .625rem; }
+.channel-receipts ul { display: grid; gap: .25rem; padding-left: 1rem; }
+.channel-receipts li span + span { margin-left: .5rem; }
+.pinned-announcements { grid-column: 1 / -1; min-width: 0; }
+.pinned-announcements .channel-posts { margin-top: .75rem; }
+@media (max-width: 32rem) {
+  .channel-section, .channel-post { padding: .625rem .75rem; }
+}
