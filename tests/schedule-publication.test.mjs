@@ -19,7 +19,7 @@ test("publication choices, personal alerts and email delivery stay private and a
   platform = await getPlatformProxy({ configPath, persist: { path: join(statePath, "v3") }, remoteBindings: false, envFiles: [] });
   const db = drizzle(platform.env.DB, { schema: s }), secret = "isolated-shift-builder-test-secret-at-least-32-characters";
   const auth = createAuthService(db, { secret }), access = createAccessService(db, auth);
-  const workspace = createWorkforceService(db, access, { secret, fieldKey, emailEnabled: true });
+  const workspace = createWorkforceService(db, access, { secret, fieldKey, emailEnabled: true, smsEnabled: true });
   const password = "Fictional shift builder test passphrase!";
   const f = await seedWorkforceFixture(db, s, loadServerModule, password), origin = "http://localhost:3000";
   const request = (path, cookie = "", body) => new Request(origin + path, { method: body === undefined ? "GET" : "POST", headers: { Cookie: cookie, ...(body === undefined ? {} : { Origin: origin, "Content-Type": "application/json" }) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
@@ -153,9 +153,53 @@ test("publication choices, personal alerts and email delivery stay private and a
     assert.deepEqual(stateAfter.rows, stateBefore.rows);
     assert.equal(stateAfter.smsEnabled, stateBefore.smsEnabled);
   });
+  await t.test('publication dispatches schedule SMS and email once and honors an opt-out after queueing', async () => {
+    const { dispatchEmployeeNotices } = await loadServerModule('workforce/employee-notice-delivery.ts');
+    const sms = [];
+    const environment = { ...emailEnv, STAGE6_SMS: { fetch: async request => {
+      sms.push({ ...await request.json(), key: request.headers.get('Idempotency-Key') });
+      return Response.json({ accepted: true });
+    } } };
+    const save = async values => {
+      const { contextToken, revision, version, scheduleVersion } = await ok(await selfCall('notification-preferences'));
+      await ok(await selfCall('notification-preferences', { id: newToken(), contextToken, revision, version, scheduleVersion, ...values }));
+    };
+    await db.update(s.employees).set({ phone: '+12025550101' }).where(sql`id=${f.a.id}`);
+    await save({ smsEnabled: true, events: { schedule: { email: true, sms: true } } });
+    const options = { ...all, period: { start: '2027-02-01', end: '2027-02-07' }, sms: true };
+    await ok(await draft([shift(97050, f.a, f.roleA, '2027-02-01')]));
+    let review = await ok(await preview(options));
+    assert.equal(review.smsDestinations, 1);
+    assert.equal(review.emailDestinations, 1);
+    assert.doesNotMatch(JSON.stringify(review), /12025550101|@example/);
+    await ok(await apply(review, options));
+    const emailCount = sent.length;
+    await Promise.all([dispatchEmployeeNotices(db, environment), dispatchEmployeeNotices(db, environment), dispatchScheduleEmails(db, emailEnv)]);
+    assert.equal(sms.length, 1);
+    assert.equal(sms[0].to, '+12025550101');
+    assert.match(sms[0].key, /^[a-f0-9]{64}$/);
+    assert.doesNotMatch(sms[0].text, /09:00|Private|@example/);
+    assert.equal(sent.length, emailCount + 1);
+    assert.equal((await ok(await preview(options))).latest.texts.accepted, 1);
+    await ok(await draft([shift(97051, f.a, f.roleA, '2027-02-02')]));
+    review = await ok(await preview(options));
+    await ok(await apply(review, options));
+    await save({ smsEnabled: false });
+    await Promise.all([dispatchEmployeeNotices(db, environment), dispatchScheduleEmails(db, emailEnv)]);
+    assert.equal(sms.length, 1);
+    assert.equal(sent.length, emailCount + 2);
+    assert.equal((await ok(await preview(options))).latest.texts.cancelled, 1);
+    await ok(await draft([shift(97052, f.a, f.roleA, '2027-02-03')]));
+    review = await ok(await preview(options));
+    assert.equal(review.smsDestinations, 0);
+    assert.equal(review.emailDestinations, 1);
+    await ok(await apply(review, options));
+    await dispatchScheduleEmails(db, emailEnv);
+  });
   await t.test('scope, method, disabled mail configuration and live captured-context revocation fail closed',async()=>{
     assert.equal((await call('publish-preview',employee,{revision:(await snapshot()).revision,options:all})).status,401);assert.equal((await call('publish-preview')).status,405);assert.equal((await preview({...all,departmentId:f.deptB.id},manager)).status,403);
     const unconfigured=createWorkforceService(db,access,{secret,fieldKey}),v=await snapshot();assert.equal((await unconfigured.handle(request('/api/workspace/publish-preview',owner,{revision:v.revision,options:all}))).status,400);
+    assert.equal((await unconfigured.handle(request('/api/workspace/publish-preview',owner,{revision:v.revision,options:{...all,email:false,sms:true}}))).status,400);
     const captured=await access.workspaceContext(request('/api/workspace/state',manager));await f.disableManager();const revoked=createWorkforceService(db,{workspaceContext:async()=>captured},{secret,fieldKey,emailEnabled:true});assert.equal((await revoked.handle(request('/api/workspace/publish-preview',manager,{revision:v.revision,options:all}))).status,401);assert.deepEqual(await db.all(sql`PRAGMA foreign_key_check`),[]);
   });
 });

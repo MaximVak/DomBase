@@ -554,6 +554,59 @@ test("registered tablets, PIN sessions and action-scoped approvals use isolated 
     assert.equal(recovered.state.clockEvents.find(event => event.id === automatic[1].id).at, new Date(fixed("15:01")).toISOString());
     assert.deepEqual(await db.all(sql`PRAGMA foreign_key_check`), []);
   });
+  await t.test("background shift, break, overtime and clock-out reminders recheck live work and channel choices", async () => {
+    const { queueEmployeeReminders, dispatchEmployeeNotices, runEmployeeReminderDelivery } = await loadServerModule("workforce/employee-notice-delivery.ts");
+    const { nextDate, zonedTimestamp } = await loadServerModule("workforce/time.ts");
+    const zone = "America/Los_Angeles";
+    const date = nextDate(nextDate(new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(time))));
+    const at = wall => zonedTimestamp(date, wall, zone);
+    const [employee] = await db.insert(schema.employees).values({ name: "Reminder fixture", phone: "+12025550102", email: "reminder@example.test", pinHash: "reminder-no-pin" }).returning();
+    await db.insert(schema.employeeRoles).values({ employeeId: employee.id, roleId: f.roleA.id });
+    const [account] = await db.insert(schema.accounts).values({ employeeId: employee.id, email: "reminder@example.test", normalizedEmail: "reminder@example.test", displayName: "Reminder fixture", passwordHash: f.owner.passwordHash, loginEnabled: true }).returning();
+    const choices = { smsEnabled: true, events: { shiftStart: { email: true, sms: true }, shiftEnd: { email: true }, clockOut: { sms: true }, breakReminder: { email: true }, overtimeReminder: { email: true } } };
+    await db.insert(schema.accountNotificationPreferences).values({ accountId: account.id, choices });
+    const [published] = await db.insert(schema.schedulePublications).values({ version: 556, publishedByAccountId: f.owner.id }).returning();
+    const [shift] = await db.insert(schema.shifts).values({ employeeId: employee.id, roleId: f.roleA.id, roleName: f.roleA.name, date, startTime: "07:50", endTime: "18:00", publicationId: published.id }).returning();
+    await db.insert(schema.shifts).values({ employeeId: employee.id, roleId: f.roleA.id, roleName: f.roleA.name, date, startTime: "07:00", endTime: "07:20", publicationId: null });
+    const mail = [], sms = [];
+    const env = { INVITATION_EMAIL_FROM: "clock@example.test", INVITATION_EMAIL_REPLY_TO: "team@example.test", INVITATION_EMAIL_ORIGIN: "https://fixture.example.test",
+      INVITATION_EMAIL: { send: async message => { mail.push(message); return { messageId: "reminder-captured" }; } },
+      STAGE6_SMS: { fetch: async request => { sms.push(await request.json()); return Response.json({ accepted: true }); } } };
+    const rows = () => db.select().from(schema.employeeNoticeDeliveries).where(eq(schema.employeeNoticeDeliveries.employeeId, employee.id));
+    const run = wall => runEmployeeReminderDelivery(db, env, at(wall));
+    const punch = (eventType, wall, clockDetails) => db.insert(schema.clockEvents).values({ employeeId: employee.id, roleName: f.roleA.name,
+      eventType, occurredAt: new Date(at(wall)).toISOString(), shiftId: shift.id, source: "system", clockDetails });
+    await queueEmployeeReminders(db, at("04:05"), true, true);
+    assert.equal((await rows()).length, 2);
+    await db.update(schema.shifts).set({ startTime: "08:00" }).where(eq(schema.shifts.id, shift.id));
+    await dispatchEmployeeNotices(db, env, at("04:06"));
+    assert.ok((await rows()).every(row => row.state === "cancelled"));
+    await Promise.all([run("04:07"), run("04:07")]);
+    assert.equal(mail.filter(message => message.subject.endsWith("Upcoming shift")).length, 1);
+    assert.equal(sms.filter(message => message.text.includes("next shift")).length, 1);
+    await punch("in", "08:00");
+    await queueEmployeeReminders(db, at("11:20"), true, true);
+    assert.ok((await rows()).some(row => row.event === "breakReminder" && row.state === "pending"));
+    await punch("break", "11:21", { breakKind: "rest", minimumMinutes: 10 });
+    await dispatchEmployeeNotices(db, env, at("11:22"));
+    assert.equal(mail.filter(message => message.subject.endsWith("Break reminder")).length, 0);
+    await punch("break_end", "11:35");
+    await run("12:50");
+    assert.equal(mail.filter(message => message.subject.endsWith("Break reminder")).length, 1);
+    await run("15:50");
+    assert.equal(mail.filter(message => message.subject.endsWith("Overtime reminder")).length, 1);
+    await run("17:48");
+    assert.equal(mail.filter(message => message.subject.endsWith("Shift ending soon")).length, 1);
+    await run("18:10");
+    assert.equal(sms.filter(message => message.text.includes("has ended")).length, 1);
+    await queueEmployeeReminders(db, at("19:00"), true, true);
+    await db.update(schema.accountNotificationPreferences).set({ choices: { ...choices, smsEnabled: false } }).where(eq(schema.accountNotificationPreferences.accountId, account.id));
+    await dispatchEmployeeNotices(db, env, at("19:01"));
+    assert.equal(sms.filter(message => message.text.includes("has ended")).length, 1);
+    assert.ok((await rows()).some(row => row.event === "clockOut" && row.state === "cancelled"));
+    assert.ok(mail.every(message => message.to === employee.email && !message.text.includes(employee.name)));
+    assert.ok(sms.every(message => message.to === employee.phone && !message.text.includes(employee.name)));
+  });
   await t.test("PIN resets, inactive employees and device revocation invalidate access", async () => {
     ownerCookie = await login(f.owner.email);
     const p = await person();

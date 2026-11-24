@@ -16,12 +16,15 @@ import { changedSchedulePeople } from "../app/schedule-publish-model";
 import type { PublishOptions, PublicationDelivery, EmailDeliveryState } from "../app/schedule-publish-model";
 import { validateShifts, validatePlan } from "./shift-plan";
 import { readScheduleConflicts } from "./conflicts";
+import { normalizePhone } from "../team/rules";
+import { employeeNotificationAllowed } from "./notification-preferences";
+import { scheduleTextDelivery } from "./employee-notice-delivery";
 
 export function publishOptions(value: unknown, r: RecordContext): PublishOptions {
   const row = v.object(value);
   const departmentId = row.departmentId === undefined || row.departmentId === null ? null : v.integer(row.departmentId);
   if (departmentId !== null && !r.view.state.departments.some(department => department.id === departmentId)) throw new AuthError(403, "Department is outside your access.");
-  return { departmentId, period: row.period === undefined || row.period === null ? null : workspacePeriod(row.period), notify: row.notify === undefined ? "changed" : v.oneOf(row.notify, ["all", "changed", "none"]), inApp: row.inApp === undefined ? true : v.boolean(row.inApp), email: row.email === undefined ? false : v.boolean(row.email) };
+  return { departmentId, period: row.period === undefined || row.period === null ? null : workspacePeriod(row.period), notify: row.notify === undefined ? "changed" : v.oneOf(row.notify, ["all", "changed", "none"]), inApp: row.inApp === undefined ? true : v.boolean(row.inApp), email: row.email === undefined ? false : v.boolean(row.email), sms: row.sms === undefined ? false : v.boolean(row.sms) };
 }
 async function prepare(r: RecordContext, options: PublishOptions) {
   r.ctx.requirePermission("schedule.read"); r.ctx.requirePermission("schedule.manage");
@@ -39,13 +42,25 @@ async function prepare(r: RecordContext, options: PublishOptions) {
   const open = await openPublicationPlan(r, options, last?.version ?? 0);
   const exchanges = await exchangeInvalidations(r.db, r.ctx.activeActor(), selected.map(row => row.shiftId).filter((id): id is number => !!id));
   const changed = changedSchedulePeople(r.view.state.shifts, upserts, deleted); for (const id of [...open.employeeIds, ...exchanges.employeeIds]) changed.add(id);
-  const candidates = options.notify === "none" || (!selected.length && !open.selected.length) ? [] : await r.db.select({ id: s.employees.id, name: s.employees.name, email: s.employees.email, alerts: s.employeeSettings.sendLocationAlerts, inApp: s.scheduleNotificationPreferences.inApp, emailPreference: s.scheduleNotificationPreferences.email }).from(s.employees)
+  const smsPreference = options.sms ? employeeNotificationAllowed(s.employees.id, "schedule", "sms") : sql`0`;
+  const candidates = options.notify === "none" || (!selected.length && !open.selected.length) ? [] : await r.db.select({ id: s.employees.id, name: s.employees.name, email: s.employees.email, phone: s.employees.phone, alerts: s.employeeSettings.sendLocationAlerts, inApp: s.scheduleNotificationPreferences.inApp, emailPreference: s.scheduleNotificationPreferences.email, smsPreference }).from(s.employees)
     .leftJoin(s.employeeSettings, eq(s.employeeSettings.employeeId, s.employees.id)).leftJoin(s.scheduleNotificationPreferences, eq(s.scheduleNotificationPreferences.employeeId, s.employees.id))
     .where(and(eq(s.employees.active, true), eq(s.employees.terminated, false), r.ctx.employeeFilter(s.employees.id), r.ctx.activeActor(), options.notify === "changed" ? sql`${s.employees.id} IN (SELECT value FROM json_each(${JSON.stringify([...changed])}))` : options.departmentId === null ? sql`1=1` : sql`(${s.employees.id} IN (SELECT value FROM json_each(${JSON.stringify([...changed])})) OR EXISTS (SELECT 1 FROM employee_roles er JOIN roles role ON role.id=er.role_id JOIN departments dept ON dept.id=role.department_id WHERE er.employee_id=${s.employees.id} AND er.active=1 AND role.archived=0 AND dept.archived=0 AND dept.id=${options.departmentId}))`)).orderBy(s.employees.id).limit(2001);
   if (candidates.length > 2000) throw new AuthError(503, "Too many recipients to review safely.");
   const master = r.view.settings.notifyScheduleChanges;
   if (master && options.notify !== "none" && options.email && !r.emailEnabled) throw new AuthError(400, "Email delivery is unavailable. Choose in-app notices or nobody, or ask an Owner to check email configuration.");
-  const recipients = candidates.map(person => ({ employeeId: person.id, name: person.name, inApp: master && person.alerts !== false && options.inApp && person.inApp !== false, emailRequested: master && person.alerts !== false && options.email && person.emailPreference !== false, address: validEmail(person.email.trim()) ? person.email.trim().toLowerCase() : "" })).filter(person => person.inApp || person.emailRequested);
+  if (master && options.notify !== "none" && options.sms && !r.smsEnabled) throw new AuthError(400, "Text delivery is unavailable. Choose another channel or publish without notices.");
+  const textDestinations = new Set<string>();
+  const recipients = candidates.map(person => {
+    const enabled = master && person.alerts !== false;
+    const smsRequested = enabled && !!options.sms && !!person.smsPreference;
+    const phone = smsRequested ? normalizePhone(person.phone) || "" : "";
+    const textDestination = phone && !textDestinations.has(phone) ? phone : "";
+    if (textDestination) textDestinations.add(textDestination);
+    return { employeeId: person.id, name: person.name, inApp: enabled && options.inApp && person.inApp !== false,
+      emailRequested: enabled && options.email && person.emailPreference !== false, address: validEmail(person.email.trim()) ? person.email.trim().toLowerCase() : "",
+      smsRequested, phone, textDestination };
+  }).filter(person => person.inApp || person.emailRequested || person.smsRequested);
   const dates = [...selected.map(row => row.date ?? row.originalDate!), ...open.selected.map(row => row.date)].filter(Boolean).sort();
   return { exchanges, open, stored, all, selected, upserts, deleted, lastVersion: last?.version ?? 0, needsReview: open.needsReview || (!!stored && stored.basePublicationVersion !== (last?.version ?? 0)), recipients, optedOut: candidates.length - recipients.length, period: options.period ?? (dates.length ? { start: dates[0], end: dates.at(-1)! } : null) };
 }
@@ -55,16 +70,25 @@ export async function latestPublicationDelivery(r: RecordContext): Promise<Publi
   const scope = r.ctx.allDepartments ? sql`1=1` : sql`NOT EXISTS (SELECT 1 FROM json_each(${s.schedulePublications.scopeDepartments}) scope WHERE CAST(scope.value AS INTEGER) NOT IN (SELECT value FROM json_each(${JSON.stringify(r.ctx.departmentIds)})))`;
   const [publication] = await r.db.select().from(s.schedulePublications).where(and(eq(s.schedulePublications.publishedByAccountId, r.ctx.account.id), sql`${s.schedulePublications.notifyMode} IS NOT NULL`, scope, r.ctx.activeActor())).orderBy(desc(s.schedulePublications.version)).limit(1);
   if (!publication) return null;
-  const [people, emailRows] = await r.db.batch([
-    r.db.select({ employeeId: s.schedulePublicationRecipients.employeeId, name: s.employees.name, inApp: s.schedulePublicationRecipients.inApp, emailRequested: s.schedulePublicationRecipients.emailRequested, state: s.scheduleEmails.state }).from(s.schedulePublicationRecipients).innerJoin(s.employees, eq(s.employees.id, s.schedulePublicationRecipients.employeeId)).leftJoin(s.scheduleEmails, eq(s.scheduleEmails.id, s.schedulePublicationRecipients.emailId)).where(and(eq(s.schedulePublicationRecipients.publicationId, publication.id), r.ctx.employeeFilter(s.employees.id), r.ctx.activeActor())).orderBy(s.employees.name).limit(2001),
+  const [people, emailRows, textRows] = await r.db.batch([
+    r.db.select({ employeeId: s.schedulePublicationRecipients.employeeId, name: s.employees.name, inApp: s.schedulePublicationRecipients.inApp, emailRequested: s.schedulePublicationRecipients.emailRequested,
+      state: sql<EmailDeliveryState | null>` ${s.scheduleEmails.state}`.as("email_delivery_state"), textState: sql<EmailDeliveryState | null>` ${s.employeeNoticeDeliveries.state}`.as("text_delivery_state"),
+    }).from(s.schedulePublicationRecipients).innerJoin(s.employees, eq(s.employees.id, s.schedulePublicationRecipients.employeeId)).leftJoin(s.scheduleEmails, eq(s.scheduleEmails.id, s.schedulePublicationRecipients.emailId))
+      .leftJoin(s.employeeNoticeDeliveries, and(eq(s.employeeNoticeDeliveries.publicationId, s.schedulePublicationRecipients.publicationId), eq(s.employeeNoticeDeliveries.employeeId, s.schedulePublicationRecipients.employeeId)))
+      .where(and(eq(s.schedulePublicationRecipients.publicationId, publication.id), r.ctx.employeeFilter(s.employees.id), r.ctx.activeActor())).orderBy(s.employees.name).limit(2001),
     r.db.select({ state: s.scheduleEmails.state }).from(s.scheduleEmails).where(and(eq(s.scheduleEmails.publicationId, publication.id), r.ctx.activeActor())).limit(2001),
+    r.db.select({ state: s.employeeNoticeDeliveries.state }).from(s.employeeNoticeDeliveries).where(and(eq(s.employeeNoticeDeliveries.publicationId, publication.id), r.ctx.employeeFilter(s.employeeNoticeDeliveries.employeeId), r.ctx.activeActor())).limit(2001),
   ]);
-  if (people.length > 2000 || emailRows.length > 2000) throw new AuthError(503, "Too many delivery receipts to display safely.");
-  const emails: Record<EmailDeliveryState, number> = { pending: 0, sending: 0, accepted: 0, uncertain: 0, cancelled: 0 }; for (const row of emailRows) emails[row.state]++;
-  return { id: publication.id, version: publication.version, department: publication.departmentId === null ? "All selected departments" : r.view.state.departments.find(department => department.id === publication.departmentId)?.name ?? "Selected department", period: publication.periodStart && publication.periodEnd ? { start: publication.periodStart, end: publication.periodEnd } : null, notify: publication.notifyMode!, inAppCount: people.filter(person => person.inApp).length, emails, recipients: people.map(person => ({ employeeId: person.employeeId, name: person.name, inApp: person.inApp, email: person.state ?? (person.emailRequested ? "no_address" : "not_requested") })) };
+  if (people.length > 2000 || emailRows.length > 2000 || textRows.length > 2000) throw new AuthError(503, "Too many delivery receipts to display safely.");
+  const totals = (rows: { state: EmailDeliveryState }[]) => {
+    const counts: Record<EmailDeliveryState, number> = { pending: 0, sending: 0, accepted: 0, uncertain: 0, cancelled: 0 };
+    for (const row of rows) counts[row.state]++;
+    return counts;
+  };
+  return { id: publication.id, version: publication.version, department: publication.departmentId === null ? "All selected departments" : r.view.state.departments.find(department => department.id === publication.departmentId)?.name ?? "Selected department", period: publication.periodStart && publication.periodEnd ? { start: publication.periodStart, end: publication.periodEnd } : null, notify: publication.notifyMode!, inAppCount: people.filter(person => person.inApp).length, emails: totals(emailRows), texts: totals(textRows), recipients: people.map(person => ({ employeeId: person.employeeId, name: person.name, inApp: person.inApp, email: person.state ?? (person.emailRequested ? "no_address" : "not_requested"), sms: person.textState ?? "not_requested" })) };
 }
 export async function publicationPreview(r: RecordContext, raw: Record<string, unknown>) {
-  v.keys(raw, ["departmentId", "period", "notify", "inApp", "email"]); const options = publishOptions(raw, r), plan = await prepare(r, options);
+  v.keys(raw, ["departmentId", "period", "notify", "inApp", "email", "sms"]); const options = publishOptions(raw, r), plan = await prepare(r, options);
   const issues: string[] = []; let warnings = null;
   if (plan.period && Date.parse(plan.period.end) - Date.parse(plan.period.start) > 61 * 86400000) issues.push("Review and publish a workweek or a date range of at most 62 days.");
   else if (plan.selected.length && plan.period) warnings = await readScheduleConflicts(r.db, r.ctx, { period: plan.period, revision: r.view.revision, upserts: plan.upserts.map(row => ({ id: row.id, employeeId: row.employeeId, date: row.date, start: row.start, end: row.end, role: row.role, shiftType: row.shiftType })), deletedShiftIds: plan.deleted });
@@ -74,16 +98,16 @@ export async function publicationPreview(r: RecordContext, raw: Record<string, u
   const latest = await latestPublicationDelivery(r);
   const [current] = await r.db.select({ revision: s.workforceState.revision }).from(s.workforceState).where(and(eq(s.workforceState.id, 1), r.ctx.activeActor()));
   if (!current) throw new AuthError(401, "Sign in to continue."); if (current.revision !== r.view.revision) throw new AuthError(409, "Shared data changed. Close and reload before reviewing publication.");
-  return { openChanges: plan.open.selected.length, closedClaims: plan.open.claims.length, revision: r.view.revision, reviewToken: reviewToken(r, options, plan.lastVersion), changes: plan.selected.length + plan.open.selected.length, remaining: plan.open.all.length - plan.open.selected.length + Math.max(0, (r.view.state.scheduleDraftsByManager[r.ctx.account.employeeId ?? -r.ctx.account.id]?.upsertedShifts.length ?? 0) + (r.view.state.scheduleDraftsByManager[r.ctx.account.employeeId ?? -r.ctx.account.id]?.deletedShiftIds.length ?? 0) - plan.selected.length), needsReview: plan.needsReview, issues, warnings, entries, recipients: plan.recipients.map(person => ({ employeeId: person.employeeId, name: person.name, inApp: person.inApp, email: person.emailRequested && !!person.address })), optedOut: plan.optedOut, missingEmail: plan.recipients.filter(person => person.emailRequested && !person.address).length, emailDestinations: new Set(plan.recipients.filter(person => person.emailRequested && person.address).map(person => person.address)).size, emailConfigured: !!r.emailEnabled, masterEnabled: r.view.settings.notifyScheduleChanges, shifts: plan.upserts.map(shift => ({ ...shift, notes: undefined })), latest };
+  return { openChanges: plan.open.selected.length, closedClaims: plan.open.claims.length, revision: r.view.revision, reviewToken: reviewToken(r, options, plan.lastVersion), changes: plan.selected.length + plan.open.selected.length, remaining: plan.open.all.length - plan.open.selected.length + Math.max(0, (r.view.state.scheduleDraftsByManager[r.ctx.account.employeeId ?? -r.ctx.account.id]?.upsertedShifts.length ?? 0) + (r.view.state.scheduleDraftsByManager[r.ctx.account.employeeId ?? -r.ctx.account.id]?.deletedShiftIds.length ?? 0) - plan.selected.length), needsReview: plan.needsReview, issues, warnings, entries, recipients: plan.recipients.map(person => ({ employeeId: person.employeeId, name: person.name, inApp: person.inApp, email: person.emailRequested && !!person.address, sms: !!person.textDestination })), optedOut: plan.optedOut, missingEmail: plan.recipients.filter(person => person.emailRequested && !person.address).length, emailDestinations: new Set(plan.recipients.filter(person => person.emailRequested && person.address).map(person => person.address)).size, missingSms: plan.recipients.filter(person => person.smsRequested && !person.phone).length, smsDestinations: plan.recipients.filter(person => person.textDestination).length, emailConfigured: !!r.emailEnabled, masterEnabled: r.view.settings.notifyScheduleChanges, shifts: plan.upserts.map(shift => ({ ...shift, notes: undefined })), latest };
 }
 
 export async function publishSchedule(r: RecordContext, change: Change) {
-  const row = change.after ? v.object(change.after) : {}; v.keys(row, ["publish", "departmentId", "period", "notify", "inApp", "email", "reviewToken", "reviewLatest"]);
+  const row = change.after ? v.object(change.after) : {}; v.keys(row, ["publish", "departmentId", "period", "notify", "inApp", "email", "sms", "reviewToken", "reviewLatest"]);
   if (row.publish !== undefined && row.publish !== true) throw new AuthError(400, "Confirm publication.");
   const options = publishOptions(row, r), plan = await prepare(r, options);
   if (!plan.stored && !plan.open.selected.length) throw new AuthError(409, "Save a draft before publishing."); if (!plan.selected.length && !plan.open.selected.length) throw new AuthError(400, "No draft changes in that department or date range.");
   const reviewed = typeof row.reviewToken === "string" && row.reviewToken === reviewToken(r, options, plan.lastVersion);
-  if (row.reviewToken !== undefined || ["period", "notify", "inApp", "email", "reviewLatest"].some(field => row[field] !== undefined)) { if (!r.publicationSecret || !reviewed) throw new AuthError(409, "Review these exact publication choices before publishing."); }
+  if (row.reviewToken !== undefined || ["period", "notify", "inApp", "email", "sms", "reviewLatest"].some(field => row[field] !== undefined)) { if (!r.publicationSecret || !reviewed) throw new AuthError(409, "Review these exact publication choices before publishing."); }
   if (plan.needsReview && (!reviewed || row.reviewLatest !== true)) throw new AuthError(409, "Another manager published. Reload and review the latest schedule before publishing your draft.");
   if (row.reviewLatest !== undefined) v.boolean(row.reviewLatest);
   if (reviewed && plan.period && Date.parse(plan.period.end) - Date.parse(plan.period.start) > 61 * 86400000) throw new AuthError(400, "Review and publish a workweek or a date range of at most 62 days.");
@@ -105,6 +129,9 @@ export async function publishSchedule(r: RecordContext, change: Change) {
   writeOpenPublication(r, plan.open, publicationId);
   writeExchangeInvalidations(r.tx, plan.exchanges);
   writePublicationNotices(r.tx, publicationId, plan.recipients, plan.open.selected.length ? { title: "Schedule and open shifts updated", detail: "Published shifts or open shift opportunities changed. Open My schedule to review them." } : undefined);
+  r.tx.insertRows(s.employeeNoticeDeliveries, plan.recipients.filter(person => person.textDestination).map(person => ({
+    ...scheduleTextDelivery(person.employeeId, publicationId, person.textDestination, Date.parse(r.tx.stamp)), createdAt: r.tx.stamp, updatedAt: r.tx.stamp,
+  })));
   if (plan.stored) {
   const selectedIds = new Set(plan.selected.map(row => row.id)), remaining = plan.all.filter(row => !selectedIds.has(row.id));
   r.tx.remove(s.scheduleDraftChanges, sql`id IN (SELECT value FROM json_each(${JSON.stringify([...selectedIds])})) AND draft_id=${plan.stored.id}`); r.tx.remove(s.scheduleDraftEmployees, sql`draft_id=${plan.stored.id}`);

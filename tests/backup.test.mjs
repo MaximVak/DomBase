@@ -84,12 +84,15 @@ test("encrypted local backups restore all D1 data, protected files and private-f
   const [recordedPreferences] = await db.insert(s.accountNotificationPreferences).values({ accountId: owner.id, choices: {
     smsEnabled: false, events: { lateArrival: { inApp: false }, dailySummary: { email: true } },
   } }).returning();
+  const [reminderShift] = await db.select().from(s.shifts).limit(1);
+  const [pendingReminder] = await db.insert(s.employeeNoticeDeliveries).values({ id: "recovery-fixture-reminder", employeeId: reminderShift.employeeId, shiftId: reminderShift.id,
+    event: "shiftStart", channel: "email", destinationHash: "fictional-destination", expiresAt: "2027-01-01T00:00:00.000Z" }).returning();
   const directory = join(root, "archives"), keyPath = join(root, "keys/recovery.key"); const key = await recoveryKey(keyPath); let backup, payload;
   await t.test("private encrypted bundle includes the full schema, data, replaced files and recovery keys", async () => {
     backup = await createBackup({ database: source.env.DB, bucket: source.env.FILES, secrets, directory, key });
     const bytes = await readFile(backup.file); assert.equal(bytes.includes(Buffer.from(email)), false); assert.equal(bytes.includes(Buffer.from("scrypt$16384")), false); assert.equal(bytes.includes(certificate.bytes), false); assert.equal(bytes.includes(Buffer.from(secrets.AUTH_RATE_LIMIT_SECRET)), false);
     assert.equal((await stat(backup.file)).mode & 0o777, 0o600); assert.equal((await stat(keyPath)).mode & 0o777, 0o600); assert.equal((await stat(directory)).mode & 0o777, 0o700);
-    payload = await readBackup(backup.file, key); assert.equal(payload.snapshot.tables.length, 81); assert.equal(payload.objects.length, 4); assert.equal(payload.secrets.AUTH_PRIVATE_FIELD_KEY, secrets.AUTH_PRIVATE_FIELD_KEY);
+    payload = await readBackup(backup.file, key); assert.equal(payload.snapshot.tables.length, 82); assert.equal(payload.objects.length, 4); assert.equal(payload.secrets.AUTH_PRIVATE_FIELD_KEY, secrets.AUTH_PRIVATE_FIELD_KEY);
     assert.equal(await containedBackup(backup.file, directory), backup.file);
   });
   await t.test("wrong key, damaged ciphertext, loose permissions and external paths are rejected", async () => {
@@ -112,7 +115,7 @@ test("encrypted local backups restore all D1 data, protected files and private-f
   await t.test("fresh isolated D1/R2 restores all table contents, migrations, sequences, indexes and triggers", async () => {
     destination = await open(destinationPath);
     const result = await restoreIntoEmpty({ database: destination.env.DB, bucket: destination.env.FILES, payload });
-    assert.deepEqual(result, { tables: 80, migrations: 32, objects: 4, exactDatabase: true, exactFiles: true });
+    assert.deepEqual(result, { tables: 81, migrations: 33, objects: 4, exactDatabase: true, exactFiles: true });
     await assert.rejects(destination.env.DB.prepare("UPDATE clock_events SET event_type=event_type").run());
     await assert.rejects(destination.env.DB.prepare("UPDATE audit_log SET action=action").run());
     await assert.rejects(destination.env.DB.prepare("UPDATE wage_rates SET amount_cents=amount_cents").run());
@@ -121,6 +124,7 @@ test("encrypted local backups restore all D1 data, protected files and private-f
     await assert.rejects(destination.env.DB.prepare("UPDATE timesheet_reviews SET note=note").run());
     assert.deepEqual(await recovered.select().from(s.timesheetLockEvents), [recordedLock]);
     assert.deepEqual(await recovered.select().from(s.accountNotificationPreferences), [recordedPreferences]);
+    assert.deepEqual(await recovered.select().from(s.employeeNoticeDeliveries), [pendingReminder]);
     await assert.rejects(destination.env.DB.prepare("DELETE FROM timesheet_lock_events").run());
     assert.equal((await recovered.select().from(s.openShifts))[0].notes, "Preserved unassigned opening");
     assert.equal((await recovered.select().from(s.openShiftClaims))[0].status, "pending");
@@ -134,6 +138,7 @@ test("encrypted local backups restore all D1 data, protected files and private-f
   });
   await t.test("recovery revokes all old contexts while preserving passwords, files and immutable history", async () => {
     await invalidateRecoveredAccess(destination.env.DB); const recovered = drizzle(destination.env.DB, { schema: s });
+    assert.equal((await recovered.select().from(s.employeeNoticeDeliveries))[0].state, "cancelled");
     assert.ok((await recovered.select().from(s.teamInvitations))[0].revokedAt);
     const { dispatchInvitationEmails } = await loadServerModule("team/email.ts");
     let sends = 0;

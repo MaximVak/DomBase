@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import { check, foreignKey, index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 import type { ActionDetails, ClockDetails } from "../kiosk/break-rules";
 import type { NotificationChoices } from "../workforce/notification-preferences-model";
+import type { EmployeeNoticeEvent } from "../workforce/employee-notice-model";
 
 // One database serves one company/location. Additional locations are out of scope.
 const id = () => integer("id").primaryKey({ autoIncrement: true });
@@ -1005,6 +1006,28 @@ export const accountNotificationPreferences = sqliteTable("account_notification_
   version: integer("version").notNull().default(1),
   ...timestamps(),
 }, table => [check("account_notification_preferences_values_check", sql`json_valid(${table.choices}) AND json_type(${table.choices}) = 'object' AND ${table.version} > 0`)]);
+
+export const employeeNoticeDeliveries = sqliteTable("employee_notice_deliveries", {
+  id: text("id").primaryKey().notNull(),
+  employeeId: integer("employee_id").notNull().references(() => employees.id),
+  publicationId: integer("publication_id").references(() => schedulePublications.id),
+  shiftId: integer("shift_id").references(() => shifts.id),
+  event: text("event").$type<EmployeeNoticeEvent>().notNull(),
+  channel: text("channel", { enum: ["email", "sms"] }).notNull(),
+  destinationHash: text("destination_hash").notNull(),
+  expiresAt: text("expires_at").notNull(),
+  state: text("state", { enum: ["pending", "sending", "accepted", "uncertain", "cancelled"] }).notNull().default("pending"),
+  leaseToken: text("lease_token"),
+  leaseUntil: text("lease_until"),
+  ...timestamps(),
+}, table => [
+  index("employee_notice_queue_idx").on(table.state, table.channel, table.createdAt),
+  index("employee_notice_publication_idx").on(table.publicationId),
+  check("employee_notice_values_check", sql`${table.event} IN ('schedule','shiftStart','shiftEnd','clockOut','breakReminder','overtimeReminder')
+    AND ${table.state} IN ('pending','sending','accepted','uncertain','cancelled') AND ${table.channel} IN ('sms','email')
+    AND ((${table.event}='schedule' AND ${table.publicationId} IS NOT NULL AND ${table.shiftId} IS NULL AND ${table.channel}='sms')
+      OR (${table.event}<>'schedule' AND ${table.publicationId} IS NULL AND ${table.shiftId} IS NOT NULL))`),
+]);
 
 export const scheduleEmails = sqliteTable("schedule_emails", {
   id: text("id").primaryKey().notNull(),

@@ -10,17 +10,16 @@ const money = (value: number) => Math.round(value * 100) / 100;
 const hasHours = (row: PayableCard) => (row.card.metrics.actual ?? 0) > 0 || (row.card.metrics.pto ?? 0) > 0;
 const hour = 3600000;
 
-function allocateOvertime(rows: PayableCard[], week: string, policy: OvertimePolicy, exempt: boolean) {
+export function allocateWorkedTime(rows: { date: string; worked: number; hasActual: boolean }[], week: string, policy: OvertimePolicy, exempt = false) {
   const seventhDate = plusDays(week, 6);
-  const workedDays = new Set(rows.filter(row => (row.card.metrics.actual ?? 0) > 0).map(row => row.card.date));
+  const workedDays = new Set(rows.filter(row => row.hasActual).map(row => row.date));
   const seventhDayApplies = policy.overtimeSeventhDayEnabled && workedDays.size === 7;
   const weeklyLimit = policy.overtimeWeeklyEnabled ? policy.overtimeWeeklyHours * hour : Infinity;
   let weekRegular = 0;
   let workedToday = 0;
   let date = "";
-  for (const { card, hours } of rows) {
-    const worked = Math.round(hours * hour);
-    if (card.date !== date) { date = card.date; workedToday = 0; }
+  return rows.map(({ date: workDate, worked }) => {
+    if (workDate !== date) { date = workDate; workedToday = 0; }
     const seventh = seventhDayApplies && date === seventhDate;
     const dailyLimit = seventh ? 0 : policy.overtimeDailyEnabled ? policy.overtimeDailyHours * hour : Infinity;
     const doubleLimit = policy.overtimeDoubleEnabled ? Math.min(policy.overtimeDoubleHours, seventh ? policy.overtimeSeventhDoubleHours : Infinity) * hour : Infinity;
@@ -28,12 +27,20 @@ function allocateOvertime(rows: PayableCard[], week: string, policy: OvertimePol
     // consume the weekly allowance, so daily and weekly premiums do not stack.
     const regular = exempt ? worked : Math.max(0, Math.min(worked, dailyLimit - workedToday, doubleLimit - workedToday, weeklyLimit - weekRegular));
     const doubleTime = exempt ? 0 : Math.max(0, worked - Math.max(0, doubleLimit - workedToday));
-    card.metrics.regular = regular / hour;
-    card.metrics.ot = Math.max(0, worked - regular - doubleTime) / hour;
-    card.metrics.doubleOt = doubleTime / hour;
     weekRegular += regular;
     workedToday += worked;
-  }
+    return { regular, overtime: Math.max(0, worked - regular - doubleTime), doubleTime };
+  });
+}
+
+function allocateOvertime(rows: PayableCard[], week: string, policy: OvertimePolicy, exempt: boolean) {
+  const allocation = allocateWorkedTime(rows.map(({ card, hours }) => ({ date: card.date, worked: Math.round(hours * hour), hasActual: (card.metrics.actual ?? 0) > 0 })), week, policy, exempt);
+  rows.forEach(({ card }, index) => {
+    const { regular, overtime, doubleTime } = allocation[index];
+    card.metrics.regular = regular / hour;
+    card.metrics.ot = overtime / hour;
+    card.metrics.doubleOt = doubleTime / hour;
+  });
 }
 
 export function priceWorkweek(rows: PayableCard[], week: string, policy: OvertimePolicy, scope?: WorkweekScope) {

@@ -12,9 +12,10 @@ import type { DocumentBucket } from "../documents/types";
 import { dispatchScheduleEmails } from "../workforce/schedule-email";
 import { dispatchClockReminderEmails } from "../workforce/clock-reminder-email";
 import { dispatchInvitationEmails } from "../team/email";
-import type { InvitationEmailEnv } from "../team/email";
+import { dispatchEmployeeNotices, runEmployeeReminderDelivery, smsAvailable } from "../workforce/employee-notice-delivery";
+import type { EmployeeNoticeEnv } from "../workforce/employee-notice-delivery";
 
-interface Env extends Omit<BackupScheduleEnv, "AUTH_PRIVATE_FIELD_KEY">, InvitationEmailEnv {
+interface Env extends Omit<BackupScheduleEnv, "AUTH_PRIVATE_FIELD_KEY">, EmployeeNoticeEnv {
   ASSETS: Fetcher;
   DB: D1Database;
   FILES?: DocumentBucket;
@@ -45,7 +46,12 @@ const worker = {
     ctx.waitUntil(dispatchScheduleEmails(db, env).catch(() => { console.error("Schedule email status is temporarily unavailable."); }));
     ctx.waitUntil(dispatchInvitationEmails(db, env).catch(() => { console.error("Invitation email queue is temporarily unavailable."); }));
     const now = Date.now();
-    ctx.waitUntil(runScheduledMaintenance(db, now, () => dispatchClockReminderEmails(db, env, now)).then(recorded => {
+    ctx.waitUntil(runScheduledMaintenance(db, now, async () => {
+      await Promise.all([
+        dispatchClockReminderEmails(db, env, now).catch(() => console.error("Clock reminder email is temporarily unavailable.")),
+        runEmployeeReminderDelivery(db, env, now).catch(() => console.error("Employee reminder delivery is temporarily unavailable.")),
+      ]);
+    }).then(recorded => {
       // Scheduled-only, non-personal evidence that background work ran without a browser.
       console.info("Scheduled workforce maintenance complete", { recorded });
     }));
@@ -77,6 +83,9 @@ const worker = {
 
     const response = await handler.fetch(request, env, ctx);
     if (request.method === "POST" && (url.pathname === "/api/workspace/commit" || (["/api/workspace/open-shifts", "/api/workspace/shift-exchanges", "/api/self/shift-exchanges"].includes(url.pathname) && response.headers.get("X-Schedule-Dispatch") === "1")) && response.ok) ctx.waitUntil(dispatchScheduleEmails(drizzle(env.DB, { schema }), env).catch(() => { console.error("Schedule email status is temporarily unavailable."); }));
+    if (request.method === "POST" && url.pathname === "/api/workspace/commit" && response.ok && smsAvailable(env)) {
+      ctx.waitUntil(dispatchEmployeeNotices(drizzle(env.DB, { schema }), env, Date.now(), "schedule").catch(() => console.error("Schedule text status is temporarily unavailable.")));
+    }
     if (["/", "/login", "/setup", "/access", "/kiosk", "/kiosk-admin", "/me", "/me/schedule", "/me/availability", "/team", "/team/reports", "/community", "/invite", "/backups"].includes(url.pathname) || /^\/api\/(auth|access|workforce|workspace|documents|kiosk|kiosk-admin|self|team|community|invitations|backups)\//.test(url.pathname)) {
       const headers = new Headers(response.headers);
       headers.delete("X-Schedule-Dispatch");

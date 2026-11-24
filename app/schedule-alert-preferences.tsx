@@ -95,7 +95,7 @@ export function NotificationPreferences({ endpoint, onSaved }: { endpoint: Endpo
           setDraft(current => ({ ...current, smsEnabled: value === data.smsEnabled ? undefined : value }));
           setNotice("");
         }} /> Allow text messages</label>
-        <p>Turning this off stops all notification texts. Text delivery is pending setup.</p>
+        <p>Turning this off stops all notification texts.{!data.smsConfigured && " Text delivery is pending setup."}</p>
         {!data.hasPhone && <p>Ask a manager to add a valid mobile number to your profile before using text delivery.</p>}
       </fieldset>}
       {[...sections].map(([title, rows]) => <fieldset className="notification-settings-group" disabled={pending} key={title}>
@@ -108,7 +108,7 @@ export function NotificationPreferences({ endpoint, onSaved }: { endpoint: Endpo
               {(Object.keys(channels) as NotificationChannel[]).map(channel => {
                 const saved = row.channels[channel];
                 if (saved === undefined) return null;
-                const planned = spec.planned.includes(channel);
+                const planned = spec.planned.includes(channel) && (channel !== "sms" || !data.smsConfigured);
                 return <label className="notification-preference-control" key={channel}>
                   <input type="checkbox" aria-label={spec.label + " " + channels[channel] + (planned ? " (coming later)" : "")}
                     checked={draft.events?.[row.id]?.[channel] ?? saved} onChange={event => change(row.id, channel, event.target.checked, saved)} />

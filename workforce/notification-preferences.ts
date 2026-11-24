@@ -136,9 +136,9 @@ async function savePreferences(db: Database, ctx: PreferenceContext, body: Recor
   return readPreferences(db, ctx);
 }
 
-export async function handleNotificationPreferences(db: Database, ctx: PreferenceContext, request: Request, secret: string, now: number) {
+export async function handleNotificationPreferences(db: Database, ctx: PreferenceContext, request: Request, secret: string, now: number, smsConfigured: boolean) {
   if (new URL(request.url).search) throw new AuthError(400, "Preferences do not accept account selectors.");
-  if (request.method === "GET") return json(await readPreferences(db, ctx));
-  if (request.method === "POST") return json(await savePreferences(db, ctx, await readAuthBody(request, 8192), secret, now));
+  if (request.method === "GET") return json({ ...await readPreferences(db, ctx), smsConfigured });
+  if (request.method === "POST") return json({ ...await savePreferences(db, ctx, await readAuthBody(request, 8192), secret, now), smsConfigured });
   return json({ error: "Method not allowed." }, 405, { Allow: "GET, POST" });
 }

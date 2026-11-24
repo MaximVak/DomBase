@@ -53,7 +53,7 @@ function currentRecord(view: WorkspaceData, change: Change, employeeKey: number)
   }
   throw new AuthError(400, "Unknown operation.");
 }
-export function createWorkforceService(db: Database, access: ReturnType<typeof createAccessService>, options: { emailEnabled?: boolean; secret: string; fieldKey: string; now?: () => number; stagingAccountantFixtureIds?: string; bucket?: DocumentBucket }) {
+export function createWorkforceService(db: Database, access: ReturnType<typeof createAccessService>, options: { emailEnabled?: boolean; smsEnabled?: boolean; secret: string; fieldKey: string; now?: () => number; stagingAccountantFixtureIds?: string; bucket?: DocumentBucket }) {
   const now = options.now ?? Date.now;
   if (options.secret.length < 32) throw new Error("Workspace configuration unavailable.");
   async function handle(request: Request) {
@@ -108,7 +108,7 @@ export function createWorkforceService(db: Database, access: ReturnType<typeof c
         return await handleNotificationPreferences(db, {
           account: ctx.account, guard: ctx.activeActor(), contextToken: rateKey(options.secret, `notification-preferences:${ctx.account.id}:${ctx.account.employeeId}:${ctx.sessionId}`),
           manager: { attendance: p["schedule.read"] && p["timesheets.read"], timeOff: p["time_off.read"] && (p["team.manage"] || p["schedule.manage"] || p["time_off.approve"]), schedule: p["schedule.manage"], messaging: p["messages.read"] },
-        }, request, options.secret, now());
+        }, request, options.secret, now(), !!options.smsEnabled);
       }
       if (action === "publish-preview") {
         if (request.method !== "POST") return json({ error: "Method not allowed." }, 405, { Allow: "POST" });
@@ -119,7 +119,7 @@ export function createWorkforceService(db: Database, access: ReturnType<typeof c
         const view = await workspaceSnapshot(db, ctx, options.fieldKey, period);
         if (v.integer(body.revision, 0) !== view.revision) throw new AuthError(409, "Shared data changed. Close and reload before reviewing publication.");
         const roles = await db.select({ id: s.roles.id, name: s.roles.name, departmentId: s.roles.departmentId, archived: s.roles.archived }).from(s.roles);
-        return json(await publicationPreview({ db, ctx, view, roles, tx: new WorkspaceTransaction(db, ctx, "preview", new Date(now()).toISOString()), fieldKey: options.fieldKey, today: "", publicationSecret: options.secret, emailEnabled: options.emailEnabled }, values));
+        return json(await publicationPreview({ db, ctx, view, roles, tx: new WorkspaceTransaction(db, ctx, "preview", new Date(now()).toISOString()), fieldKey: options.fieldKey, today: "", publicationSecret: options.secret, emailEnabled: options.emailEnabled, smsEnabled: options.smsEnabled }, values));
       }
       if (action === "schedule-tools") {
         if (request.method !== "POST") return json({ error: "Method not allowed." }, 405, { Allow: "POST" });
@@ -134,7 +134,7 @@ export function createWorkforceService(db: Database, access: ReturnType<typeof c
       if (action === "frequent-shifts" && request.method === "GET") return json(await frequentShifts(db, ctx, url));
       if (action === "state" && request.method === "GET") {
         const [view, notificationFlags] = await Promise.all([workspaceSnapshot(db, ctx, options.fieldKey, requestPeriod(url, now())), dashboardNotificationFlags(db, ctx.account.id)]);
-        return json({ ...view, notificationFlags, scheduleDelivery: { emailConfigured: !!options.emailEnabled } });
+        return json({ ...view, notificationFlags, scheduleDelivery: { emailConfigured: !!options.emailEnabled, smsConfigured: !!options.smsEnabled } });
       }
       if (action === "maintenance" && request.method === "POST") {
         ctx.requirePermission("timesheets.manage");
@@ -162,7 +162,7 @@ export function createWorkforceService(db: Database, access: ReturnType<typeof c
       const [previous] = await db.select().from(s.workforceCommits).where(eq(s.workforceCommits.id, id)).limit(1);
       if (previous) {
         if (previous.accountId !== ctx.account.id || previous.bodyHash !== hash) throw new AuthError(409, "This save identifier is already in use.");
-        return minimal ? json({ saved: true, id, revision: previous.revision }, 200, { "Preference-Applied": "return=minimal" }) : json({ ...await workspaceSnapshot(db, ctx, options.fieldKey, period), scheduleDelivery: { emailConfigured: !!options.emailEnabled } });
+        return minimal ? json({ saved: true, id, revision: previous.revision }, 200, { "Preference-Applied": "return=minimal" }) : json({ ...await workspaceSnapshot(db, ctx, options.fieldKey, period), scheduleDelivery: { emailConfigured: !!options.emailEnabled, smsConfigured: !!options.smsEnabled } });
       }
       const view = await workspaceSnapshot(db, ctx, options.fieldKey, period);
       if (revision !== view.revision) throw new AuthError(409, "Someone else saved changes. Reload the latest data and try again.");
@@ -174,7 +174,7 @@ export function createWorkforceService(db: Database, access: ReturnType<typeof c
       }
       const stamp = new Date(now()).toISOString(); const tx = new WorkspaceTransaction(db, ctx, id, stamp);
       const roles = await db.select({ id: s.roles.id, name: s.roles.name, departmentId: s.roles.departmentId, archived: s.roles.archived }).from(s.roles);
-      const r: RecordContext = { db, ctx, tx, view, roles, publicationSecret: options.secret, emailEnabled: options.emailEnabled, fieldKey: options.fieldKey, today: new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(now())) };
+      const r: RecordContext = { db, ctx, tx, view, roles, publicationSecret: options.secret, emailEnabled: options.emailEnabled, smsEnabled: options.smsEnabled, fieldKey: options.fieldKey, today: new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(now())) };
       const order = (entity: Entity) => entity === "department" ? 0 : entity === "employee" ? 1 : entity === "pto-policy" ? 2 : 3;
       for (const change of [...changes].sort((a, b) => order(a.entity) - order(b.entity))) {
         if (change.entity === "department") await departmentChange(r, change);
@@ -189,7 +189,7 @@ export function createWorkforceService(db: Database, access: ReturnType<typeof c
       if (!await tx.commit(revision, hash, [...new Set(changes.map(change => change.entity))])) throw new AuthError(409, "Your access or this workspace changed. Reload before saving.");
       // Reload is a separate request: compiling/projecting a second full snapshot
       // here can exceed the hosted Worker's CPU budget after an already committed save.
-      return minimal ? json({ saved: true, id, revision: revision + 1 }, 200, { "Preference-Applied": "return=minimal" }) : json({ ...await workspaceSnapshot(db, ctx, options.fieldKey, period), scheduleDelivery: { emailConfigured: !!options.emailEnabled } });
+      return minimal ? json({ saved: true, id, revision: revision + 1 }, 200, { "Preference-Applied": "return=minimal" }) : json({ ...await workspaceSnapshot(db, ctx, options.fieldKey, period), scheduleDelivery: { emailConfigured: !!options.emailEnabled, smsConfigured: !!options.smsEnabled } });
     } catch (error) {
       if (error instanceof AuthError) return json({ error: error.message }, error.status);
       // Never log a request, SQL parameter, message, private field or credential.

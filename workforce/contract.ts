@@ -8,7 +8,7 @@ export type WorkspaceData = {
   exchangeRequests?: {id:number;requester:string;kind:"cover"|"trade";at:string|null}[];
   openRequests?: { id: number; employee: string; requestedAt: string; role: string }[];
   openSchedule?: import("../app/open-shifts-model").OpenSchedule;
-  scheduleDelivery?: { emailConfigured: boolean };
+  scheduleDelivery?: { emailConfigured: boolean; smsConfigured?: boolean };
   period?: import("./period").WorkspacePeriod;
   scheduleEstimateScopeComplete?: boolean;
   revision: number;

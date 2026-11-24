@@ -103,9 +103,10 @@ export async function restoreIntoEmpty({ database, bucket, payload }) {
 }
 export async function invalidateRecoveredAccess(database, now = Date.now()) {
   const stamp = new Date(now).toISOString();
-  const hasInvitations = (await database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='team_invitations'").all()).results.length > 0;
+  const recoveredTables = new Set((await database.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('team_invitations','employee_notice_deliveries')").all()).results.map(row => row.name));
   await database.batch([
-    ...(hasInvitations ? [database.prepare("UPDATE team_invitations SET revoked_at=?, updated_at=? WHERE revoked_at IS NULL AND used_at IS NULL").bind(stamp, stamp)] : []),
+    ...(recoveredTables.has("team_invitations") ? [database.prepare("UPDATE team_invitations SET revoked_at=?, updated_at=? WHERE revoked_at IS NULL AND used_at IS NULL").bind(stamp, stamp)] : []),
+    ...(recoveredTables.has("employee_notice_deliveries") ? [database.prepare("UPDATE employee_notice_deliveries SET state='cancelled', lease_token=NULL, lease_until=NULL, updated_at=? WHERE state IN ('pending','sending')").bind(stamp)] : []),
     database.prepare("UPDATE accounts SET session_version=session_version+1, updated_at=?").bind(stamp),
     database.prepare("UPDATE account_sessions SET revoked_at=? WHERE revoked_at IS NULL").bind(stamp),
     database.prepare("UPDATE account_setup_tokens SET used_at=? WHERE used_at IS NULL").bind(stamp),

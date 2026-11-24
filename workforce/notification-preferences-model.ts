@@ -6,11 +6,11 @@ export const notificationTypes = [
   { id: "shiftExchange", label: "Shift trades and cover requests", group: "Schedule", channels: { inApp: true, email: true }, planned: [] },
   { id: "openShift", label: "Open shift requests", group: "Schedule", channels: { inApp: true, email: true }, planned: [] },
   { id: "timeOffResponse", label: "Time off request decisions", group: "Schedule", channels: { inApp: true, email: false }, planned: ["inApp", "email"] },
-  { id: "shiftStart", label: "Before a shift starts", group: "Reminders", channels: { email: false, sms: false }, planned: ["email", "sms"] },
-  { id: "shiftEnd", label: "Before a shift ends", group: "Reminders", channels: { email: false, sms: false }, planned: ["email", "sms"] },
+  { id: "shiftStart", label: "Before a shift starts", group: "Reminders", channels: { email: false, sms: false }, planned: ["sms"] },
+  { id: "shiftEnd", label: "Before a shift ends", group: "Reminders", channels: { email: false, sms: false }, planned: ["sms"] },
   { id: "clockOut", label: "Forgotten clock-out", group: "Reminders", channels: { inApp: true, email: true, sms: false }, planned: ["sms"] },
-  { id: "breakReminder", label: "Break reminders", group: "Reminders", channels: { email: false, sms: false }, planned: ["email", "sms"] },
-  { id: "overtimeReminder", label: "Overtime reminders", group: "Reminders", channels: { email: false, sms: false }, planned: ["email", "sms"] },
+  { id: "breakReminder", label: "Break reminders", group: "Reminders", channels: { email: false, sms: false }, planned: ["sms"] },
+  { id: "overtimeReminder", label: "Overtime reminders", group: "Reminders", channels: { email: false, sms: false }, planned: ["sms"] },
   { id: "lateArrival", label: "Late arrivals", group: "Manager alerts", channels: { inApp: true, email: false }, planned: ["email"] },
   { id: "noShow", label: "No-shows", group: "Manager alerts", channels: { inApp: true, email: false }, planned: ["email"] },
   { id: "clockExceptions", label: "Other clock and break exceptions", group: "Manager alerts", channels: { inApp: true }, planned: [] },
@@ -33,7 +33,7 @@ export const dashboardNotificationEvents = ["lateArrival", "noShow", "clockExcep
 export type DashboardNotificationFlags = Record<typeof dashboardNotificationEvents[number], boolean>;
 export type NotificationPreferences = {
   revision: number; version: number; scheduleVersion: number; contextToken: string;
-  smsEnabled: boolean; hasPhone: boolean; hasScheduleEmail: boolean; locationAlerts: boolean; scheduleAlerts: boolean;
+  smsEnabled: boolean; hasPhone: boolean; hasScheduleEmail: boolean; locationAlerts: boolean; scheduleAlerts: boolean; smsConfigured?: boolean;
   rows: { id: NotificationEvent; channels: ChannelValues }[];
 };
 
