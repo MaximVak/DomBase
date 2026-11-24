@@ -1,0 +1,11 @@
+export type Person = { id: number; name: string };
+export type MessengerThread = { id: number; title: string; unread: number; mentions: number; lastAt: string | null; pinned: boolean; muted: boolean };
+export type Attachment = { id: string; name: string; size: number; type: string };
+export type MessengerMessage = { id: number; senderId: number; sender: string; body: string; sentAt: string; attachments: Attachment[]; mentions: Person[] };
+export type MessengerInbox = { employeeId: number; threads: MessengerThread[] };
+export type MessengerHistory = { messages: MessengerMessage[]; members: Person[]; canLoadOlder: boolean };
+export type MessengerRoster = { people: Person[]; departments: Person[]; canGroupBySchedule: boolean };
+export type MessengerHit = { id: number; conversationId: number; sender: string; body: string; sentAt: string };
+export const messengerFileLimit = 10 * 1024 * 1024;
+export const messengerFilesPerMessage = 4;
+export const messengerFileTypes = "application/pdf,image/png,image/jpeg,image/gif,video/mp4";

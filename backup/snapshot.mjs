@@ -48,7 +48,7 @@ export function checkObjects(snapshot, objects) {
 
 
 export function checkFileInventory(snapshot, objects) {
-  const expired = new Set(rowsOf(snapshot, "audit_log").filter(row => row.action === "document.upload_expired").map(row => row.entity_id));
+  const expired = new Set(rowsOf(snapshot, "audit_log").filter(row => ["document.upload_expired", "messenger.upload_expired"].includes(row.action)).map(row => row.entity_id));
   const files = rowsOf(snapshot, "files");
   for (const file of files) {
     const object = objects.find(object => object.key === file.object_key);

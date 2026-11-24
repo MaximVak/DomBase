@@ -158,5 +158,5 @@ export function createSelfService(db: KioskOperatorDatabase, auth: Auth, secret:
       return json({ error: "Could not confirm your profile save or load. Reload the saved profile before making another change." }, 503);
     }
   }
-  return { handle };
+  return { handle, authorize: context };
 }

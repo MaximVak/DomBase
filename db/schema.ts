@@ -799,6 +799,30 @@ export const messages = sqliteTable("messages", {
   check("messages_body_check", sql`length(trim(${table.body})) > 0`),
 ]);
 
+export const messageAttachments = sqliteTable("message_attachments", {
+  fileId: text("file_id").primaryKey().references(() => files.id),
+  conversationId: integer("conversation_id").notNull().references(() => conversations.id),
+  messageId: integer("message_id"),
+  expiresAt: text("expires_at").notNull(),
+}, table => [
+  foreignKey({ columns: [table.messageId, table.conversationId], foreignColumns: [messages.id, messages.conversationId] }),
+  index("message_attachments_message_idx").on(table.conversationId, table.messageId),
+  index("message_attachments_expiry_idx").on(table.messageId, table.expiresAt),
+]);
+
+export const messageMentions = sqliteTable("message_mentions", {
+  messageId: integer("message_id").notNull(),
+  conversationId: integer("conversation_id").notNull(),
+  employeeId: integer("employee_id").notNull(),
+  name: text("name").notNull(),
+  notified: integer("notified", { mode: "boolean" }).notNull().default(false),
+}, table => [
+  primaryKey({ columns: [table.messageId, table.employeeId] }),
+  foreignKey({ columns: [table.messageId, table.conversationId], foreignColumns: [messages.id, messages.conversationId] }),
+  foreignKey({ columns: [table.conversationId, table.employeeId], foreignColumns: [conversationMembers.conversationId, conversationMembers.employeeId] }),
+  index("message_mentions_employee_idx").on(table.employeeId, table.conversationId),
+]);
+
 export const messageReads = sqliteTable("message_reads", {
   messageId: integer("message_id").notNull(),
   conversationId: integer("conversation_id").notNull(),

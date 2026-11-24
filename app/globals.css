@@ -4056,6 +4056,15 @@ label.enforcement-rule-line {
   max-height: none;
 }
 
+.open-team-messenger {
+  display: inline-flex;
+  align-items: center;
+  align-self: start;
+  min-height: 2.5rem;
+  margin: .375rem 2.75rem .25rem .75rem;
+  text-decoration: underline;
+}
+
 .message-dropdown-close {
   position: absolute;
   top: 10px;

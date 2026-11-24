@@ -1,0 +1,67 @@
+.team-messenger {
+  max-width: 82rem;
+  min-width: 0;
+  margin: 0 auto;
+  padding: clamp(.75rem, 3vw, 2rem);
+  color: var(--foreground);
+}
+.messenger-header, .messenger-thread-heading, .messenger-result-title, .messenger-message header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: .75rem;
+}
+.messenger-header { margin-bottom: 1rem; }
+.messenger-header h1, .messenger-thread-heading h2 { margin: .25rem 0; overflow-wrap: anywhere; }
+.messenger-header h1 { font-size: clamp(1.5rem, 3vw, 2rem); }
+.messenger-layout { display: grid; grid-template-columns: minmax(12rem, 18rem) minmax(0, 1fr); gap: 1rem; align-items: start; }
+.messenger-sidebar, .messenger-detail {
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: .75rem;
+  background: var(--panel);
+}
+.messenger-sidebar, .messenger-detail, .messenger-composer, .messenger-create fieldset {
+  display: grid;
+  gap: .75rem;
+}
+.messenger-sidebar input, .messenger-composer textarea, .messenger-composer select, .messenger-create select, .messenger-create input:not([type="checkbox"]) {
+  width: 100%;
+  min-width: 0;
+}
+.messenger-sidebar label, .messenger-composer label, .messenger-create label { font-weight: 600; }
+.team-messenger button:not(.primary-action), .messenger-file-input {
+  border: 1px solid var(--line);
+  color: inherit;
+  border-radius: .5rem;
+  background: var(--panel);
+  min-height: 2.5rem;
+  padding: .375rem .625rem;
+}
+.messenger-actions, .messenger-compose-tools { display: flex; flex-wrap: wrap; gap: .5rem; }
+.messenger-actions input { flex: 1 1 5rem; }
+.messenger-threads, .messenger-history, .messenger-files, .messenger-people { margin: 0; padding: 0; list-style: none; }
+.messenger-threads { display: grid; gap: .375rem; overflow: auto; max-height: min(45vh, 30rem); }
+.messenger-threads button { width: 100%; text-align: left; min-width: 0; display: grid; gap: .125rem; overflow-wrap: anywhere; }
+.messenger-threads button[aria-current="true"], .messenger-message[data-highlighted="true"] { outline: 2px solid var(--blue-accent); outline-offset: -2px; }
+.messenger-message { border: 1px solid var(--line); background: var(--panel); border-radius: .5rem; padding: .625rem .75rem; overflow-wrap: anywhere; }
+.messenger-message[data-own="true"] { background: var(--background); }
+.messenger-message p { margin: .375rem 0; white-space: pre-wrap; }
+.messenger-history { display: grid; gap: .5rem; max-height: 50vh; overflow: auto; }
+.messenger-files { display: grid; gap: .25rem; }
+.messenger-files li { display: flex; align-items: center; flex-wrap: wrap; gap: .25rem .625rem; overflow-wrap: anywhere; }
+.messenger-compose-tools { align-items: center; }
+.messenger-file-input { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; max-width: 100%; }
+.messenger-file-input input { flex: 1 1 7rem; min-width: 0; max-width: 100%; }
+.messenger-people { display: flex; flex-wrap: wrap; gap: .375rem; }
+.messenger-composer .primary-action { justify-self: end; }
+.messenger-create fieldset { min-width: 0; border: 0; padding: 0; margin: 0 0 1rem; }
+.messenger-roster { display: grid; gap: .375rem; max-height: 14rem; overflow: auto; }
+.messenger-error { overflow-wrap: anywhere; }
+@media (max-width: 48rem) {
+  .messenger-layout { grid-template-columns: minmax(0, 1fr); }
+  .messenger-sidebar, .messenger-detail { padding: .75rem; }
+  .messenger-threads { max-height: 12rem; }
+}

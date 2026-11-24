@@ -3171,6 +3171,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                       >
                         <span aria-hidden="true">&times;</span>
                       </button>
+                      <a className="open-team-messenger" href={selectedConversationId ? "/messages?conversation=" + selectedConversationId : "/messages"}>Open team messenger</a>
                       {isCreatingConversation && ptoMessageEmployeeId !== null ? (
                         <div className="conversation-view pto-draft-conversation">
                           <div className="message-popout-heading">

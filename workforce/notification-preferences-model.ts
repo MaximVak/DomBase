@@ -21,7 +21,7 @@ export const notificationTypes = [
   { id: "dailySummary", label: "Daily summary", group: "Manager alerts", channels: { email: false }, planned: [] },
   { id: "weeklySummary", label: "Weekly summary", group: "Manager alerts", channels: { email: false }, planned: [] },
   { id: "announcement", label: "Announcement email copies", group: "Messaging", channels: { email: false }, planned: ["email"] },
-  { id: "mention", label: "Message mentions", group: "Messaging", channels: { inApp: true }, planned: ["inApp"] },
+  { id: "mention", label: "Message mentions", group: "Messaging", channels: { inApp: true }, planned: [] },
 ] as const;
 
 export type NotificationEvent = typeof notificationTypes[number]["id"];

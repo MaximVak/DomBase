@@ -67,7 +67,7 @@ test("hosted encrypted daily backup restores exact DB/files/keys and leaves live
   await f.env.FILES.put(photoKey, bytes, { httpMetadata: { contentType: "image/jpeg" }, customMetadata: { sha256 } });
   await f.db.insert(f.schema.clockInPhotos).values({ eventId: event.id, objectKey: photoKey, sizeBytes: bytes.length, sha256, readyAt: "2026-11-09T17:00:01.000Z" });
   assert.equal((await runDueBackup(f.env, secrets, { now: Date.parse("2026-11-10T09:00:00Z") })).reason, "before daily start");
-  const first = await runDueBackup(f.env, secrets, { now }); assert.equal(first.completed, true); assert.equal(first.objects, 4); assert.equal(first.tables, 82);
+  const first = await runDueBackup(f.env, secrets, { now }); assert.equal(first.completed, true); assert.equal(first.objects, 4); assert.equal(first.tables, 84);
   const receipt = await f.completion("2026-11-10"); assert.equal(receipt.fingerprint, publicFingerprint(publicKey));
   assert.equal(JSON.stringify(receipt).includes(secrets.AUTH_RATE_LIMIT_SECRET), false); assert.equal(JSON.stringify(receipt).includes("fictional.pdf"), false);
   assert.equal((await runDueBackup(f.env, secrets, { now: now + 60000 })).reason, "already completed");
