@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createHmac, randomBytes } from "node:crypto";
 import { startAuthApp } from "./support/auth-app-fixture.mjs";
-import { seedKioskFixture, employeePin, cookiesOf } from "./support/kiosk-fixture.mjs";
+import { seedKioskFixture, employeePin, otherEmployeePin, cookiesOf } from "./support/kiosk-fixture.mjs";
 
 test("built Worker serves a separate registered kiosk and completes PIN → approval → clock → lock", { timeout: 120000 }, async t => {
   const app = await startAuthApp({ seed: seedKioskFixture }); t.after(app.close); const f = app.fixtureData;
@@ -52,4 +53,78 @@ test("built Worker serves a separate registered kiosk and completes PIN → appr
   const listing = await ok(await call("/api/kiosk-admin/devices", owner)); const registered = listing.devices.find(row => row.name === "Built Worker test tablet"); assert.ok(registered);
   await ok(await call("/api/kiosk-admin/revoke", owner, { deviceId: registered.id }));
   assert.equal((await call("/api/kiosk/status", device)).status, 401);
+});
+
+test("registered tablets reconcile offline PIN clock entries exactly once and send conflicts for review", { timeout: 120000 }, async t => {
+  const formatDate = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit" });
+  const formatTime = new Intl.DateTimeFormat("en-GB", { timeZone: "America/Los_Angeles", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+  const app = await startAuthApp({ async seed(db, schema, load, password) {
+    const fixture = await seedKioskFixture(db, schema, load, password);
+    await db.update(schema.employeeProfiles).set({ ssnEncrypted: null });
+    const nearStart = new Date(Date.now() - 3600000);
+    const nearEnd = new Date(Date.now() + 3600000);
+    const [publication] = await db.insert(schema.schedulePublications).values({ version: 2, publishedByAccountId: fixture.owner.id }).returning();
+    await db.insert(schema.shifts).values({ employeeId: fixture.a.id, roleId: fixture.roleA.id, date: formatDate.format(nearStart),
+      startTime: formatTime.format(nearStart), endTime: formatTime.format(nearEnd), publicationId: publication.id });
+    return fixture;
+  } });
+  t.after(app.close);
+  const call = (path, cookie = "", body) => fetch(app.origin + path, {
+    redirect: "manual", signal: AbortSignal.timeout(20000),
+    headers: { Cookie: cookie, ...(body === undefined ? {} : { Origin: app.origin, "Content-Type": "application/json" }) },
+    ...(body === undefined ? {} : { method: "POST", body: JSON.stringify(body) }),
+  });
+  const ok = async response => { assert.equal(response.status, 200); return response.json(); };
+  async function login() {
+    const response = await call("/api/auth/login", "", { email: app.email, password: app.password });
+    await ok(response);
+    return cookiesOf(response)[0];
+  }
+  let owner = await login();
+  const employeeId = app.fixtureData.a.id;
+  await ok(await call("/api/kiosk-admin/employee-pin", owner, { employeeId, pin: employeePin, password: app.password }));
+  const registered = await call("/api/kiosk-admin/register", owner, { name: "Offline clock verification tablet", password: app.password });
+  await ok(registered);
+  const device = cookiesOf(registered).find(cookie => cookie.startsWith("dombase-kiosk-device="));
+  assert.ok(device);
+  owner = await login();
+
+  const status = await ok(await call("/api/kiosk/status?offline=1", device));
+  assert.match(status.offlineDevice, /^[a-f0-9]{64}$/);
+  const person = await ok(await call("/api/kiosk/pin", device, { pin: employeePin, breaks: true, offline: true }));
+  assert.equal(person.employee.id, employeeId);
+  assert.equal(person.state, "out");
+  assert.ok(person.offline.expiresAt > Date.now());
+  const { token, key } = person.offline;
+  const makeAction = (eventType, previous, attemptedAt = Date.now()) => {
+    const entry = {
+      ticket: randomBytes(32).toString("base64url"), attemptedAt, eventType,
+      ...(eventType === "in" ? { roleId: app.fixtureData.roleA.id } : { details: { reports: [] } }),
+      explanation: "Isolated offline clock verification.",
+    };
+    const payload = JSON.stringify([entry.ticket, previous, attemptedAt, eventType, entry.roleId ?? null, entry.explanation, entry.details ?? null]);
+    const proof = createHmac("sha256", key).update(payload).digest("hex");
+    return { ...entry, offline: { token, previous, proof } };
+  };
+  const sync = (body, cookie = device) => call("/api/kiosk/offline-sync", cookie, body);
+  const first = makeAction("in", null);
+  assert.equal((await sync(first, "")).status, 401);
+  assert.equal((await sync(first, "dombase-kiosk-device=" + app.fixtureData.deviceToken)).status, 403);
+  assert.equal((await sync({ ...first, explanation: "Changed after being signed" })).status, 403);
+  const initialResults = await Promise.all([sync(first), sync(first)]);
+  for (const response of initialResults) assert.deepEqual(await ok(response), { outcome: "synced" });
+  const second = makeAction("out", "offline." + first.ticket);
+  assert.deepEqual(await ok(await sync(second)), { outcome: "synced" });
+  assert.deepEqual(await ok(await sync(second)), { outcome: "synced" });
+  assert.deepEqual(await ok(await sync(makeAction("in", null))), { outcome: "review" });
+
+  await ok(await call("/api/kiosk-admin/employee-pin", owner, { employeeId, pin: otherEmployeePin, password: app.password }));
+  assert.deepEqual(await ok(await sync(makeAction("in", "offline." + second.ticket))), { outcome: "review" });
+  assert.equal((await sync(makeAction("in", null, person.offline.expiresAt))).status, 422);
+  const state = await ok(await call("/api/workspace/state", owner));
+  assert.deepEqual(state.state.clockEvents.filter(event => event.employeeId === employeeId).map(event => [event.type, Date.parse(event.at)]), [
+    ["in", first.attemptedAt], ["out", second.attemptedAt],
+  ]);
+  const review = await ok(await call("/api/kiosk-admin/offline-review", owner));
+  assert.equal(review.entries.filter(entry => entry.employee === person.employee.name).length, 2);
 });

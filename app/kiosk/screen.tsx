@@ -10,6 +10,9 @@ import type { ClockInput } from "./clock-queue";
 import { kioskCopy, languageKey, localizedError } from "./copy";
 import type { KioskLanguage, KioskText } from "./copy";
 import { kioskPost, useClockQueue } from "./use-clock-queue";
+import { clearOfflineDevice, offlineDeviceName, prepareEmployeePin, prepareOfflineDevice, recordOfflineClock, signInOffline, storePreparedPin } from "./offline-pin";
+import type { OfflineSession, PreparedPin } from "./offline-pin";
+import { prepareOfflineShell } from "./offline-shell";
 
 type Phase = "loading" | "unregistered" | "pin" | "person" | "approval" | "error";
 type Cooldowns = { pin: PinCooldown | null; approve: PinCooldown | null };
@@ -21,6 +24,9 @@ export function KioskScreen() {
   const [pending, setPending] = useState<{ id: string; early: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
   const [online, setOnline] = useState(true);
+  const [offlineReady, setOfflineReady] = useState(false);
+  const offlinePerson = useRef<OfflineSession | null>(null);
+  const preparedPin = useRef<PreparedPin | undefined>(undefined);
   const [message, setMessage] = useState<KioskText | null>(null);
   const [notice, setNotice] = useState<KioskText | null>(null);
   const [language, setLanguage] = useState<KioskLanguage>("en");
@@ -49,6 +55,8 @@ export function KioskScreen() {
     controller.current?.abort();
     active.current = false;
     working.current = false;
+    offlinePerson.current = null;
+    preparedPin.current = undefined;
     setPerson(null); setPending(null); setBusy(false); setMessage(null); setNotice(confirmation); setPhase("pin");
     setEpoch(value => value + 1);
     lockRemote();
@@ -57,33 +65,44 @@ export function KioskScreen() {
     if (checking.current) return;
     checking.current = true;
     try {
+      if (!navigator.onLine) throw new Error("Offline.");
       const timeout = AbortSignal.timeout(8000);
-      const response = await fetch("/api/kiosk/status", { cache: "no-store", signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
+      const response = await fetch("/api/kiosk/status?offline=1", { cache: "no-store", signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
       if (signal?.aborted) return;
       if (response.status === 401) {
-        registered.current = false; healthy.current = true; setDeviceName(""); setPhase("unregistered");
+        registered.current = false; healthy.current = true; setOnline(true); setOfflineReady(false); setDeviceName(""); setPhase("unregistered");
+        await clearOfflineDevice().catch(() => undefined);
         await sync();
         return;
       }
       if (!response.ok) throw new Error("Tablet status unavailable.");
       const next = await response.json();
+      if (next.offlineDevice) await prepareOfflineDevice(next.offlineDevice, next.deviceName).catch(() => undefined);
+      void prepareOfflineShell();
       lockRemote();
       await lockRequest.current;
       if (signal?.aborted) return;
       setCooldowns({ pin: next.pinRetryAfterSeconds > 0 ? pinCooldown(String(next.pinRetryAfterSeconds), "device", Date.now()) : null, approve: next.approvalRetryAfterSeconds > 0 ? pinCooldown(String(next.approvalRetryAfterSeconds), "device", Date.now()) : null });
       registered.current = true; healthy.current = true;
-      setDeviceName(next.deviceName); setMessage(null); setPhase("pin");
+      setOnline(true); setDeviceName(next.deviceName); setMessage(null); setPhase("pin");
+      setOfflineReady(Boolean(await offlineDeviceName().catch(() => undefined)));
       await sync();
     } catch {
-      if (!signal?.aborted) { healthy.current = false; setMessage("checkingFailed"); setPhase("error"); }
+      if (signal?.aborted) return;
+      const local = await offlineDeviceName().catch(() => undefined);
+      if (signal?.aborted) return;
+      healthy.current = false; setOnline(false); setOfflineReady(Boolean(local));
+      registered.current = Boolean(local);
+      if (local) { setDeviceName(local); setMessage(null); setPhase("pin"); }
+      else { setMessage("checkingFailed"); setPhase("error"); }
     } finally { checking.current = false; }
   }, [lockRemote, sync]);
 
   useEffect(() => {
     const initial = new AbortController();
     const recover = () => {
-      setOnline(navigator.onLine);
-      if (document.hidden || active.current || !navigator.onLine) return;
+      if (!navigator.onLine) { setOnline(false); return; }
+      if (document.hidden || active.current) return;
       if (healthy.current) void sync();
       else void check(initial.signal);
     };
@@ -97,7 +116,7 @@ export function KioskScreen() {
     const hide = () => { if (document.hidden && registered.current) reset(); };
     const pageHide = () => { if (registered.current) reset(); };
     const pageShow = (event: PageTransitionEvent) => { if (event.persisted) { healthy.current = false; recover(); } };
-    const offline = () => setOnline(false);
+    const offline = () => { healthy.current = false; setOnline(false); };
     document.addEventListener("visibilitychange", hide);
     window.addEventListener("blur", pageHide);
     window.addEventListener("pagehide", pageHide);
@@ -129,7 +148,19 @@ export function KioskScreen() {
     try { localStorage.setItem(languageKey, next); } catch { /* Language remains available for this visit. */ }
   }
 
-  async function submit(action: "pin" | "approve" | "clock", body: object, clockInput?: ClockInput) {
+  async function enterOfflinePin(pin: string, version: number) {
+    const { session, retry } = await signInOffline(pin);
+    if (version !== generation.current) return false;
+    if (retry) setCooldowns(current => ({ ...current, pin: pinCooldown(String(retry), "device", Date.now()) }));
+    if (!session) { if (!retry) setMessage("offlineBadPin"); return false; }
+    offlinePerson.current = session;
+    const expiresAt = Math.min(Date.now() + session.authorization.idleSeconds * 1000, session.authorization.expiresAt - session.clockOffset);
+    setPerson({ ...session.person, local: true, state: session.progress?.state ?? session.person.state, expiresAt: new Date(expiresAt).toISOString() });
+    setPhase("person");
+    return true;
+  }
+
+  async function submit(action: "pin" | "approve" | "clock", body: { pin: string; queue?: boolean; breaks?: boolean; requestId?: string } | ClockInput, clockInput?: ClockInput) {
     if (working.current || document.hidden) return;
     const cooldown = action === "clock" ? null : cooldowns[action];
     if (cooldown?.scope === "device" && cooldown.until > Date.now()) return;
@@ -139,10 +170,26 @@ export function KioskScreen() {
     active.current = true; working.current = true;
     setBusy(true); setMessage(null); setNotice(null);
     const replay = clockInput && person?.replay;
-    const queued = clockInput && replay ? { ...clockInput, ticket: replay.ticket, attemptedAt: Math.floor(replay.serverTime + performance.now() - receivedAt.current) } : null;
+    const cached = preparedPin.current;
+    const attemptedAt = replay ? Math.floor(replay.serverTime + performance.now() - receivedAt.current) : 0;
+    const queued = clockInput && replay ? { ...clockInput, ticket: replay.ticket, attemptedAt,
+      ...(cached && !clockInput.details?.assisted ? { followUp: { grant: cached.authorization.id,
+        progress: { anchor: "online." + replay.ticket.split(".")[0], state: clockInput.eventType, attemptedAt } } } : {}),
+    } : null;
+    const pin = "pin" in body ? body.pin : undefined;
     let savedLocally = false;
     let signedIn = false;
     try {
+      if (action === "pin" && pin && (!online || !navigator.onLine)) {
+        signedIn = await enterOfflinePin(pin, version);
+        return;
+      }
+      if (clockInput && offlinePerson.current) {
+        await recordOfflineClock(offlinePerson.current, clockInput);
+        if (version === generation.current) reset("queued");
+        void sync();
+        return;
+      }
       if (queued) {
         try {
           await queueClock(queued);
@@ -156,15 +203,22 @@ export function KioskScreen() {
       if (version !== generation.current) return;
       if (!navigator.onLine) {
         if (savedLocally) reset("queued");
-        else setMessage("connection");
+        else if (clockInput && offlinePerson.current) setMessage("storage");
+        else if (action === "pin" && pin && offlineReady) {
+          setOnline(false); healthy.current = false;
+          signedIn = await enterOfflinePin(pin, version).catch(() => false);
+          if (!signedIn && version === generation.current && !registered.current) setMessage("connection");
+        } else setMessage("connection");
         return;
       }
-      const response = await kioskPost(action, queued ? { ...body, ticket: queued.ticket } : body, abort.signal);
+      const payload = { ...body, ...(queued ? { ticket: queued.ticket } : {}),
+        ...((action === "pin" && available) || cached ? { offline: true } : {}) };
+      const response = await kioskPost(action, payload, abort.signal);
       const data = await response.json();
       if (version !== generation.current) return;
       if (savedLocally && queued) {
         if (response.status >= 500 || [401, 408, 409, 429].includes(response.status)) { reset("queued"); return; }
-        try { await removeClock(queued.ticket); }
+        try { await removeClock(queued, response.ok && !data.approvalRequired); }
         catch { reset("queued"); return; }
       }
       if (version !== generation.current) return;
@@ -178,20 +232,37 @@ export function KioskScreen() {
         return;
       }
       if (action === "pin") {
+        if (pin && data.offline) {
+          const prepared = await prepareEmployeePin(pin, data).catch(() => undefined);
+          if (version !== generation.current) return;
+          preparedPin.current = prepared;
+          if (prepared) setOfflineReady(true);
+        }
         signedIn = true;
         receivedAt.current = performance.now();
         setCooldowns(current => ({ ...current, pin: null }));
-        setPerson(data); setPhase("person");
+        setPerson({ employee: data.employee, roles: data.roles, state: data.state, expiresAt: data.expiresAt,
+          replay: data.replay, breakView: data.breakView, serverTime: data.serverTime, assist: data.assist });
+        setPhase("person");
       } else if (data.approvalRequired) {
         setPending({ id: data.requestId, early: data.reason === kioskCopy.en.earlyApproval }); setPhase("approval");
       } else {
+        if (cached && data.offline && data.offlineState) {
+          await storePreparedPin({ ...cached, authorization: data.offline, clockOffset: data.offline.issuedAt - Date.now(), person: { ...cached.person, state: data.offlineState } }).catch(() => undefined);
+          if (version !== generation.current) return;
+        }
         if (action === "approve") setCooldowns(current => ({ ...current, approve: null }));
         reset(data.assistance === "approved" ? "assistanceApproved" : data.assistance === "pending" ? "assistancePending" : data.eventType);
       }
     } catch {
       if (version === generation.current) {
         if (savedLocally) reset("queued");
-        else setMessage("connection");
+        else if (clockInput && offlinePerson.current) setMessage("storage");
+        else if (action === "pin" && pin && offlineReady) {
+          setOnline(false); healthy.current = false;
+          signedIn = await enterOfflinePin(pin, version).catch(() => false);
+          if (!signedIn && version === generation.current && !registered.current) setMessage("connection");
+        } else setMessage("connection");
       }
     } finally {
       if (version === generation.current) {
@@ -201,7 +272,7 @@ export function KioskScreen() {
     }
   }
 
-  const offlineText = phase === "person" && available && person?.replay ? "offlineAction" : phase === "approval" ? "offlineApproval" : "offlinePin";
+  const offlineText = phase === "person" && available && (person?.replay || person?.local) ? "offlineAction" : phase === "approval" ? "offlineApproval" : offlineReady ? "offlineReady" : "offlinePin";
   return <main className="kiosk-screen" lang={language}>
     <section className="kiosk-shell" aria-labelledby="kiosk-heading">
       <header><span className="brand-mark" aria-hidden="true">D</span><div className="kiosk-title"><p className="kiosk-eyebrow">{text.clock}</p><h1 id="kiosk-heading">{deviceName || text.tablet}</h1></div>
@@ -218,8 +289,8 @@ export function KioskScreen() {
       {phase === "error" ? <button type="button" onClick={() => void check()}>{text.retry}</button> : null}
       {phase === "unregistered" ? <><h2>{text.register}</h2><p>{text.registrationHint}</p></> : null}
       {phase === "pin" && cooldowns.pin ? <PinLockout value={cooldowns.pin} language={language} onExpired={clearPinCooldown} /> : null}
-      {phase === "pin" ? <PinForm key={epoch} language={language} busy={busy} offline={!online} locked={cooldowns.pin?.scope === "device"} describedBy={cooldowns.pin ? "kiosk-lockout" : undefined} onSubmit={pin => submit("pin", { pin, queue: available, breaks: true })} /> : null}
-      {phase === "person" && person ? <ClockPanel person={person} language={language} busy={busy} earlyClockBlocked={message === "earlyClock"} offlineBlocked={!online && !(person.replay && available)} onClock={input => submit("clock", input, input)} onCancel={() => reset()} /> : null}
+      {phase === "pin" ? <PinForm key={epoch} language={language} busy={busy} offline={!online && !offlineReady} locked={cooldowns.pin?.scope === "device"} describedBy={cooldowns.pin ? "kiosk-lockout" : undefined} onSubmit={pin => submit("pin", { pin, queue: available, breaks: true })} /> : null}
+      {phase === "person" && person ? <ClockPanel person={person} language={language} busy={busy} earlyClockBlocked={message === "earlyClock"} offlineBlocked={!online && !((person.replay || person.local) && available)} onClock={input => submit("clock", input, input)} onCancel={() => reset()} /> : null}
       {phase === "approval" && pending ? <><h2>{text.approval}</h2><p>{pending.early ? text.earlyApproval : text.approvalReason}</p>{cooldowns.approve ? <PinLockout value={cooldowns.approve} language={language} manager onExpired={clearApprovalCooldown} /> : null}
         <PinForm key={"manager-" + epoch} language={language} manager busy={busy} offline={!online} locked={cooldowns.approve?.scope === "device"} describedBy={cooldowns.approve ? "kiosk-lockout" : undefined} onSubmit={pin => submit("approve", { requestId: pending.id, pin })} /><button type="button" onClick={() => reset()}>{text.cancel}</button>
       </> : null}

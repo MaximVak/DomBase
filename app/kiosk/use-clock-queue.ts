@@ -35,16 +35,17 @@ export function useClockQueue() {
         let synced = false;
         let review = false;
         for (const entry of entries) {
-          const action = { ticket: entry.ticket, attemptedAt: entry.attemptedAt, eventType: entry.eventType, roleId: entry.roleId, explanation: entry.explanation, details: entry.details };
-          const response = await kioskPost("sync", action);
+          const { ticket, attemptedAt, eventType, roleId, explanation, details, offline } = entry;
+          const action = { ticket, attemptedAt, eventType, roleId, explanation, details, offline };
+          const response = await kioskPost(entry.offline ? "offline-sync" : "sync", action);
           if ([401, 403, 409, 422].includes(response.status)) {
-            await holdClock(action);
+            await holdClock(entry);
             continue;
           }
           if (!response.ok) break;
           const receipt = await response.json();
           if (receipt.outcome !== "synced" && receipt.outcome !== "review") break;
-          await removeClock(entry.ticket);
+          await removeClock(entry, receipt.outcome === "synced");
           if (receipt.outcome === "review") review = true;
           else synced = true;
         }

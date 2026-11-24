@@ -11,6 +11,7 @@ import { KioskRateLimitError, devicePinLockouts, pinAttemptLimits, attemptBudget
 import { clockDraft, eventAllowed, makeReplayTicket, readReplayTicket, syncClock } from "./replay";
 import type { ClockDraft } from "./replay";
 import { clockIdleSeconds } from "./idle";
+import { offlineDeviceTag, prepareOfflineAuthorization, prepareOfflineReplay } from "./offline";
 import { clockPolicy, kioskBreakView, resolveBreakDetails, workplaceDate } from "./break-actions";
 import { nextDate, zonedTimestamp } from "../workforce/time";
 import { clockEntryUnlocked } from "../workforce/timesheet-lock-guards";
@@ -19,6 +20,7 @@ import type { ClockDetails } from "./break-rules";
 
 type Person = { interaction: typeof schema.kioskInteractions.$inferSelect; employee: typeof schema.employees.$inferSelect };
 type Approval = { accountId: number; sessionVersion: number; credentialRevision: string };
+const clockSeconds = (interaction: Person["interaction"]) => Math.round((Date.parse(interaction.expiresAt) - Date.parse(interaction.createdAt)) / 1000);
 const expired = () => new AuthError(401, "Enter your employee PIN again.");
 
 export function createKioskService(db: KioskOperatorDatabase, options: { secret: string; now?: () => number }) {
@@ -70,7 +72,7 @@ export function createKioskService(db: KioskOperatorDatabase, options: { secret:
       db.update(schema.kioskApprovalSessions).set({ usedAt: stamp() }).where(and(eq(schema.kioskApprovalSessions.deviceSessionId, device.session.id), isNull(schema.kioskApprovalSessions.usedAt))),
     ]);
   }
-  async function signIn(request: Request, device: RegisteredDevice, pin: unknown, queue: boolean, breaks: boolean) {
+  async function signIn(request: Request, device: RegisteredDevice, pin: unknown, queue: boolean, breaks: boolean, offline: boolean) {
     if (!pinIsValid(pin)) throw new AuthError(401, "Invalid employee PIN.");
     const lookup = pinLookup(options.secret, pin);
     const deviceAttempt = await attemptBudget(db, options.secret, `employee-device:${device.device.id}`, pinAttemptLimits.employeeDevice, now());
@@ -94,6 +96,7 @@ export function createKioskService(db: KioskOperatorDatabase, options: { secret:
     return json({ employee: { id: employee.id, name: employee.name }, roles, state: event?.eventType ?? "out", expiresAt,
       ...(breaks ? { breakView: await kioskBreakView(db, employee.id, event, now()), serverTime: now(),
         assist: await assistanceView(employee.id, event) } : {}),
+      ...(offline ? { offline: prepareOfflineAuthorization(options.secret, device, employee.id, employee.pinVersion, event?.id ?? 0, now(), seconds) } : {}),
       ...(queue ? { replay: { ticket: makeReplayTicket(options.secret, device, id, event?.id ?? 0), serverTime: now() } } : {}),
     }, 200, { "Set-Cookie": kioskCookie(new URL(request.url), "person", token, seconds) });
   }
@@ -216,7 +219,7 @@ export function createKioskService(db: KioskOperatorDatabase, options: { secret:
       requiresApproval: !upcoming || policy.blockEarlyClockIn, details };
   }
   async function prepareClock(device: RegisteredDevice, person: Person, body: Record<string, unknown>) {
-    exactKeys(body, ["eventType", "roleId", "explanation", "ticket", "details"]);
+    exactKeys(body, ["eventType", "roleId", "explanation", "ticket", "details", "offline"]);
     const draft = clockDraft(body);
     const previous = await lastEvent(person.employee.id);
     const ticket = body.ticket === undefined ? null : readReplayTicket(options.secret, device, body.ticket);
@@ -240,7 +243,7 @@ export function createKioskService(db: KioskOperatorDatabase, options: { secret:
     return pending;
   }
   async function approve(device: RegisteredDevice, person: Person, body: Record<string, unknown>) {
-    exactKeys(body, ["requestId", "pin"]);
+    exactKeys(body, ["requestId", "pin", "offline"]);
     if (!tokenIsValid(body.requestId) || !pinIsValid(body.pin)) throw new AuthError(401, "Invalid manager approval PIN.");
     const [pending] = await db.select().from(schema.kioskClockRequests).where(and(eq(schema.kioskClockRequests.id, body.requestId), eq(schema.kioskClockRequests.interactionId, person.interaction.id), eq(schema.kioskClockRequests.requiresApproval, true), isNull(schema.kioskClockRequests.completedAt), isNull(schema.kioskClockRequests.cancelledAt), sql`${schema.kioskClockRequests.expiresAt} > ${stamp()}`)).limit(1);
     if (!pending) throw new AuthError(409, "This approval request is no longer available. Enter your employee PIN again.");
@@ -262,14 +265,18 @@ export function createKioskService(db: KioskOperatorDatabase, options: { secret:
   async function handle(request: Request) {
     try {
       const url = new URL(request.url); const action = url.pathname.slice("/api/kiosk/".length);
-      if (!["status", "pin", "lock", "clock", "approve", "sync"].includes(action)) throw new AuthError(404, "Not found.");
+      if (!["status", "pin", "lock", "clock", "approve", "sync", "offline-sync"].includes(action)) throw new AuthError(404, "Not found.");
       const device = await deviceFor(request);
-      if (action === "status" && request.method === "GET") return json({ registered: true, deviceName: device.device.name, ...await devicePinLockouts(db, options.secret, device.device.id, now()) });
+      if (action === "status" && request.method === "GET") return json({ registered: true, deviceName: device.device.name, ...(url.searchParams.get("offline") === "1" ? { offlineDevice: offlineDeviceTag(options.secret, device) } : {}), ...await devicePinLockouts(db, options.secret, device.device.id, now()) });
       if (request.method !== "POST") return json({ error: "Method not allowed." }, 405, { Allow: action === "status" ? "GET" : "POST" });
       const body = await readAuthBody(request);
       if (action === "lock") { exactKeys(body, []); await lock(device); return json({ locked: true }, 200, { "Set-Cookie": kioskCookie(url, "person", "", 0) }); }
-      if (action === "pin") { exactKeys(body, ["pin", "queue", "breaks"]); return await signIn(request, device, body.pin, body.queue === true, body.breaks === true); }
+      if (action === "pin") { exactKeys(body, ["pin", "queue", "breaks", "offline"]); return await signIn(request, device, body.pin, body.queue === true, body.breaks === true, body.offline === true); }
       if (action === "sync") return json(await syncClock(db, device, activeDevice(device), options.secret, now(), body, lastEvent, planClock));
+      if (action === "offline-sync") {
+        const { forceReview, ...entry } = await prepareOfflineReplay(db, device, activeDevice(device), options.secret, now(), body);
+        return json(await syncClock(db, device, activeDevice(device), options.secret, now(), entry, lastEvent, planClock, forceReview));
+      }
       const person = await personFor(request, device);
       let result;
       if (action === "approve") result = await approve(device, person, body);
@@ -278,7 +285,9 @@ export function createKioskService(db: KioskOperatorDatabase, options: { secret:
         if (pending.requiresApproval) return json({ approvalRequired: true, requestId: pending.id, reason: pending.approvalReason }, 202);
         result = await commitClock(device, person, pending);
       } else throw new AuthError(405, "Method not allowed.");
-      return json(result, 200, { "Set-Cookie": kioskCookie(url, "person", "", 0) });
+      const latest = body.offline === true && !result.assistance ? await lastEvent(person.employee.id).catch(() => null) : null;
+      const offline = latest ? prepareOfflineAuthorization(options.secret, device, person.employee.id, person.employee.pinVersion, latest.id, now(), clockSeconds(person.interaction)) : undefined;
+      return json({ ...result, ...(offline ? { offline, offlineState: latest?.eventType } : {}) }, 200, { "Set-Cookie": kioskCookie(url, "person", "", 0) });
     } catch (error) {
       if (error instanceof KioskRateLimitError) return json({ error: error.message, retryAfterSeconds: error.retryAfterSeconds, limitScope: error.limitScope }, error.status, { "Retry-After": String(error.retryAfterSeconds) });
       if (error instanceof AuthError) return json({ error: error.message }, error.status);

@@ -55,6 +55,7 @@ export async function syncClock(
   db: KioskOperatorDatabase, device: RegisteredDevice, activeDevice: SQL, secret: string, now: number, body: Record<string, unknown>,
   lastEvent: (employeeId: number) => Promise<ClockEvent | null>,
   planClock: (employeeId: number, previous: ClockEvent | null, draft: ClockDraft, time: number) => Promise<Plan>,
+  forceReview = false,
 ) {
   exactKeys(body, ["ticket", "eventType", "roleId", "explanation", "attemptedAt", "details"]);
   const { interactionId, previousId } = readReplayTicket(secret, device, body.ticket);
@@ -84,7 +85,7 @@ export async function syncClock(
   const shiftScope = shift ? sql`EXISTS (SELECT 1 FROM shifts WHERE id = ${shift.id} AND employee_id = ${interaction.employeeId}
     AND role_id = ${roleId} AND publication_id = ${shift.publicationId} AND archived_at IS NULL AND shift_type = 'work'
     AND date = ${shift.date} AND start_time = ${shift.startTime} AND end_time = ${shift.endTime})` : sql`1 = 1`;
-  const canAutoSave = plan && !plan.requiresApproval && (draft.eventType !== "in" || shift) && (previous?.id ?? 0) === previousId
+  const canAutoSave = !forceReview && plan && !plan.requiresApproval && (draft.eventType !== "in" || shift) && (previous?.id ?? 0) === previousId
     && eventAllowed(previous?.eventType ?? null, draft.eventType, !!draft.details?.assisted) && (!previous || Date.parse(previous.occurredAt) <= attempted)
     && attempted >= now - 72 * 3600000;
   const unsettled = sql`${activeDevice} AND NOT EXISTS (SELECT 1 FROM kiosk_clock_replays WHERE interaction_id = ${interactionId})
@@ -92,7 +93,7 @@ export async function syncClock(
   const assistance = plan?.details?.assistance;
   const target = assistance?.targetEventId;
   const unlocked = clockEntryUnlocked(interaction.employeeId, draft.eventType === "in" ? 0 : previousId, attemptedAt, assistance?.requestedAt);
-  if (target && previousId === target && attempted >= now - 72 * 3600000) {
+  if (!forceReview && target && previousId === target && attempted >= now - 72 * 3600000) {
     await atomicBatch(db, [
       insertAssistance(assistance, interactionId, attemptedAt, draft.explanation, sql`id=${target} AND employee_id=${interaction.employeeId} AND event_type='out' AND automatic=1`,
         sql`${unsettled} AND ${unlocked} AND ${assistedOutPolicyGuard} AND (SELECT MAX(id) FROM clock_events WHERE employee_id=${interaction.employeeId})=${target}

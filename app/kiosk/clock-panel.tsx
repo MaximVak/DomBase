@@ -10,7 +10,7 @@ import type { ReportedTime } from "../../kiosk/assistance";
 
 export type ClockPerson = {
   employee: { id: number; name: string }; roles: { id: number; name: string }[];
-  state: "in" | "out" | "break" | "break_end"; expiresAt: string; serverTime?: number;
+  state: "in" | "out" | "break" | "break_end"; expiresAt: string; serverTime?: number; local?: boolean;
   replay?: { ticket: string; serverTime: number };
   assist?: { in: boolean; out: boolean; recovery: boolean; reminder: boolean; date: string };
   breakView?: { issues: BreakIssue[]; active?: { kind: BreakKind; availableAt: number; extensionAt: number } };
