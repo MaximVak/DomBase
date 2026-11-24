@@ -218,6 +218,13 @@
       "when": 1795481431042,
       "tag": "0030_stage3_clock_photos_and_holidays",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "6",
+      "when": 1795493440730,
+      "tag": "0031_stage6_notification_preferences",
+      "breakpoints": true
     }
   ]
 }

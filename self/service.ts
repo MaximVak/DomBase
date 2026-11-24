@@ -18,6 +18,7 @@ import { readEmployeeSchedule } from "./schedule";
 import { readSchedulePreferences, saveSchedulePreferences, readScheduleAlerts, saveScheduleAlertReceipt } from "./schedule-notifications";
 import { readMyAvailability, saveMyAvailability } from "./availability";
 import { readMyTimeOff, submitMyTimeOff } from "./time-off";
+import { handleNotificationPreferences } from "../workforce/notification-preferences";
 
 type Auth = Pick<ReturnType<typeof createAuthService>, "getSession">;
 export function createSelfService(db: KioskOperatorDatabase, auth: Auth, secret: string, now = Date.now, emailEnabled = false) {
@@ -107,6 +108,7 @@ export function createSelfService(db: KioskOperatorDatabase, auth: Auth, secret:
   async function handle(request: Request) {
     try {
       const ctx = await context(request); const url = new URL(request.url);
+      if (url.pathname === "/api/self/notification-preferences") return await handleNotificationPreferences(db, ctx, request, secret, now());
       if (url.pathname === "/api/self/time-off") {
         if (url.search) throw new AuthError(400, "Time off does not accept employee selectors.");
         if (request.method === "GET") return json(await readMyTimeOff(db, ctx, now()));

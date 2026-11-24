@@ -42,7 +42,7 @@ export async function decideOpenClaim(db:Database,ctx:Context,body:Record<string
  if(body.reviewToken!==token)throw new AuthError(409,'Review this exact request and decision before saving.');
  const tx=new WorkspaceTransaction(db,ctx,body.id as string,new Date(now).toISOString()),publicationId=newRecordId();
  const others=decision==='approve'?await db.select().from(s.openShiftClaims).where(and(eq(s.openShiftClaims.openShiftId,open.id),eq(s.openShiftClaims.status,'pending'),ctx.activeActor())).limit(2001):[claim];if(others.length>2000)throw new AuthError(503,'Too many requests to decide safely.');
- const recipients=await selectNoticeRecipients(db,ctx,meta.master,{inApp:true,email:!!options.emailEnabled},[...new Set(others.map(row=>row.employeeId))]);
+ const recipients=await selectNoticeRecipients(db,ctx,meta.master,{inApp:true,email:!!options.emailEnabled,event:"openShift"},[...new Set(others.map(row=>row.employeeId))]);
  tx.insert(s.schedulePublications,{id:publicationId,version:(last?.version??0)+1,publishedByAccountId:ctx.account.id,publishedAt:tx.stamp,noticeType:'open_shift_request',departmentId:role.departmentId,periodStart:open.date,periodEnd:open.date,notifyMode:'changed',notifyInApp:true,notifyEmail:!!options.emailEnabled,scopeDepartments:role.departmentId===null?[]:[role.departmentId]});
  if(decision==='approve'){
   const shiftId=newRecordId();tx.insert(s.shifts,{id:shiftId,employeeId:claim.employeeId,roleId:open.roleId,roleName:role.name,date:open.date,startTime:open.startTime,endTime:open.endTime,station:open.station,notes:open.notes,shiftType:'work',color:open.color,publicationId},eligibleForOpen(claim.employeeId,open.roleId));

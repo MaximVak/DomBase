@@ -21,6 +21,7 @@ export type WorkspaceData = {
   opened: Record<number, string[]>;
   dismissed: Record<number, string[]>;
   employeeVersions: Record<number, number>;
+  notificationFlags?: import("./notification-preferences-model").DashboardNotificationFlags;
   teamPeriod?: import("../team/rules").PayCalendar;
   timesheetSchedule?: PublishedTimesheetShift[];
   timesheetLeave?: import("../app/timesheets-model").TimesheetPto[];

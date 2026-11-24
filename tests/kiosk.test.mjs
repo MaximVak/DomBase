@@ -415,6 +415,11 @@ test("registered tablets, PIN sessions and action-scoped approvals use isolated 
     }).returning();
     const employee = await login(employeeAccount.email);
     const ownAlerts = body => request(self, "/api/self/schedule-alerts", employee, body);
+    async function changePreferences(sendPreference, events) {
+      const { revision, version, scheduleVersion, contextToken } = await ok(await sendPreference());
+      return ok(await sendPreference({ id: randomBytes(32).toString("base64url"), revision, version, scheduleVersion, contextToken, events }));
+    }
+    const ownPreferences = body => request(self, "/api/self/notification-preferences", employee, body);
     const pin = fixturePin1;
     async function sign() {
       const response = await send("pin", deviceCookie, { pin, breaks: true, queue: true });
@@ -430,6 +435,11 @@ test("registered tablets, PIN sessions and action-scoped approvals use isolated 
     assert.equal(overdue.rows.find(row => row.id === "shift-" + morning.id).status, "Late");
     assert.equal(overdue.alerts.some(alert => alert.employee === f.multi.name && alert.title === "Clock-in overdue"), true);
     assert.equal(overdue.rows.some(row => row.id === "shift-" + other.id), false);
+    await changePreferences(body => manage("notification-preferences", managerCookie, body), { lateArrival: { inApp: false } });
+    const mutedAttendance = await ok(await manage("attendance", managerCookie));
+    assert.deepEqual(mutedAttendance.rows, overdue.rows);
+    assert.equal(mutedAttendance.alerts.some(alert => alert.employee === f.multi.name && alert.title === "Clock-in overdue"), false);
+    assert.equal((await ok(await manage("attendance", ownerCookie))).alerts.some(alert => alert.employee === f.multi.name), true);
     const person = await sign();
     assert.equal(person.data.assist.in, true);
     assert.equal((await send("clock", person.cookie, report("in", "09:20"))).status, 422);
@@ -496,7 +506,19 @@ test("registered tablets, PIN sessions and action-scoped approvals use isolated 
       INVITATION_EMAIL: { send: async message => { emails.push(message); return { messageId: "isolated-test-message" }; } },
       INVITATION_EMAIL_FROM: "clock@example.test", INVITATION_EMAIL_REPLY_TO: "team@example.test", INVITATION_EMAIL_ORIGIN: "https://local.example.test",
     }, at);
-    for (const wall of ["15:10", "16:00", "17:00"]) {
+    at = fixed("15:10");
+    await changePreferences(ownPreferences, { clockOut: { inApp: false } });
+    await runScheduledMaintenance(db, at);
+    const queued = (await reminders()).find(row => row.email === "pending");
+    assert.ok(queued);
+    assert.equal((await sign()).data.assist.reminder, false);
+    assert.deepEqual((await ok(await ownAlerts())).notices, []);
+    await changePreferences(ownPreferences, { clockOut: { email: false } });
+    await deliver();
+    assert.equal((await reminders()).find(row => row.id === queued.id).email, "cancelled");
+    assert.equal(emails.length, 0);
+    await changePreferences(ownPreferences, { clockOut: { inApp: true, email: true } });
+    for (const wall of ["16:00", "17:00"]) {
       at = fixed(wall);
       await runScheduledMaintenance(db, at, deliver);
       await runScheduledMaintenance(db, at, deliver);
@@ -506,9 +528,9 @@ test("registered tablets, PIN sessions and action-scoped approvals use isolated 
     assert.equal(automatic[1].automatic, true);
     assert.deepEqual((await reminders()).map(row => row.id).filter(id => id.startsWith(`clock-out-${automatic[0].id}-`)),
       [0, 1, 2].map(slot => `clock-out-${automatic[0].id}-${slot}`));
-    assert.equal(emails.length, 3);
+    assert.equal(emails.length, 2);
     assert.ok(emails.every(message => message.to === f.multi.email && message.subject === "DomBase clock-out reminder"));
-    assert.equal((await reminders()).filter(row => row.email === "accepted").length, 3);
+    assert.equal((await reminders()).filter(row => row.email === "accepted").length, 2);
     at = fixed("17:01");
     await db.update(schema.locationSettings).set({ breakWaivers: true });
     const paused = await sign();

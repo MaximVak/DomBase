@@ -1,25 +1,133 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
-type Preferences = { revision: number; version: number; contextToken: string; inApp: boolean; email: boolean; masterEnabled: boolean; hasEmail: boolean };
-export function ScheduleAlertPreferences({ endpoint, onSaved }: { onSaved?: () => void; endpoint: "/api/self/schedule-preferences" | "/api/workspace/schedule-preferences" }) {
-  const [data, setData] = useState<Preferences | null>(null), [error, setError] = useState(""), [notice, setNotice] = useState(""), [pending, setPending] = useState(false), request = useRef<AbortController | null>(null);
+import type { FormEvent } from "react";
+import { notificationSpec } from "../workforce/notification-preferences-model";
+import type { NotificationChannel, NotificationChoices, NotificationEvent, NotificationPreferences as Preferences } from "../workforce/notification-preferences-model";
+
+const channels = { inApp: "In-app", email: "Email", sms: "Text (SMS)" };
+type Endpoint = "/api/self/notification-preferences" | "/api/workspace/notification-preferences";
+
+function errorText(error: unknown, fallback: string) {
+  return error instanceof Error && !(error instanceof TypeError) && !(error instanceof SyntaxError) ? error.message : fallback;
+}
+
+export function NotificationPreferences({ endpoint, onSaved }: { endpoint: Endpoint; onSaved?: () => void }) {
+  const [data, setData] = useState<Preferences>();
+  const [draft, setDraft] = useState<NotificationChoices>({});
+  const [pending, setPending] = useState(true);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const request = useRef<AbortController | null>(null);
+
   const load = useCallback(async () => {
-    request.current?.abort(); const controller = new AbortController(); request.current = controller; setData(null); setError(""); setPending(true);
-    try { const response = await fetch(endpoint, { cache: "no-store", signal: controller.signal }); const value = await response.json(); if (!response.ok) throw new Error(value.error || "Could not load alert preferences."); if (!controller.signal.aborted) setData(value); }
-    catch (reason) { if (!controller.signal.aborted) setError(reason instanceof Error && !(reason instanceof TypeError) && !(reason instanceof SyntaxError) ? reason.message : "Could not load alert preferences. Check your connection and try again."); }
-    finally { if (!controller.signal.aborted) setPending(false); }
+    request.current?.abort();
+    const controller = new AbortController();
+    request.current = controller;
+    setPending(true); setError(""); setNotice("");
+    try {
+      const response = await fetch(endpoint, { cache: "no-store", signal: controller.signal });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Could not load notification preferences.");
+      if (!controller.signal.aborted) { setData(result); setDraft({}); }
+    } catch (reason) {
+      if (!controller.signal.aborted) setError(errorText(reason, "Could not load preferences. Check your connection and retry."));
+    } finally {
+      if (!controller.signal.aborted) setPending(false);
+    }
   }, [endpoint]);
-  useEffect(() => { const initial = window.setTimeout(() => void load(), 0); return () => { clearTimeout(initial); request.current?.abort(); }; }, [load]);
-  async function save() {
-    if (!data || pending) return; setPending(true); setError(""); setNotice("");
-    const controller = new AbortController(); request.current = controller;
-    const id = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
-    try { const response = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, contextToken: data.contextToken, revision: data.revision, version: data.version, inApp: data.inApp, email: data.email }), signal: controller.signal }); const value = await response.json(); if (!response.ok) throw new Error(value.error || "Could not save alert preferences."); if (!controller.signal.aborted) { setNotice("Schedule alert preferences saved."); await load(); onSaved?.(); } }
-    catch (reason) { if (!controller.signal.aborted) setError(reason instanceof Error && !(reason instanceof TypeError) && !(reason instanceof SyntaxError) ? reason.message : "The save could not be confirmed. Reload preferences before retrying."); }
-    finally { if (!controller.signal.aborted) setPending(false); }
+
+  useEffect(() => {
+    const initial = window.setTimeout(() => void load(), 0);
+    return () => { clearTimeout(initial); request.current?.abort(); };
+  }, [load]);
+
+  const dirty = draft.smsEnabled !== undefined || !!Object.keys(draft.events ?? {}).length;
+  function change(event: NotificationEvent, channel: NotificationChannel, value: boolean, saved: boolean) {
+    setDraft(current => {
+      const events = { ...current.events };
+      const row = { ...events[event] };
+      if (value === saved) delete row[channel];
+      else row[channel] = value;
+      if (Object.keys(row).length) events[event] = row;
+      else delete events[event];
+      return { ...current, events };
+    });
+    setNotice("");
   }
-  return <section className="schedule-alert-preferences" aria-label="My schedule alert preferences" aria-busy={pending}><h3>My schedule alerts</h3><p>Choose how you receive future schedule publication and change notices.</p>
-    {data ? <><label className="schedule-tool-check"><input type="checkbox" checked={data.inApp} disabled={pending} onChange={event => { setData({ ...data, inApp: event.target.checked }); setNotice(""); }} />In-app notices</label><label className="schedule-tool-check"><input type="checkbox" checked={data.email} disabled={pending} onChange={event => { setData({ ...data, email: event.target.checked }); setNotice(""); }} />Email</label>{!data.hasEmail ? <p>Your profile needs a valid email address to receive email notices. Ask a manager to update it.</p> : null}{!data.masterEnabled ? <p>Company or location alerts are currently disabled for you. Your preferences will apply when those alerts are enabled.</p> : null}<button type="button" disabled={pending} onClick={() => void save()}>Save my schedule alerts</button></> : pending ? <p role="status">Loading alert preferences…</p> : null}
-    {notice ? <p role="status">{notice}</p> : null}{error ? <p role="alert">{error}</p> : null}<button type="button" disabled={pending} onClick={() => void load()}>Reload preferences</button>
-  </section>;
+
+  async function save(event: FormEvent) {
+    event.preventDefault();
+    if (!data || pending || !dirty) return;
+    const controller = new AbortController();
+    request.current = controller;
+    setPending(true); setError(""); setNotice("");
+    const id = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
+    try {
+      const { contextToken, revision, version, scheduleVersion } = data;
+      const response = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, cache: "no-store",
+        body: JSON.stringify({ id, contextToken, revision, version, scheduleVersion, ...draft }), signal: controller.signal });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Could not save notification preferences.");
+      if (!controller.signal.aborted) {
+        setData(result); setDraft({}); setNotice("Notification preferences saved.");
+        onSaved?.();
+      }
+    } catch (reason) {
+      if (!controller.signal.aborted) setError(errorText(reason, "The save could not be confirmed. Reload preferences before retrying."));
+    } finally {
+      if (!controller.signal.aborted) setPending(false);
+    }
+  }
+
+  const sections = new Map<string, Preferences["rows"]>();
+  for (const row of data?.rows ?? []) {
+    const { group } = notificationSpec(row.id);
+    if (!sections.has(group)) sections.set(group, []);
+    sections.get(group)!.push(row);
+  }
+  const personal = !!sections.get("Schedule")?.some(row => row.id === "schedule");
+  return <form className="notification-preferences" aria-label="My notification preferences" aria-busy={pending} onSubmit={save}>
+    {data ? <>
+      {personal && <fieldset className="notification-settings-group" disabled={pending}>
+        <legend>Text messages</legend>
+        <label className="notification-preference-control"><input type="checkbox" checked={draft.smsEnabled ?? data.smsEnabled} onChange={event => {
+          const value = event.target.checked;
+          setDraft(current => ({ ...current, smsEnabled: value === data.smsEnabled ? undefined : value }));
+          setNotice("");
+        }} /> Allow text messages</label>
+        <p>Turning this off stops all notification texts. Text delivery is pending setup.</p>
+        {!data.hasPhone && <p>Ask a manager to add a valid mobile number to your profile before using text delivery.</p>}
+      </fieldset>}
+      {[...sections].map(([title, rows]) => <fieldset className="notification-settings-group" disabled={pending} key={title}>
+        <legend>{title}</legend>
+        {rows.map(row => {
+          const spec = notificationSpec(row.id);
+          return <div className="notification-settings-row" key={row.id} role="group" aria-label={spec.label}>
+            <span>{spec.label}</span>
+            <div className="notification-settings-channels">
+              {(Object.keys(channels) as NotificationChannel[]).map(channel => {
+                const saved = row.channels[channel];
+                if (saved === undefined) return null;
+                const planned = spec.planned.includes(channel);
+                return <label className="notification-preference-control" key={channel}>
+                  <input type="checkbox" aria-label={spec.label + " " + channels[channel] + (planned ? " (coming later)" : "")}
+                    checked={draft.events?.[row.id]?.[channel] ?? saved} onChange={event => change(row.id, channel, event.target.checked, saved)} />
+                  <span>{channels[channel]}{planned && <small>Coming later</small>}</span>
+                </label>;
+              })}
+            </div>
+          </div>;
+        })}
+      </fieldset>)}
+      {personal && !data.hasScheduleEmail && <p>Ask a manager to add a valid profile email for schedule and clock-out emails.</p>}
+      {personal && !data.locationAlerts && <p>Location alerts are disabled for your profile. Your choices are saved for when alerts are enabled.</p>}
+      {personal && data.locationAlerts && !data.scheduleAlerts && <p>Company schedule alerts are currently disabled.</p>}
+    </> : pending && <p role="status">Loading notification preferences…</p>}
+    {notice && <p role="status">{notice}</p>}
+    {error && <p role="alert">{error}</p>}
+    <div className="notification-settings-actions">
+      {data && <button type="submit" className="primary-action" disabled={pending || !dirty}>Save preferences</button>}
+      <button type="button" disabled={pending} onClick={() => void load()}>Reload preferences</button>
+    </div>
+  </form>;
 }

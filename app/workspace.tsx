@@ -727,7 +727,8 @@ export default function Home({ account }: { account: DashboardAccount }) {
   }, [visibleScheduleTimeOffId]);
   const reviewingOwnPtoRequest = reviewingPtoRequest?.employeeId === activeEmployeeId;
   const activeUserCanManage = shared.data.permissions["team.manage"] || shared.data.permissions["schedule.manage"] || shared.data.permissions["time_off.approve"];
-  const notificationRequests = activeUserCanManage ? [...(state.ptoRequests ?? [])]
+  const notificationFlags = shared.data.notificationFlags;
+  const notificationRequests = activeUserCanManage && notificationFlags?.timeOffRequest !== false ? [...(state.ptoRequests ?? [])]
     .filter((request) => request.employeeId !== activeEmployeeId)
     .sort((first, second) => (second.requestedAt ?? "").localeCompare(first.requestedAt ?? ""))
     : [];
@@ -795,7 +796,10 @@ export default function Home({ account }: { account: DashboardAccount }) {
       requestStatus: request.status,
     };
   });
-  const alertNotifications: HeaderNotification[] = operationalAlerts.map((alert) => ({
+  const alertNotifications: HeaderNotification[] = operationalAlerts.filter(alert => {
+    const type = alert.id.startsWith("late-clock-in-") ? "lateArrival" : alert.id.startsWith("no-show-") ? "noShow" : "clockExceptions";
+    return notificationFlags?.[type] !== false;
+  }).map((alert) => ({
     id: `alert-${alert.id}`,
     kind: "alert",
     title: alert.title,
@@ -810,8 +814,8 @@ export default function Home({ account }: { account: DashboardAccount }) {
     detail: notification.detail,
     at: notification.at,
   }));
-  const openRequestNotifications: HeaderNotification[] = (shared.data.openRequests ?? []).map(request => ({ id: `request-open-${request.id}`, kind: "open-request", title: `${request.employee} · Open shift request`, detail: `${request.role} · Pending approval`, at: request.requestedAt }));
-  const exchangeNotifications: HeaderNotification[] = (shared.data.exchangeRequests ?? []).map(row=>({id:`request-exchange-${row.id}`,kind:"shift-exchange",title:`${row.requester} · ${row.kind==='trade'?'Trade':'Cover'} request`,detail:"Teammate accepted · Manager approval needed",at:row.at??""}));
+  const openRequestNotifications: HeaderNotification[] = (notificationFlags?.managerOpenShift === false ? [] : shared.data.openRequests ?? []).map(request => ({ id: `request-open-${request.id}`, kind: "open-request", title: `${request.employee} · Open shift request`, detail: `${request.role} · Pending approval`, at: request.requestedAt }));
+  const exchangeNotifications: HeaderNotification[] = (notificationFlags?.managerShiftExchange === false ? [] : shared.data.exchangeRequests ?? []).map(row=>({id:`request-exchange-${row.id}`,kind:"shift-exchange",title:`${row.requester} · ${row.kind==='trade'?'Trade':'Cover'} request`,detail:"Teammate accepted · Manager approval needed",at:row.at??""}));
   const allHeaderNotifications = [
     ...exchangeNotifications,
     ...openRequestNotifications,
@@ -3890,7 +3894,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
                   pin={activeEmployee.pin}
                 /> : null
               ) : activeSettingsTab === "Notifications" ? (
-                <NotificationsSettingsPanel employeeLinked={account.employeeId !== null} locationName={activeEmployee?.location.trim() || sidebarLocationName} />
+                <NotificationsSettingsPanel />
               ) : activeSettingsTab === "Password & security" ? (
                 <section className="panel settings-enforcement-panel settings-security-panel">
                   <div className="settings-panel-heading"><h3>Password &amp; security</h3></div>

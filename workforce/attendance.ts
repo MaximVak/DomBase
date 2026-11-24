@@ -7,6 +7,7 @@ import { atomicBatch } from "../kiosk/database";
 import type { Context, Database } from "./context";
 import { offsetDate } from "./period";
 import { countAssistedClocks } from "./assisted-clock";
+import { accountNotificationAllowed, employeeNotificationAllowed } from "./notification-preferences";
 
 type Candidate = {
   id: number; employeeId: number; employee: string; role: string; date: string; startTime: string; endTime: string;
@@ -61,7 +62,8 @@ export async function readAttendance(db: Database, ctx: Context, now: number) {
       FROM notifications n JOIN shifts sh ON n.event_target_id=('clock-attendance-' || sh.id) AND sh.employee_id=n.employee_id
       JOIN employees staff ON staff.id=sh.employee_id
       WHERE n.source_key LIKE 'clock-manager-%' AND sh.publication_id IS NOT NULL AND sh.archived_at IS NULL AND ${scope}
-        AND CASE WHEN n.source_key LIKE 'clock-manager-late-%' THEN ${policy.lateAttendanceAlerts} ELSE ${policy.noShowAlerts} END
+        AND CASE WHEN n.source_key LIKE 'clock-manager-late-%' THEN ${policy.lateAttendanceAlerts} AND ${accountNotificationAllowed(ctx.account.id, "lateArrival", "inApp")}
+          ELSE ${policy.noShowAlerts} AND ${accountNotificationAllowed(ctx.account.id, "noShow", "inApp")} END
         AND n.occurred_at >= ${new Date(now - 24 * 3600000).toISOString()} ORDER BY n.occurred_at DESC,n.id LIMIT 50`),
     db.all<{ id: number; employee: string; role: string; status: string }>(sql`SELECT c.id,e.name AS employee,c.role_name AS role,
       CASE WHEN c.event_type='break' THEN 'On break' ELSE 'On shift' END AS status
@@ -103,29 +105,33 @@ export async function createAttendanceNotices(db: Database, now = Date.now()) {
       const guard = sql`EXISTS(SELECT 1 FROM shifts sh WHERE sh.id=${row.id} AND sh.employee_id=${row.employeeId}
         AND sh.publication_id IS NOT NULL AND sh.archived_at IS NULL AND sh.start_time=${row.startTime} AND sh.end_time=${row.endTime})
         AND (SELECT MAX(c.id) FROM clock_events c WHERE c.employee_id=${row.employeeId}) IS ${row.lastId}`;
-      const queue = (id: string, title: string, detail: string, email: boolean, allow = sql`1=1`) => {
-        inserts.push(sql`INSERT INTO notifications (id,employee_id,source_key,kind,title,detail,occurred_at,event_target_id,clock_email_state)
-          SELECT ${id},${row.employeeId},${id},'alert',${title},${detail},${stamp},${target},${email ? "pending" : null}
-          WHERE ${guard} AND ${allow} ON CONFLICT DO NOTHING`);
+      const queue = (id: string, title: string, detail: string, allow: SQL, inApp = sql`1`, email = sql`0`) => {
+        inserts.push(sql`INSERT INTO notifications (id,employee_id,source_key,kind,title,detail,occurred_at,event_target_id,in_app,clock_email_state)
+          SELECT ${id},${row.employeeId},${id},'alert',${title},${detail},${stamp},${target},${inApp},CASE WHEN ${email} THEN 'pending' END
+          WHERE ${guard} AND ${allow} AND (${inApp} OR ${email}) ON CONFLICT DO NOTHING`);
       };
       if (!row.excused && now <= current.end + 24 * 3600000) {
         if (policy.lateAttendanceAlerts && current.late && (current.status === "Late" || row.clockIn)) {
-          queue("clock-manager-late-" + row.id, row.clockIn ? "Late arrival" : "Clock-in overdue", "Check attendance for the scheduled shift.", false,
+          queue("clock-manager-late-" + row.id, row.clockIn ? "Late arrival" : "Clock-in overdue", "Check attendance for the scheduled shift.",
             sql`EXISTS(SELECT 1 FROM location_settings WHERE late_attendance_alerts=1)`);
         }
         if (policy.noShowAlerts && current.status === "No show") {
-          queue("clock-manager-no-show-" + row.id, "No-show", "No clock-in has been recorded for the scheduled shift.", false,
+          queue("clock-manager-no-show-" + row.id, "No-show", "No clock-in has been recorded for the scheduled shift.",
             sql`EXISTS(SELECT 1 FROM location_settings WHERE no_show_alerts=1)`);
         }
       }
       if (policy.clockOutReminders && row.sessionInId && current.active && row.lastShift === row.id) {
+        const employeeId = sql`${row.employeeId}`;
+        const inApp = employeeNotificationAllowed(employeeId, "clockOut", "inApp");
+        const email = sql`EXISTS(SELECT 1 FROM location_settings WHERE business_id=1 AND clock_out_reminder_email=1)
+          AND ${employeeNotificationAllowed(employeeId, "clockOut", "email")}`;
         const intervals = [policy.clockOutReminderFirst, policy.clockOutReminderSecond, policy.clockOutReminderThird];
         for (const [slot, delay] of intervals.entries()) {
           const due = current.end + delay * minute;
           if (now < due || now > due + 24 * 3600000) continue;
-          queue(`clock-out-${row.sessionInId}-${slot}`, "Clock-out reminder", "Your scheduled shift has ended. Use the time clock to clock out.", policy.clockOutReminderEmail,
+          queue(`clock-out-${row.sessionInId}-${slot}`, "Clock-out reminder", "Your scheduled shift has ended. Use the time clock to clock out.",
             sql`EXISTS(SELECT 1 FROM location_settings WHERE clock_out_reminders=1)
-              AND NOT EXISTS(SELECT 1 FROM employee_settings WHERE employee_id=${row.employeeId} AND send_location_alerts=0)`);
+              AND NOT EXISTS(SELECT 1 FROM employee_settings WHERE employee_id=${row.employeeId} AND send_location_alerts=0)`, inApp, email);
         }
       }
     }

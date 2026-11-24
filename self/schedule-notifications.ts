@@ -9,6 +9,7 @@ import type { Database } from "../workforce/context";
 import * as v from "../workforce/validation";
 import { atomicBatch } from "../kiosk/database";
 import { validEmail } from "../backup/email-config.mjs";
+import { employeeNotificationAllowed } from "../workforce/notification-preferences";
 export type SchedulePreferenceContext = { account: { id: number; employeeId: number | null }; guard: SQL; contextToken: string };
 export async function readSchedulePreferences(db: Database, ctx: SchedulePreferenceContext) {
   const [row] = await db.select({ revision: s.workforceState.revision, version: s.scheduleNotificationPreferences.version, inApp: s.scheduleNotificationPreferences.inApp, email: s.scheduleNotificationPreferences.email, address: s.employees.email, alerts: s.employeeSettings.sendLocationAlerts, companyAlerts: s.locationSettings.notifyScheduleChanges }).from(s.employees)
@@ -33,7 +34,9 @@ export async function saveSchedulePreferences(db: Database, ctx: SchedulePrefere
   if (!await tx.commit(revision, hash, ["schedule-notification-preferences"])) throw new AuthError(409, "Your access or shared data changed. Reload before saving.");
   return { saved: true, revision: revision + 1 };
 }
-const employeeNotice = sql`(${s.notifications.kind}='schedule' OR (${s.notifications.kind}='alert' AND ${s.notifications.sourceKey} LIKE 'clock-out-%'))`;
+const employeeNotice = sql`${s.notifications.inApp}=1 AND (${s.notifications.kind}='schedule' OR (
+  ${s.notifications.kind}='alert' AND ${s.notifications.sourceKey} LIKE 'clock-out-%'
+  AND ${employeeNotificationAllowed(s.notifications.employeeId, "clockOut", "inApp")}))`;
 export async function readScheduleAlerts(db: Database, ctx: SchedulePreferenceContext, url: URL) {
   if ([...url.searchParams.keys()].some(key => key !== "cursor") || url.searchParams.getAll("cursor").length > 1) throw new AuthError(400, "Schedule alerts do not accept employee selectors.");
   await readSchedulePreferences(db, ctx);
@@ -48,7 +51,7 @@ export async function saveScheduleAlertReceipt(db: Database, ctx: SchedulePrefer
   v.keys(body, ["notificationId", "action", "contextToken"]); const id = v.text(body.notificationId, 200, true), action = v.oneOf(body.action, ["read", "dismiss"]);
   if (body.contextToken !== ctx.contextToken) throw new AuthError(409, "Your sign-in changed. Reload your alerts.");
   await readSchedulePreferences(db, ctx);
-  const own = sql`EXISTS (SELECT 1 FROM notifications n WHERE n.id=${id} AND n.employee_id=${ctx.account.employeeId} AND (n.kind='schedule' OR (n.kind='alert' AND n.source_key LIKE 'clock-out-%')))`;
+  const own = sql`EXISTS (SELECT 1 FROM ${s.notifications} WHERE ${s.notifications.id}=${id} AND ${s.notifications.employeeId}=${ctx.account.employeeId} AND ${employeeNotice})`;
   if (!await db.get(sql`SELECT 1 WHERE ${own} AND ${ctx.guard}`)) throw new AuthError(404, "Alert is unavailable.");
   const stamp = new Date(now).toISOString(), sourceKey = `schedule-${id}`;
   await atomicBatch(db, [sql`INSERT INTO notification_receipts (account_id,source_key,opened_at,dismissed_at) SELECT ${ctx.account.id},${sourceKey},${stamp},${action === "dismiss" ? stamp : null} WHERE ${own} AND ${ctx.guard}

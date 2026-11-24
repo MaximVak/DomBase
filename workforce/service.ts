@@ -36,6 +36,7 @@ import { createAttendanceNotices, readAttendance } from "./attendance";
 import { readAssistedClocks, decideAssistedClock } from "./assisted-clock";
 import { handleTimesheetReview } from "./timesheet-review";
 import { handleTimesheetLocks } from "./timesheet-locks";
+import { dashboardNotificationFlags, handleNotificationPreferences } from "./notification-preferences";
 
 const entities: Entity[] = ["employee", "department", "schedule-event", "schedule-draft", "schedule-publish", "open-shift-draft", "timecard", "hours-adjustment", "pto-request", "pto-policy", "availability", "conversation", "settings", "business", "notifications"];
 function currentRecord(view: WorkspaceData, change: Change, employeeKey: number): unknown {
@@ -102,6 +103,13 @@ export function createWorkforceService(db: Database, access: ReturnType<typeof c
         if (request.method === "POST") return json(await saveSchedulePreferences(db, own, await readAuthBody(request, 4096), options.secret, now()));
         return json({ error: "Method not allowed." }, 405, { Allow: "GET, POST" });
       }
+      if (action === "notification-preferences") {
+        const p = ctx.permissions;
+        return await handleNotificationPreferences(db, {
+          account: ctx.account, guard: ctx.activeActor(), contextToken: rateKey(options.secret, `notification-preferences:${ctx.account.id}:${ctx.account.employeeId}:${ctx.sessionId}`),
+          manager: { attendance: p["schedule.read"] && p["timesheets.read"], timeOff: p["time_off.read"] && (p["team.manage"] || p["schedule.manage"] || p["time_off.approve"]), schedule: p["schedule.manage"], messaging: p["messages.read"] },
+        }, request, options.secret, now());
+      }
       if (action === "publish-preview") {
         if (request.method !== "POST") return json({ error: "Method not allowed." }, 405, { Allow: "POST" });
         if (url.search) throw new AuthError(400, "Choose publication options in the request body.");
@@ -124,7 +132,10 @@ export function createWorkforceService(db: Database, access: ReturnType<typeof c
         return json(await readScheduleConflicts(db, ctx, await readAuthBody(request, 256 * 1024)));
       }
       if (action === "frequent-shifts" && request.method === "GET") return json(await frequentShifts(db, ctx, url));
-      if (action === "state" && request.method === "GET") return json({ ...await workspaceSnapshot(db, ctx, options.fieldKey, requestPeriod(url, now())), scheduleDelivery: { emailConfigured: !!options.emailEnabled } });
+      if (action === "state" && request.method === "GET") {
+        const [view, notificationFlags] = await Promise.all([workspaceSnapshot(db, ctx, options.fieldKey, requestPeriod(url, now())), dashboardNotificationFlags(db, ctx.account.id)]);
+        return json({ ...view, notificationFlags, scheduleDelivery: { emailConfigured: !!options.emailEnabled } });
+      }
       if (action === "maintenance" && request.method === "POST") {
         ctx.requirePermission("timesheets.manage");
         if (!ctx.allDepartments) throw new AuthError(403, "This action requires company-wide time management.");

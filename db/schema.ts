@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { check, foreignKey, index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 import type { ActionDetails, ClockDetails } from "../kiosk/break-rules";
+import type { NotificationChoices } from "../workforce/notification-preferences-model";
 
 // One database serves one company/location. Additional locations are out of scope.
 const id = () => integer("id").primaryKey({ autoIncrement: true });
@@ -821,6 +822,7 @@ export const notifications = sqliteTable("notifications", {
   ptoRequestId: integer("pto_request_id").references(() => ptoRequests.id),
   availabilityRequestId: integer("availability_request_id").references(() => availabilityRequests.id),
   eventTargetId: text("event_target_id"),
+  inApp: integer("in_app", { mode: "boolean" }).notNull().default(true),
   clockEmailState: text("clock_email_state", { enum: ["pending", "sending", "accepted", "uncertain", "cancelled"] }),
   clockEmailClaimedAt: text("clock_email_claimed_at"),
   openedAt: text("opened_at"),
@@ -996,6 +998,13 @@ export const scheduleNotificationPreferences = sqliteTable("schedule_notificatio
   version: integer("version").notNull().default(1),
   ...timestamps(),
 }, table => [check("schedule_notification_preferences_values_check", sql`${table.inApp} IN (0,1) AND ${table.email} IN (0,1) AND ${table.version} > 0`)]);
+
+export const accountNotificationPreferences = sqliteTable("account_notification_preferences", {
+  accountId: integer("account_id").primaryKey().references(() => accounts.id),
+  choices: text("choices", { mode: "json" }).$type<NotificationChoices>().notNull(),
+  version: integer("version").notNull().default(1),
+  ...timestamps(),
+}, table => [check("account_notification_preferences_values_check", sql`json_valid(${table.choices}) AND json_type(${table.choices}) = 'object' AND ${table.version} > 0`)]);
 
 export const scheduleEmails = sqliteTable("schedule_emails", {
   id: text("id").primaryKey().notNull(),

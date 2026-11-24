@@ -73,7 +73,7 @@ export async function exchangeRequestPage(db:Database,guard:SQL,visible:SQL,secr
 export async function notifyExchange(db:Database,tx:WorkspaceTransaction,guard:SQL,ids:number[],emailEnabled:boolean,date:string){
  const[settings]=await db.select().from(s.locationSettings).where(and(eq(s.locationSettings.businessId,1),guard)).limit(1);if(!settings)throw new AuthError(401,'Sign in to continue.');
  const[last]=await db.select({version:s.schedulePublications.version}).from(s.schedulePublications).orderBy(desc(s.schedulePublications.version)).limit(1);
- const recipients=await selectNoticeRecipients(db,{activeActor:()=>guard,employeeFilter:()=>sql`1=1`},settings.notifyScheduleChanges,{inApp:true,email:emailEnabled},[...new Set(ids)]),id=newRecordId();
+ const recipients=await selectNoticeRecipients(db,{activeActor:()=>guard,employeeFilter:()=>sql`1=1`},settings.notifyScheduleChanges,{inApp:true,email:emailEnabled,event:"shiftExchange"},[...new Set(ids)]),id=newRecordId();
  tx.insert(s.schedulePublications,{id,version:(last?.version??0)+1,publishedByAccountId:tx.ctx.account.id,publishedAt:tx.stamp,noticeType:'schedule',shiftExchange:true,periodStart:date,periodEnd:date,notifyMode:'changed',notifyInApp:true,notifyEmail:emailEnabled,scopeDepartments:[]});
  writePublicationNotices(tx,id,recipients,{title:'Shift trade or cover request updated',detail:'A shift request needs your attention or has a new decision. Open My schedule to review your requests.'});
  return id;

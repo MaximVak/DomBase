@@ -118,6 +118,41 @@ test("publication choices, personal alerts and email delivery stay private and a
     options.templateName=null;const skip=await ok(await call('schedule-tools',owner,{action:'clear-preview',revision:before.revision,...options}));assert.equal(skip.templateEntries,0);await ok(await call('schedule-tools',owner,{action:'clear',id:newToken(),revision:skip.revision,...options,reviewToken:skip.reviewToken}));assert.deepEqual(await db.select().from(s.scheduleTemplates),templates);
     const latest=await snapshot();await ok(await call('commit',owner,saveBody(latest,[{entity:'schedule-draft',id:1,before:latest.state.scheduleDraftsByManager[f.b.id],after:null}],newToken())));
   });
+  await t.test('notification preferences preserve legacy choices and require both recipient SMS controls', async () => {
+    const { employeeNotificationAllowed, accountNotificationAllowed } = await loadServerModule('workforce/notification-preferences.ts');
+    const type = (prefs, id) => prefs.rows.find(row => row.id === id)?.channels;
+    const employeePrefs = () => selfCall('notification-preferences').then(ok);
+    const legacy = await ok(await selfCall('schedule-preferences'));
+    const initial = await employeePrefs();
+    assert.deepEqual(type(initial, 'schedule'), { inApp: legacy.inApp, email: legacy.email, sms: false });
+    assert.deepEqual(type(initial, 'shiftExchange'), { inApp: legacy.inApp, email: legacy.email });
+    assert.equal(initial.smsEnabled, false);
+    assert.equal(type(initial, 'dailySummary'), undefined);
+    assert.doesNotMatch(JSON.stringify(initial), /@example/);
+    const payload = (prefs, update) => ({ id: newToken(), contextToken: prefs.contextToken, revision: prefs.revision,
+      version: prefs.version, scheduleVersion: prefs.scheduleVersion, ...update });
+    assert.equal((await selfCall('notification-preferences?accountId=' + f.owner.id)).status, 400);
+    assert.equal((await selfCall('notification-preferences', payload(initial, { events: { dailySummary: { email: true } } }))).status, 400);
+    assert.equal((await selfCall('notification-preferences', payload(initial, { events: { mention: { sms: true } } }))).status, 400);
+    const stateBefore = await ok(await call('notification-preferences', owner));
+    const update = payload(initial, { smsEnabled: true, events: { schedule: { sms: true, email: false }, shiftExchange: { email: true } } });
+    const results = await Promise.all([selfCall('notification-preferences', update), selfCall('notification-preferences', update)]);
+    const [saved, retry] = await Promise.all(results.map(ok));
+    assert.deepEqual(saved, retry);
+    assert.equal((await selfCall('notification-preferences', payload(initial, { smsEnabled: false }))).status, 409);
+    assert.equal((await ok(await selfCall('schedule-preferences'))).email, false);
+    assert.equal(type(saved, 'shiftExchange').email, true);
+    const allowed = async () => await db.get(sql`SELECT ${employeeNotificationAllowed(sql`${f.a.id}`, 'schedule', 'sms')} AS recipient,
+      ${accountNotificationAllowed(f.employeeAccount.id, 'schedule', 'sms')} AS account,
+      ${employeeNotificationAllowed(sql`${f.b.id}`, 'schedule', 'sms')} AS other`);
+    assert.deepEqual(await allowed(), { recipient: 1, account: 1, other: 0 });
+    await ok(await selfCall('notification-preferences', payload(saved, { smsEnabled: false })));
+    assert.equal(type(await employeePrefs(), 'schedule').sms, true);
+    assert.deepEqual(await allowed(), { recipient: 0, account: 0, other: 0 });
+    const stateAfter = await ok(await call('notification-preferences', owner));
+    assert.deepEqual(stateAfter.rows, stateBefore.rows);
+    assert.equal(stateAfter.smsEnabled, stateBefore.smsEnabled);
+  });
   await t.test('scope, method, disabled mail configuration and live captured-context revocation fail closed',async()=>{
     assert.equal((await call('publish-preview',employee,{revision:(await snapshot()).revision,options:all})).status,401);assert.equal((await call('publish-preview')).status,405);assert.equal((await preview({...all,departmentId:f.deptB.id},manager)).status,403);
     const unconfigured=createWorkforceService(db,access,{secret,fieldKey}),v=await snapshot();assert.equal((await unconfigured.handle(request('/api/workspace/publish-preview',owner,{revision:v.revision,options:all}))).status,400);

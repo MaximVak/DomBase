@@ -4,7 +4,7 @@ import {openShiftIsFuture} from "../../open-shifts-model";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { EmployeeOpenShifts } from "./open-shifts";
 import { ScheduleAlerts } from "./alerts";
-import { ScheduleAlertPreferences } from "../../schedule-alert-preferences";
+import { NotificationPreferences } from "../../schedule-alert-preferences";
 import { offsetScheduleDate, type EmployeeSchedule } from "../../../self/schedule-model";
 import { fullDayLeaveMinutes, leaveRequestMinutes } from "../../../workforce/leave-duration";
 
@@ -23,6 +23,7 @@ export function EmployeeScheduleScreen() {
   const [showTeam, setShowTeam] = useState(false);
   const [error, setError] = useState("");
   const [pending, setPending] = useState(true);
+  const [alertVersion, setAlertVersion] = useState(0);
   const activeRequest = useRef<AbortController | null>(null);
   const load = useCallback(async () => {
     activeRequest.current?.abort();
@@ -53,8 +54,8 @@ export function EmployeeScheduleScreen() {
   const shifts = data?.shifts.filter(shift => showTeam || shift.employeeId === data.employeeId) ?? [];
   return <main className="team-screen employee-schedule-screen">
     <header><div><a href="/me">← My profile</a> · <a href="/me/availability">My availability</a> · <a href="/me/time-off">Request time off</a><h1>My schedule</h1><p>Published shifts and your approved time off.</p></div><button type="button" disabled={pending} onClick={() => void load()}>Reload schedule</button></header>
-    <details className="schedule-alert-settings"><summary>My schedule alert preferences</summary><ScheduleAlertPreferences endpoint="/api/self/schedule-preferences" /></details>
-    <ScheduleAlerts onView={setDate} />
+    <details className="schedule-alert-settings"><summary>My schedule alert preferences</summary><NotificationPreferences endpoint="/api/self/notification-preferences" onSaved={() => setAlertVersion(value => value + 1)} /></details>
+    <ScheduleAlerts key={alertVersion} onView={setDate} />
     <div className="employee-week-toolbar">
       <button type="button" disabled={!data || pending} onClick={() => { if (data) setDate(offsetScheduleDate(data.startDate, -7)); }}>← Previous week</button>
       <label>Week containing<input type="date" min="0001-01-01" max="9998-12-31" value={date || data?.today || ""} onChange={event => { if (event.target.value) setDate(event.target.value); }} /></label>

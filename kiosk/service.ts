@@ -20,6 +20,7 @@ import type { ClockDetails } from "./break-rules";
 import { accountantEarlyWindowMs } from "./break-rules";
 import type { DocumentBucket } from "../documents/types";
 import { clockPhotoGrant, kioskPhotosEnabled, saveClockPhoto } from "./clock-photo";
+import { employeeNotificationAllowed } from "../workforce/notification-preferences";
 
 type Person = { interaction: typeof schema.kioskInteractions.$inferSelect; employee: typeof schema.employees.$inferSelect };
 type ClockInCandidate = { shift: typeof schema.shifts.$inferSelect; start: number; end: number };
@@ -148,7 +149,9 @@ export function createKioskService(db: KioskOperatorDatabase, options: { secret:
     const assistedOut = policy.assistedClockOut && !policy.breakWaivers;
     const recovery = assistedOut && event?.automatic && event.eventType === "out" && time - Date.parse(event.occurredAt) <= 36 * 3600000
       && !await db.get(sql`SELECT 1 FROM assisted_clock_reports WHERE event_id=${event.id}`);
-    const reminder = active && (await db.get<{ id: string }>(sql`SELECT id FROM notifications WHERE employee_id=${employeeId}
+    const reminder = active && policy.clockOutReminders && (await db.get<{ id: string }>(sql`SELECT id FROM notifications WHERE employee_id=${employeeId} AND in_app=1
+      AND ${employeeNotificationAllowed(sql`${employeeId}`, "clockOut", "inApp")}
+      AND NOT EXISTS (SELECT 1 FROM employee_settings WHERE employee_id=${employeeId} AND send_location_alerts=0)
       AND source_key LIKE 'clock-out-%' AND event_target_id=${event.shiftId ? "clock-attendance-" + event.shiftId : ""} AND occurred_at >= COALESCE((
         SELECT occurred_at FROM clock_events WHERE employee_id=${employeeId} AND event_type='in' ORDER BY id DESC LIMIT 1),'') LIMIT 1`));
     const date = workplaceDate(time, policy.zone);
