@@ -47,7 +47,9 @@ export async function readStagingConfig() {
     || JSON.stringify(config.assets) !== JSON.stringify(expected.assets)
     || !config.compatibility_flags?.includes("nodejs_compat")) throw new Error("Staging bindings differ from the approved target.");
   const { invitationEmailConfigBlock } = await import("../team/email-config.mjs");
-  invitationEmailConfigBlock(config);
+  const invitationVars = { ...config.vars };
+  delete invitationVars.STAGING_ACCOUNTANT_FIXTURE_IDS;
+  invitationEmailConfigBlock({ ...config, vars: invitationVars });
   return config;
 }
 
