@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import * as schema from "../db/schema";
 import { AuthError, isLoopback, json, readAuthBody } from "../auth/http";
@@ -13,7 +13,7 @@ import type { ClockDraft } from "./replay";
 import { clockIdleSeconds } from "./idle";
 import { offlineDeviceTag, prepareOfflineAuthorization, prepareOfflineReplay } from "./offline";
 import { clockPolicy, kioskBreakView, resolveBreakDetails, workplaceDate } from "./break-actions";
-import { nextDate, zonedTimestamp } from "../workforce/time";
+import { nextDate } from "../workforce/time";
 import { clockEntryUnlocked } from "../workforce/timesheet-lock-guards";
 import { assistedOutPolicyGuard, insertAssistance, isAutomaticRecovery, planAssistance, shiftBounds } from "./assistance";
 import type { ClockDetails } from "./break-rules";
@@ -22,9 +22,16 @@ import type { DocumentBucket } from "../documents/types";
 import { clockPhotoGrant, kioskPhotosEnabled, saveClockPhoto } from "./clock-photo";
 
 type Person = { interaction: typeof schema.kioskInteractions.$inferSelect; employee: typeof schema.employees.$inferSelect };
+type ClockInCandidate = { shift: typeof schema.shifts.$inferSelect; start: number; end: number };
 type Approval = { accountId: number; sessionVersion: number; credentialRevision: string };
 const clockSeconds = (interaction: Person["interaction"]) => Math.round((Date.parse(interaction.expiresAt) - Date.parse(interaction.createdAt)) / 1000);
 const expired = () => new AuthError(401, "Enter your employee PIN again.");
+
+function selectClockInShift(candidates: ClockInCandidate[], time: number, date: string, allowance: number) {
+  const matching = candidates.filter(candidate => time >= candidate.start - allowance && time < candidate.end);
+  const upcoming = candidates.find(candidate => candidate.shift.date === date && time < candidate.start - allowance);
+  return { ready: matching[0], upcoming, matchingCount: matching.length };
+}
 
 export function createKioskService(db: KioskOperatorDatabase, options: { secret: string; now?: () => number; bucket?: DocumentBucket }) {
   if (options.secret.length < 32) throw new Error("Kiosk configuration is unavailable.");
@@ -69,6 +76,31 @@ export function createKioskService(db: KioskOperatorDatabase, options: { secret:
     const [event] = await db.select().from(schema.clockEvents).where(eq(schema.clockEvents.employeeId, employeeId)).orderBy(desc(schema.clockEvents.id)).limit(1);
     return event ?? null;
   }
+  async function clockInCandidates(employeeId: number, roleIds: number[], date: string, zone: string) {
+    const shifts = await db.select().from(schema.shifts).where(and(eq(schema.shifts.shiftType, "work"),
+      eq(schema.shifts.employeeId, employeeId), inArray(schema.shifts.roleId, roleIds), isNull(schema.shifts.archivedAt),
+      sql`${schema.shifts.publicationId} IS NOT NULL`, sql`${schema.shifts.date} BETWEEN date(${date}, '-1 day') AND ${nextDate(date)}`));
+    return shifts.flatMap(shift => {
+      try { return [{ shift, ...shiftBounds(shift, zone) }]; }
+      catch { return []; }
+    }).sort((a, b) => a.start - b.start);
+  }
+  async function clockInSchedule(employeeId: number, roleIds: number[], time: number) {
+    if (!roleIds.length) return;
+    const policy = await clockPolicy(db);
+    const date = workplaceDate(time, policy.zone);
+    const allowance = policy.earlyClockInMinutes * 60000;
+    const candidates = await clockInCandidates(employeeId, roleIds, date, policy.zone);
+    const { ready, upcoming } = selectClockInShift(candidates, time, date, allowance);
+    const preferred = ready ?? upcoming;
+    if (!preferred) return;
+    const notes = roleIds.flatMap(roleId => {
+      const { ready, upcoming } = selectClockInShift(candidates.filter(candidate => candidate.shift.roleId === roleId), time, date, allowance);
+      const text = (ready ?? upcoming)?.shift.notes?.trim();
+      return text ? [{ roleId, text }] : [];
+    });
+    if (notes.length) return { roleId: preferred.shift.roleId, notes };
+  }
   async function lock(device: RegisteredDevice) {
     await atomicBatch(db, [
       db.update(schema.kioskInteractions).set({ endedAt: stamp() }).where(and(eq(schema.kioskInteractions.deviceSessionId, device.session.id), isNull(schema.kioskInteractions.endedAt))),
@@ -96,9 +128,14 @@ export function createKioskService(db: KioskOperatorDatabase, options: { secret:
     if (results[1].meta.changes !== 1) throw expired();
     await releaseAttempt(db, deviceAttempt); await releaseAttempt(db, pinAttempt);
     const [event, roles, photos] = await Promise.all([lastEvent(employee.id), rolesFor(employee.id), options.bucket && breaks ? kioskPhotosEnabled(db) : false]);
+    const at = now();
+    const [breakView, assist, schedule] = breaks ? await Promise.all([
+      kioskBreakView(db, employee.id, event, at), assistanceView(employee.id, event),
+      !event || event.eventType === "out" ? clockInSchedule(employee.id, roles.map(role => role.id), at) : undefined,
+    ]) : [];
     return json({ employee: { id: employee.id, name: employee.name }, roles, state: event?.eventType ?? "out", expiresAt,
-      ...(breaks ? { breakView: await kioskBreakView(db, employee.id, event, now()), serverTime: now(),
-        assist: await assistanceView(employee.id, event) } : {}),
+      ...(breaks ? { breakView, serverTime: at, assist } : {}),
+      ...(schedule ? { clockInSchedule: schedule } : {}),
       ...(photos ? { clockInPhotos: true } : {}),
       ...(offline ? { offline: prepareOfflineAuthorization(options.secret, device, employee.id, employee.pinVersion, event?.id ?? 0, now(), seconds) } : {}),
       ...(queue ? { replay: { ticket: makeReplayTicket(options.secret, device, id, event?.id ?? 0), serverTime: now() } } : {}),
@@ -200,28 +237,15 @@ export function createKioskService(db: KioskOperatorDatabase, options: { secret:
     const role = (await rolesFor(employeeId)).find(role => role.id === roleId);
     if (!role) throw new AuthError(403, "Choose one of your active job roles.");
     const date = workplaceDate(clockTime, policy.zone);
-    const tomorrow = nextDate(date);
-    const shifts = await db.select().from(schema.shifts).where(and(eq(schema.shifts.shiftType, "work"),
-      eq(schema.shifts.employeeId, employeeId), eq(schema.shifts.roleId, roleId), isNull(schema.shifts.archivedAt),
-      sql`${schema.shifts.publicationId} IS NOT NULL`, sql`${schema.shifts.date} BETWEEN date(${date}, '-1 day') AND ${tomorrow}`));
-    const allowance = policy.earlyClockInMinutes * 60000;
-    const candidates = shifts.flatMap(shift => {
-      try {
-        const start = zonedTimestamp(shift.date, shift.startTime, policy.zone);
-        const end = zonedTimestamp(shift.endTime <= shift.startTime ? nextDate(shift.date) : shift.date, shift.endTime, policy.zone);
-        return [{ shift, start, end }];
-      } catch { return []; }
-    }).sort((a, b) => a.start - b.start);
-    const matching = candidates.filter(candidate => clockTime >= candidate.start - allowance && clockTime < candidate.end);
-    const ready = matching[0];
-    const upcoming = candidates.find(candidate => candidate.shift.date === date && clockTime < candidate.start - allowance);
+    const candidates = await clockInCandidates(employeeId, [roleId], date, policy.zone);
+    const { ready, upcoming, matchingCount } = selectClockInShift(candidates, clockTime, date, policy.earlyClockInMinutes * 60000);
     if (draft.details?.assisted) {
       const assistance = await planAssistance(db, employeeId, previous, draft, clockTime, policy, ready?.shift ?? null);
       return { roleId, roleName: role.name, shift: ready?.shift ?? null, requiresApproval: false, details: { california: true as const, assistance } };
     }
     if (ready) {
       const early = ready.start - clockTime;
-      const scheduledStart = online && matching.length === 1 && !draft.details?.worked && early > 0 && early <= accountantEarlyWindowMs
+      const scheduledStart = online && matchingCount === 1 && !draft.details?.worked && early > 0 && early <= accountantEarlyWindowMs
         ? new Date(ready.start).toISOString() : undefined;
       return { roleId, roleName: role.name, shift: ready.shift, requiresApproval: false,
         details: { ...details, ...(scheduledStart ? { scheduledStart } : {}) } };

@@ -11061,6 +11061,8 @@ button[aria-label^="Remove"]:focus-visible,
 .kiosk-error { color: #922d24; background: #fff1ef; padding: 12px; border-radius: 6px; overflow-wrap: anywhere; }
 .kiosk-notice { color: #174c38; background: #edf8f1; padding: 12px; border-radius: 6px; }
 .kiosk-status { color: var(--text); background: var(--page-bg, #f4f7f9); padding: .75rem; border-radius: 6px; }
+.kiosk-shift-note h3 { font-size: inherit; }
+.kiosk-shift-note p { margin: .25rem 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .kiosk-actions { display: grid; gap: 12px; }
 .kiosk-camera { display: grid; gap: 8px; }
 .kiosk-camera video { display: block; width: min(100%, 240px); margin-inline: auto; border-radius: 8px; background: #1e293b; }

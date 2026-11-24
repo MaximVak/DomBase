@@ -328,41 +328,58 @@ test("registered tablets, PIN sessions and action-scoped approvals use isolated 
       await settings({ blockEarlyClockIn: true, breakWaivers: false, unpaidRestOverage: false });
     }
   });
-  await t.test("the five-minute check-in window preserves exact time and captures the published start for the report", async () => {
+  await t.test("split-shift notes and the five-minute check-in window follow the same published shift", async () => {
     const { nextDate, zonedTimestamp } = await loadServerModule("workforce/time.ts");
     const zone = "America/Los_Angeles";
     const today = new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(time));
     const date = nextDate(nextDate(today));
     const stamp = wall => zonedTimestamp(date, wall, zone);
     const [employee] = await db.insert(schema.employees).values({ name: "Fictional early check-in employee", pinHash: "early-check-in-fixture-before-enrollment" }).returning();
-    await db.insert(schema.employeeRoles).values({ employeeId: employee.id, roleId: f.roleA.id });
+    await db.insert(schema.employeeRoles).values([f.roleA, f.roleB].map(role => ({ employeeId: employee.id, roleId: role.id })));
     const pin = "812018";
     await ok(await adm("employee-pin", ownerCookie, { employeeId: employee.id, pin, password }));
     const [publication] = await db.insert(schema.schedulePublications).values({ version: 555, publishedByAccountId: f.owner.id }).returning();
-    await db.insert(schema.shifts).values([["09:00", "11:00"], ["13:00", "15:00"], ["17:00", "19:00"]].map(([startTime, endTime]) => ({
-      employeeId: employee.id, roleId: f.roleA.id, date, startTime, endTime, publicationId: publication.id,
+    await db.insert(schema.shifts).values([["09:00", "11:00", "Morning handoff"], ["13:00", "15:00", "Afternoon pickup"], ["17:00", "19:00", ""]].map(([startTime, endTime, notes]) => ({
+      employeeId: employee.id, roleId: f.roleA.id, date, startTime, endTime, notes, publicationId: publication.id,
     })));
+    const alternate = { employeeId: employee.id, roleId: f.roleB.id, date, startTime: "15:00", endTime: "16:00", notes: "Alternate role instructions", publicationId: publication.id };
+    await db.insert(schema.shifts).values([
+      alternate,
+      { ...alternate, startTime: "08:00", endTime: "09:00", notes: "Unpublished note", publicationId: null },
+      { ...alternate, startTime: "08:00", endTime: "09:00", notes: "Archived note", archivedAt: new Date(time).toISOString() },
+      { ...alternate, employeeId: f.b.id, startTime: "08:00", endTime: "09:00", notes: "Another employee’s note" },
+    ]);
     let at = stamp("08:55") - 1;
     const clockService = createKioskService(db, { secret, now: () => at });
     const send = (action, session, body) => request(clockService, `/api/kiosk/${action}`, session, body);
     const signedIn = async () => {
-      const response = await send("pin", deviceCookie, { pin, queue: true });
+      const response = await send("pin", deviceCookie, { pin, queue: true, breaks: true });
+      assert.equal(response.headers.get("cache-control"), "no-store");
       return { data: await ok(response), cookie: `${deviceCookie}; ${cookiesOf(response)[0]}` };
     };
     const clockIn = { eventType: "in", roleId: f.roleA.id, explanation: "" };
     const clockOut = { eventType: "out", explanation: "" };
+    const schedule = text => ({ roleId: f.roleA.id, notes: [
+      { roleId: f.roleA.id, text }, { roleId: f.roleB.id, text: alternate.notes },
+    ].sort((a, b) => a.roleId - b.roleId) });
     let actor = await signedIn();
+    assert.deepEqual(actor.data.clockInSchedule, schedule("Morning handoff"));
     assert.equal((await send("clock", actor.cookie, clockIn)).status, 422);
     at++;
     await ok(await send("clock", actor.cookie, clockIn));
     at = stamp("10:00");
-    await ok(await send("clock", (await signedIn()).cookie, clockOut));
+    actor = await signedIn();
+    assert.equal(actor.data.clockInSchedule, undefined);
+    await ok(await send("clock", actor.cookie, clockOut));
     at = stamp("12:57");
-    await ok(await send("clock", (await signedIn()).cookie, { ...clockIn, details: { worked: true } }));
+    actor = await signedIn();
+    assert.deepEqual(actor.data.clockInSchedule, schedule("Afternoon pickup"));
+    await ok(await send("clock", actor.cookie, { ...clockIn, details: { worked: true } }));
     at = stamp("14:00");
     await ok(await send("clock", (await signedIn()).cookie, clockOut));
     at = stamp("16:58");
     actor = await signedIn();
+    assert.equal(actor.data.clockInSchedule, undefined);
     await ok(await send("sync", deviceCookie, { ...clockIn, attemptedAt: at, ticket: actor.data.replay.ticket }));
     at = stamp("18:00");
     await ok(await send("clock", (await signedIn()).cookie, clockOut));

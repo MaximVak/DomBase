@@ -246,7 +246,8 @@ export function KioskScreen() {
         receivedAt.current = performance.now();
         setCooldowns(current => ({ ...current, pin: null }));
         setPerson({ employee: data.employee, roles: data.roles, state: data.state, expiresAt: data.expiresAt,
-          replay: data.replay, breakView: data.breakView, serverTime: data.serverTime, assist: data.assist, clockInPhotos: data.clockInPhotos === true });
+          replay: data.replay, breakView: data.breakView, serverTime: data.serverTime, assist: data.assist,
+          clockInPhotos: data.clockInPhotos === true, clockInSchedule: data.clockInSchedule });
         setPhase("person");
       } else if (data.approvalRequired) {
         setPending({ id: data.requestId, early: data.reason === kioskCopy.en.earlyApproval }); setPhase("approval");

@@ -14,6 +14,7 @@ export type ClockPerson = {
   state: "in" | "out" | "break" | "break_end"; expiresAt: string; serverTime?: number; local?: boolean;
   replay?: { ticket: string; serverTime: number };
   clockInPhotos?: boolean;
+  clockInSchedule?: { roleId: number; notes: { roleId: number; text: string }[] };
   assist?: { in: boolean; out: boolean; recovery: boolean; reminder: boolean; date: string };
   breakView?: { issues: BreakIssue[]; active?: { kind: BreakKind; availableAt: number; extensionAt: number } };
 };
@@ -23,7 +24,7 @@ export function ClockPanel({ person, language, busy, online, offlineBlocked, ear
   onClock: (input: ClockInput, photo?: Blob) => Promise<void>; onCancel: () => void;
 }) {
   const text = kioskCopy[language];
-  const [roleId, setRoleId] = useState(String(person.roles[0]?.id ?? ""));
+  const [roleId, setRoleId] = useState(String(person.clockInSchedule?.roleId ?? person.roles[0]?.id ?? ""));
   const [explanation, setExplanation] = useState("");
   const [reporting, setReporting] = useState(false);
   const [assistance, setAssistance] = useState<"in" | "out" | null>(null);
@@ -40,6 +41,7 @@ export function ClockPanel({ person, language, busy, online, offlineBlocked, ear
     return () => window.clearInterval(timer);
   }, [activeBreak]);
   const off = person.state === "out";
+  const shiftNote = off && online ? person.clockInSchedule?.notes.find(note => note.roleId === Number(roleId))?.text : undefined;
   const onBreak = person.state === "break";
   const disabled = busy || offlineBlocked;
   const serverTime = (person.serverTime ?? person.replay?.serverTime ?? 0) + elapsed;
@@ -73,6 +75,10 @@ export function ClockPanel({ person, language, busy, online, offlineBlocked, ear
       </select>
     </label> : null}
     {off && !person.roles.length ? <p role="status">{text.assignRole}</p> : null}
+    {shiftNote ? <div className="kiosk-status kiosk-shift-note" aria-live="polite">
+      <h3>{text.shiftNote}</h3>
+      <p>{shiftNote}</p>
+    </div> : null}
     <label htmlFor="kiosk-explanation">{text.note}
       <textarea id="kiosk-explanation" value={explanation} maxLength={1000} disabled={busy} onChange={event => setExplanation(event.target.value)} />
     </label>
