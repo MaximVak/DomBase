@@ -14,7 +14,8 @@ import { clockRoleScope } from "./clock-photos";
 const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 import { workspacePeriod, offsetDate } from "./period";
 import type { WorkspacePeriod } from "./period";
-export async function workspaceSnapshot(db: Database, ctx: Context, fieldKey: string, period: WorkspacePeriod = workspacePeriod()): Promise<WorkspaceData> {
+export async function workspaceSnapshot(db: Database, ctx: Context, fieldKey: string, period: WorkspacePeriod = workspacePeriod(),
+  { attendanceLinks = false }: { attendanceLinks?: boolean } = {}): Promise<WorkspaceData> {
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
   period = workspacePeriod(period);
   const dates = (column: SQLWrapper) => sql`${column} >= ${period.start} AND ${column} <= ${period.end}`;
@@ -47,6 +48,10 @@ export async function workspaceSnapshot(db: Database, ctx: Context, fieldKey: st
     AND cm.left_at IS NULL AND ce.active = 1 AND ce.terminated = 0)`;
   const memberConversation = db.select({ id: s.conversations.id }).from(s.conversations).where(and(member, isNull(s.conversations.archivedAt), allowed(p["messages.read"])));
   const clockScope = clockRoleScope(ctx, s.clockEvents.roleName);
+  const originalAttendanceShift = attendanceLinks && p["schedule.read"] ? sql<number | null>`CASE WHEN ${s.timeCardEdits.revision}=1 THEN (
+    SELECT c.shift_id FROM json_each(${s.timeCardEdits.before}, '$.eventIds') source JOIN clock_events c ON c.id=source.value
+    WHERE c.event_type='in' AND c.employee_id=${s.timeCardEdits.employeeId} AND ${clockRoleScope(ctx, sql`c.role_name`)} LIMIT 1
+  ) END`.as("attendance_shift_id") : undefined;
   const ownEmployee = ctx.account.employeeId ?? -1;
   const privateScope = (column: SQLWrapper) => and(canEmployee(column), or(allowed(p["team.read"] && p["team.private.read"]), sql`${column} = ${ownEmployee}`));
   // Unique SQL names keep D1's positional result mapping intact when several
@@ -86,7 +91,9 @@ export async function workspaceSnapshot(db: Database, ctx: Context, fieldKey: st
     db.select({ edit: s.timeCardEdits, photoEventId: sql<number | null>`CASE WHEN ${s.timeCardEdits.revision} = 1 THEN (
       SELECT photo.event_id FROM json_each(${s.timeCardEdits.before}, '$.eventIds') source
       JOIN clock_in_photos photo ON photo.event_id = source.value JOIN clock_events c ON c.id = photo.event_id
-      WHERE photo.ready_at IS NOT NULL AND c.employee_id = ${s.timeCardEdits.employeeId} AND ${clockRoleScope(ctx, sql`c.role_name`)} LIMIT 1) END`.as("photo_event_id") })
+      WHERE photo.ready_at IS NOT NULL AND c.employee_id = ${s.timeCardEdits.employeeId} AND ${clockRoleScope(ctx, sql`c.role_name`)} LIMIT 1) END`.as("photo_event_id"),
+      ...(originalAttendanceShift ? { attendanceShiftId: originalAttendanceShift } : {}),
+    })
       .from(s.timeCardEdits).where(sql`${allowed(p["timesheets.read"])} AND ${employeeScope(s.timeCardEdits.employeeId)} AND EXISTS (SELECT 1 FROM time_cards tc WHERE tc.id = ${s.timeCardEdits.cardId} AND ${cardDates(sql`tc.work_date`)} AND ${ctx.allDepartments ? sql`1 = 1` : ctx.roleFilter(sql`tc.role_id`)})`).orderBy(s.timeCardEdits.cardId, s.timeCardEdits.revision),
     db.select().from(s.hoursAdjustments).where(and(allowed(p["timesheets.read"] && ctx.allDepartments), employeeScope(s.hoursAdjustments.employeeId), dates(s.hoursAdjustments.date))).orderBy(s.hoursAdjustments.id),
     db.select().from(s.ptoPolicies).where(and(allowed(p["time_off.read"]), eq(s.ptoPolicies.archived, false))).orderBy(s.ptoPolicies.id),
@@ -116,7 +123,7 @@ export async function workspaceSnapshot(db: Database, ctx: Context, fieldKey: st
         eq(s.ptoRequests.status, "approved"), eq(s.ptoRequests.compensation, "paid"), isNull(s.ptoRequests.archivedAt),
         sql`${s.ptoRequests.startDate} <= ${period.end} AND ${s.ptoRequests.endDate} >= ${period.start}`)),
   ]);
-  const edits = editRows.map(({ edit, photoEventId }) => ({ ...edit, photoEventId }));
+  const edits = editRows.map(({ edit, ...projection }) => ({ ...edit, ...projection }));
   const business = businesses[0]; const settings = normalizeScheduleEnforcement(settingsRows[0]);
   const owner = accounts.find(row => row.id === business?.primaryOwnerAccountId);
   const basicInfo = { ...defaultInfo, ...Object.fromEntries(Object.keys(defaultInfo).filter(key => key !== "accountOwner").map(key => [key, business?.[key as keyof typeof business] ?? defaultInfo[key as keyof typeof defaultInfo]])), accountOwner: owner?.name ?? "" };

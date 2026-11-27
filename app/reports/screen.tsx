@@ -4,6 +4,11 @@ import type { ReportsOverview, ReportScope } from "../../workforce/reports-overv
 import { SidebarNavIcon } from "../sidebar-nav-icon";
 
 const usd = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
+const reportSections = {
+  overview: { path: "/reports", title: "Overview" },
+  hours: { path: "/reports/hours", title: "Scheduled vs. Actual Hours" },
+  attendance: { path: "/reports/attendance", title: "Attendance" },
+};
 
 export function duration(seconds: number) {
   const minutes = Math.round(seconds / 60);
@@ -20,23 +25,22 @@ export function Metric({ label, children }: { label: string; children: ReactNode
 }
 
 export function ReportFrame({ active, scope, canCompare, error, start, end, children }: {
-  active: "overview" | "hours"; scope?: ReportScope; canCompare: boolean; error?: string; start: string; end: string; children: ReactNode;
+  active: keyof typeof reportSections; scope?: ReportScope; canCompare: boolean; error?: string; start: string; end: string; children: ReactNode;
 }) {
-  const isHours = active === "hours";
-  const path = isHours ? "/reports/hours" : "/reports";
+  const { path, title } = reportSections[active];
   const query = scope ? `?${new URLSearchParams(scope.period)}` : "";
   return <main className="reports-screen">
     <header className="reports-header">
       <a href="/" className="reports-back">← Dashboard</a>
       <div className="reports-title"><SidebarNavIcon icon="reports" /><h1>Reports</h1></div>
     </header>
-    {(canCompare || isHours) && <nav className="reports-nav" aria-label="Reports sections">
-      <a href={`/reports${query}`} aria-current={!isHours ? "page" : undefined}>Overview</a>
-      <a href={`/reports/hours${query}`} aria-current={isHours ? "page" : undefined}>Scheduled vs. Actual Hours</a>
+    {canCompare && <nav className="reports-nav" aria-label="Reports sections">
+      {Object.entries(reportSections).map(([key, section]) =>
+        <a key={key} href={section.path + query} aria-current={key === active ? "page" : undefined}>{section.title}</a>)}
     </nav>}
     <section className="reports-overview" aria-labelledby="reports-overview-title">
       <div className="reports-overview-heading">
-        <div><h2 id="reports-overview-title">{isHours ? "Scheduled vs. Actual Hours" : "Overview"}</h2>{scope && <p>{scope.location} · {scope.companyWide ? "All departments" : "Your departments"}</p>}</div>
+        <div><h2 id="reports-overview-title">{title}</h2>{scope && <p>{scope.location} · {scope.companyWide ? "All departments" : "Your departments"}</p>}</div>
         <form action={path} method="get" className="reports-filters" aria-label="Report dates">
           <label>Start date<input type="date" name="start" defaultValue={start} required /></label>
           <label>End date<input type="date" name="end" defaultValue={end} required /></label>

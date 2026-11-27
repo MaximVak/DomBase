@@ -5,10 +5,11 @@ import { normalizeScheduleEnforcement } from "../app/schedule-enforcement";
 import { AuthError } from "../auth/http";
 import * as s from "../db/schema";
 import { workplaceDate } from "../kiosk/break-actions";
-import { reliabilityFor, reliabilityTotals } from "../team/insights-rules";
 import type { Context, Database } from "./context";
 import { offsetDate, requestPeriod, weekStart } from "./period";
 import type { WorkspacePeriod } from "./period";
+import { attendanceRows, attendanceTotals } from "./reports-attendance";
+import type { AttendanceRow } from "./reports-attendance";
 import { workspaceSnapshot } from "./snapshot";
 
 export type ReportScope = {
@@ -39,11 +40,18 @@ export type ReportsHours = ReportScope & {
   team: (ReportHours & { id: number; name: string })[];
 };
 
+export type ReportsAttendance = ReportScope & {
+  zone: string;
+  lateMinutes: number;
+  totals: ReturnType<typeof attendanceTotals>;
+  shifts: AttendanceRow[];
+};
+
 const incompleteTime = new Set(["Missing clock-out", "Clock time needs review", "Confirm unfinished break"]);
 const incompletePremium = new Set(["Review salaried break premium", "Review break premium wage rate", "Confirm time and breaks before calculating premiums"]);
 const seconds = (hours: number | null) => Math.round((hours ?? 0) * 3600);
 
-async function readReportTime(db: Database, ctx: Context, url: URL, fieldKey: string, now: number) {
+async function readReportSource(db: Database, ctx: Context, url: URL, fieldKey: string, now: number, attendanceLinks = false) {
   ctx.requirePermission("reports.read");
   const [site] = await db.select({ location: s.business.locationName, zone: s.business.timeZone, settings: s.locationSettings })
     .from(s.business).leftJoin(s.locationSettings, eq(s.locationSettings.businessId, s.business.id))
@@ -61,7 +69,7 @@ async function readReportTime(db: Database, ctx: Context, url: URL, fieldKey: st
   }
   const dataPeriod = { start: weekStart(period.start, settings.workWeekStart), end: offsetDate(weekStart(period.end, settings.workWeekStart), 6) };
   const canSchedule = ctx.permissions["schedule.read"], canTime = ctx.permissions["timesheets.read"];
-  const view = canTime ? await workspaceSnapshot(db, ctx, fieldKey, dataPeriod) : null;
+  const view = canTime ? await workspaceSnapshot(db, ctx, fieldKey, dataPeriod, { attendanceLinks }) : null;
   if (view && (view.settings.workWeekStart !== settings.workWeekStart || view.basicInfo.timeZone !== site.zone)) {
     throw new AuthError(409, "Workweek settings changed. Apply the report dates again.");
   }
@@ -77,26 +85,39 @@ async function readReportTime(db: Database, ctx: Context, url: URL, fieldKey: st
     ctx.activeActor(), ctx.employeeFilter(s.shifts.employeeId), ctx.roleFilter(s.shifts.roleId), isNull(s.shifts.archivedAt),
     eq(s.shifts.shiftType, "work"), sql`${s.shifts.publicationId} IS NOT NULL AND ${s.shifts.date} BETWEEN ${priorDay} AND ${dataPeriod.end}`,
   ));
-  const inRange = ({ date }: { date: string }) => date >= period.start && date <= period.end;
-  const publishedInRange = published.filter(inRange);
   const state = view?.state;
   const employees = state?.employees ?? [...new Set(published.map(shift => shift.employeeId))]
     .map(id => ({ id, name: "", role: "", wage: "", active: true }));
+  const scope = { period, location: view?.basicInfo.locationName ?? site.location, companyWide: ctx.allDepartments };
+  return { scope, canSchedule, canTime, published, employees, state, dataPeriod, priorDay,
+    settings: reportSettings, zone: site.zone, pto: view?.permissions["time_off.read"] ? view.state.ptoRequests : view?.timesheetLeave ?? [], revision: view?.revision };
+}
+
+type ReportSource = Awaited<ReturnType<typeof readReportSource>>;
+
+function reportTime({ scope, employees, state, published, pto, dataPeriod, priorDay, settings, zone }: ReportSource, now: number) {
   const cards = buildTimeCards({ ...dataPeriod, start: priorDay, employees, events: state?.clockEvents ?? [], shifts: published,
-    adjustments: state?.hoursAdjustments ?? [], pto: view?.permissions["time_off.read"] ? view.state.ptoRequests : view?.timesheetLeave ?? [],
-    now, timeZone: site.zone, rounding: "actual", weekStart: reportSettings.workWeekStart,
-    mandatoryMealBreak: reportSettings.mandatoryMealBreak, mealBreakAfterHours: reportSettings.mealBreakAfterHours,
-    mealBreakMinutes: reportSettings.mealBreakMinutes, overtimePolicy: reportSettings, holidayPolicy: reportSettings,
-    overtimeScope: { companyWide: ctx.allDepartments, dataPeriod },
-    breakPremiumPolicy: reportSettings.breakPremiums ? { companyWide: ctx.allDepartments, dataPeriod,
-      mealLimit: reportSettings.mealPremiumLimit, restLimit: reportSettings.restPremiumLimit } : undefined,
+    adjustments: state?.hoursAdjustments ?? [], pto, now, timeZone: zone, rounding: "actual", weekStart: settings.workWeekStart,
+    mandatoryMealBreak: settings.mandatoryMealBreak, mealBreakAfterHours: settings.mealBreakAfterHours,
+    mealBreakMinutes: settings.mealBreakMinutes, overtimePolicy: settings, holidayPolicy: settings,
+    overtimeScope: { companyWide: scope.companyWide, dataPeriod },
+    breakPremiumPolicy: settings.breakPremiums ? { companyWide: scope.companyWide, dataPeriod,
+      mealLimit: settings.mealPremiumLimit, restLimit: settings.restPremiumLimit } : undefined,
   });
   const auto = new Set(state?.clockEvents.filter(event => event.automatic && !event.assistedStatus).map(event => event.id));
   const unresolved = new Set(cards.filter(card => card.issues.some(issue => incompleteTime.has(issue)) || card.eventIds.some(id => auto.has(id))));
-  const selected = cards.filter(inRange);
-  const scope = { period, location: view?.basicInfo.locationName ?? site.location, companyWide: ctx.allDepartments };
-  return { scope, canSchedule, canTime, published, publishedInRange, employees, state, selected, unresolved,
-    settings: reportSettings, zone: site.zone, revision: view?.revision };
+  const selected = cards.filter(({ date }) => date >= scope.period.start && date <= scope.period.end);
+  return { selected, unresolved };
+}
+
+async function reportAttendance(db: Database, ctx: Context, { scope, employees, published, state, settings, zone }: ReportSource, now: number) {
+  const { period } = scope;
+  const approvedLeave = await db.select({ employeeId: s.ptoRequests.employeeId, startDate: s.ptoRequests.startDate,
+    endDate: s.ptoRequests.endDate, startTime: s.ptoRequests.startTime, endTime: s.ptoRequests.endTime,
+  }).from(s.ptoRequests).where(and(ctx.activeActor(), ctx.employeeFilter(s.ptoRequests.employeeId), isNull(s.ptoRequests.archivedAt),
+    eq(s.ptoRequests.status, "approved"), sql`${s.ptoRequests.startDate} <= ${period.end} AND ${s.ptoRequests.endDate} >= ${period.start}`));
+  const shifts = attendanceRows(employees, published, state?.clockEvents ?? [], approvedLeave, period, settings, zone, now);
+  return { shifts, totals: attendanceTotals(shifts) };
 }
 
 async function assertReportCurrent(db: Database, ctx: Context, revision?: number) {
@@ -107,15 +128,17 @@ async function assertReportCurrent(db: Database, ctx: Context, revision?: number
 }
 
 export async function readReportsOverview(db: Database, ctx: Context, url: URL, fieldKey: string, now: number): Promise<ReportsOverview> {
-  const { scope, canSchedule, canTime, published, publishedInRange, employees, state, selected, unresolved, settings, zone, revision } =
-    await readReportTime(db, ctx, url, fieldKey, now);
+  const source = await readReportSource(db, ctx, url, fieldKey, now, true);
+  const { scope, canSchedule, canTime, published, settings, revision } = source;
+  const { selected, unresolved } = reportTime(source, now);
   const { period } = scope;
   const actual = selected.filter(card => !unresolved.has(card));
   const paid = selected.filter(card => card.metrics.actual || card.metrics.pto || card.metrics.mealPremium || card.metrics.restPremium);
   const actualTotals = totalMetrics(actual);
   const needsReview = selected.some(card => unresolved.has(card));
   const result: ReportsOverview = { ...scope };
-  if (canSchedule) result.schedule = { shifts: publishedInRange.length, paidSeconds: seconds(totalMetrics(selected).scheduled) };
+  if (canSchedule) result.schedule = { shifts: published.filter(({ date }) => date >= period.start && date <= period.end).length,
+    paidSeconds: seconds(totalMetrics(selected).scheduled) };
   if (canTime) result.time = { workedSeconds: seconds(actualTotals.actual), paidLeaveSeconds: seconds(totalMetrics(selected).pto), needsReview };
   if (canTime && ctx.permissions["wages.read"]) {
     const unresolvedWeeks = new Set([...unresolved].map(card => `${card.employeeId}:${weekStart(card.date, settings.workWeekStart)}`));
@@ -123,14 +146,8 @@ export async function readReportsOverview(db: Database, ctx: Context, url: URL, 
     const wages = paid.length ? totalMetrics(paid).wages : 0;
     result.labor = { estimatedCents: !ctx.allDepartments || incomplete || wages === null ? null : Math.round(wages * 100) };
   }
-  if (canSchedule && state) {
-    const leave = await db.select({ employeeId: s.ptoRequests.employeeId, status: s.ptoRequests.status, startDate: s.ptoRequests.startDate,
-      endDate: s.ptoRequests.endDate, startTime: s.ptoRequests.startTime, endTime: s.ptoRequests.endTime,
-    }).from(s.ptoRequests).where(and(ctx.activeActor(), ctx.employeeFilter(s.ptoRequests.employeeId), isNull(s.ptoRequests.archivedAt),
-      eq(s.ptoRequests.status, "approved"), sql`${s.ptoRequests.startDate} <= ${period.end} AND ${s.ptoRequests.endDate} >= ${period.start}`));
-    const { onTime, late, noShows, punctualityRate } = reliabilityTotals(reliabilityFor({ employees, shifts: published,
-      clockEvents: state.clockEvents, ptoRequests: leave.map(row => ({ ...row, startTime: row.startTime ?? undefined, endTime: row.endTime ?? undefined })),
-    }, period.start, period.end, now, settings, zone));
+  if (canSchedule && canTime) {
+    const { totals: { onTime, late, noShows, punctualityRate } } = await reportAttendance(db, ctx, source, now);
     result.attendance = { onTime, late, noShows, punctualityRate };
   }
   await assertReportCurrent(db, ctx, revision);
@@ -140,7 +157,9 @@ export async function readReportsOverview(db: Database, ctx: Context, url: URL, 
 export async function readReportsHours(db: Database, ctx: Context, url: URL, fieldKey: string, now: number): Promise<ReportsHours> {
   ctx.requirePermission("schedule.read");
   ctx.requirePermission("timesheets.read");
-  const { scope, selected, unresolved, employees, settings, revision } = await readReportTime(db, ctx, url, fieldKey, now);
+  const source = await readReportSource(db, ctx, url, fieldKey, now);
+  const { scope, employees, settings, revision } = source;
+  const { selected, unresolved } = reportTime(source, now);
   const canCalculatePremium = ctx.allDepartments && ctx.permissions["wages.read"];
 
   function summarize(cards: TimeCard[]): ReportHours {
@@ -173,4 +192,13 @@ export async function readReportsHours(db: Database, ctx: Context, url: URL, fie
   }).sort((a, b) => a.name.localeCompare(b.name) || a.id - b.id);
   await assertReportCurrent(db, ctx, revision);
   return { ...scope, totals: summarize(selected), days, team };
+}
+
+export async function readReportsAttendance(db: Database, ctx: Context, url: URL, fieldKey: string, now: number): Promise<ReportsAttendance> {
+  ctx.requirePermission("schedule.read");
+  ctx.requirePermission("timesheets.read");
+  const source = await readReportSource(db, ctx, url, fieldKey, now, true);
+  const attendance = await reportAttendance(db, ctx, source, now);
+  await assertReportCurrent(db, ctx, source.revision);
+  return { ...source.scope, zone: source.zone, lateMinutes: source.settings.lateMinutes, ...attendance };
 }

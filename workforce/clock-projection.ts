@@ -12,7 +12,7 @@ export const currentRawPunch = sql`NOT EXISTS (SELECT 1 FROM time_cards tc JOIN 
     WHERE tc.employee_id = ${s.clockEvents.employeeId} AND removed.value = ${s.clockEvents.id})`;
 
 type RawClock = { event: typeof s.clockEvents.$inferSelect; assistance: typeof s.assistedClockReports.$inferSelect | null; photoEventId?: number | null };
-type ClockEdit = Pick<typeof s.timeCardEdits.$inferSelect, "before" | "after" | "cardId"> & { photoEventId?: number | null };
+type ClockEdit = Pick<typeof s.timeCardEdits.$inferSelect, "before" | "after" | "cardId"> & { photoEventId?: number | null; attendanceShiftId?: number | null };
 export function projectClockEvents(rawClocks: RawClock[], edits: ClockEdit[], showShift = false): ClockEvent[] {
   const projected: ClockEvent[] = rawClocks.map(({ event: row, assistance, photoEventId }) => {
     const resolved = assistance && (assistance.status !== "pending" || row.eventType === "in");
@@ -25,14 +25,21 @@ export function projectClockEvents(rawClocks: RawClock[], edits: ClockEdit[], sh
       ...(assistance ? { assistedStatus: assistance.status } : {}), ...(photoEventId ? { photoEventId } : {}) };
   });
   const revisedCards = new Map<number, ClockEvent[]>();
+  const attendanceLinks = new Map<number, { id: number; role: string }>();
   for (const edit of edits) {
     if (!Array.isArray(edit.before.eventIds) || !Array.isArray(edit.after.events)) continue;
     const events = [...edit.after.events as ClockEvent[]];
+    const original = Array.isArray(edit.before.events) ? edit.before.events as ClockEvent[] : [];
+    if (showShift && edit.attendanceShiftId != null) {
+      const role = original.find(event => event.type === "in")?.role;
+      if (role) attendanceLinks.set(edit.cardId, { id: edit.attendanceShiftId, role });
+    }
+    const link = attendanceLinks.get(edit.cardId);
+    if (events[0] && link && events[0].role === link.role) events[0] = { ...events[0], shiftId: link.id };
     const photoEventId = edit.photoEventId ?? revisedCards.get(edit.cardId)?.[0]?.photoEventId;
     if (events.length && photoEventId) events[0] = { ...events[0], photoEventId };
     if (events.length && !events[0].carriedNotes) {
-      const before = Array.isArray(edit.before.events) ? edit.before.events as ClockEvent[] : [];
-      const notes = timeCardNotes([...(revisedCards.get(edit.cardId) ?? []), ...before]);
+      const notes = timeCardNotes([...(revisedCards.get(edit.cardId) ?? []), ...original]);
       if (notes.length) events[0] = { ...events[0], carriedNotes: notes };
     }
     revisedCards.set(edit.cardId, events);
