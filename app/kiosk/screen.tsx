@@ -309,7 +309,7 @@ export function KioskScreen() {
 
   const offlineText = phase === "person" && available && (person?.replay || person?.local) ? "offlineAction" : phase === "approval" ? "offlineApproval" : offlineReady ? "offlineReady" : "offlinePin";
   return <main className="kiosk-screen" lang={language}>
-    <section className="kiosk-shell" aria-labelledby="kiosk-heading">
+    <section className="kiosk-shell" data-phase={phase} aria-labelledby="kiosk-heading">
       <header><span className="brand-mark" aria-hidden="true">D</span><div className="kiosk-title"><p className="kiosk-eyebrow">{text.clock}</p><h1 id="kiosk-heading">{deviceName || text.tablet}</h1></div>
         <button type="button" className="kiosk-language" lang={language === "en" ? "es" : "en"} onClick={() => selectLanguage(language === "en" ? "es" : "en")}>{language === "en" ? "Español" : "English"}</button>
       </header>

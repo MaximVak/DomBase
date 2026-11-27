@@ -11096,6 +11096,12 @@ button[aria-label^="Remove"]:focus-visible,
   .kiosk-keypad { grid-column: 2; grid-row: 1 / span 4; }
   .kiosk-actions { grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); }
 }
+@media (orientation: landscape) and (min-width: 560px) {
+  .kiosk-shell[data-phase="approval"] { width: min(100%, 42rem); gap: .75rem; padding: 1rem; }
+  .kiosk-shell[data-phase="approval"] .kiosk-pin-form { grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); align-content: start; gap: .5rem 1rem; }
+  .kiosk-shell[data-phase="approval"] .kiosk-pin-form > :not(.kiosk-keypad) { grid-column: 1; }
+  .kiosk-shell[data-phase="approval"] .kiosk-keypad { grid-column: 2; grid-row: 1 / span 4; }
+}
 
 .workspace-sync-bar { min-height: 40px; display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 8px 16px; padding: 8px 16px; color: #244c3b; background: #edf8f1; border-bottom: 1px solid var(--line); font-size: .85rem; }
 .workspace-sync-bar p { margin: 0; }
