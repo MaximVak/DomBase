@@ -18,7 +18,7 @@ import { scheduleTools } from "./schedule-tools";
 import { readScheduleConflicts } from "./conflicts";
 import { readSchedulePrint } from "./schedule-print";
 import { readAccountantReport } from "./accountant-export";
-import { readReportsOverview } from "./reports-overview";
+import { readReportsHours, readReportsOverview } from "./reports-overview";
 import { timeOffChange } from "./time-off";
 import { handleManagerTimeOff } from "./manager-time-off";
 import { managerLeaveScope, readLeaveBalances } from "./leave-balances";
@@ -86,9 +86,10 @@ export function createWorkforceService(db: Database, access: ReturnType<typeof c
         if (request.method !== "GET" && request.method !== "POST") return json({ error: "Method not allowed." }, 405, { Allow: "GET, POST" });
         return json(await readAccountantReport(db, ctx, request, options.fieldKey, now(), options.stagingAccountantFixtureIds));
       }
-      if (action === "reports-overview") {
+      if (action === "reports-overview" || action === "reports-hours") {
         if (request.method !== "GET") return json({ error: "Method not allowed." }, 405, { Allow: "GET" });
-        return json(await readReportsOverview(db, ctx, url, options.fieldKey, now()));
+        const readReport = action === "reports-hours" ? readReportsHours : readReportsOverview;
+        return json(await readReport(db, ctx, url, options.fieldKey, now()));
       }
       if (action === "shift-exchanges") {
         if (request.method === "GET") return json(await readManagerExchanges(db, ctx, url, options));

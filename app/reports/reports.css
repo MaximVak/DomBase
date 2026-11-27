@@ -10,6 +10,9 @@
 .reports-title .nav-icon { color: var(--blue-deep); }
 .reports-title h1, .reports-overview-heading h2, .reports-section h3 { margin: 0; color: var(--ink); }
 .reports-title h1 { font-size: 2rem; letter-spacing: -.025em; }
+.reports-nav { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.reports-nav a { display: inline-flex; align-items: center; min-height: 44px; padding: 6px 12px; color: var(--blue-deep); border-radius: 8px; font-weight: 650; }
+.reports-nav a[aria-current="page"] { background: var(--panel); color: var(--ink); box-shadow: inset 0 -3px var(--blue); }
 .reports-overview { overflow-wrap: anywhere; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
 .reports-overview-heading { display: flex; align-items: end; justify-content: space-between; flex-wrap: wrap; gap: 16px; padding: 20px 24px; }
 .reports-overview-heading h2 { font-size: 1.3rem; }
@@ -30,10 +33,21 @@
 .reports-status { border-top: 1px solid var(--line); padding: 16px 24px; margin: 0; }
 .reports-status p { margin: 0 0 8px; }
 .reports-status a { color: var(--blue-deep); text-decoration: underline; }
+.reports-hours-metrics { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.reports-table-scroll { overflow-x: auto; overscroll-behavior-x: contain; border: 1px solid var(--line); border-radius: 8px; }
+.reports-hours-table { width: 100%; min-width: 660px; border-collapse: separate; border-spacing: 0; text-align: left; font-size: .875rem; }
+.reports-hours-table th, .reports-hours-table td { border-bottom: 1px solid var(--line); padding: 10px 12px; }
+.reports-hours-table thead th { background: var(--background); color: var(--ink); }
+.reports-hours-table tbody tr:last-child > * { border-bottom: 0; }
+.reports-hours-table tr > :first-child { position: sticky; left: 0; width: 26%; background: var(--panel); }
+.reports-hours-table thead tr > :first-child { background: var(--background); }
+.reports-hours-table td { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.reports-hours-table small { display: block; color: var(--muted); font-weight: 500; }
 
 @media (max-width: 700px) {
   .reports-overview-heading, .reports-section, .reports-status { padding: 16px; }
   .reports-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .reports-hours-table tr > :first-child { width: 116px; }
 }
 
 @media (max-width: 380px) {
