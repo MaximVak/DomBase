@@ -27,6 +27,8 @@ type ClockInCandidate = { shift: typeof schema.shifts.$inferSelect; start: numbe
 type Approval = { accountId: number; sessionVersion: number; credentialRevision: string };
 const clockSeconds = (interaction: Person["interaction"]) => Math.round((Date.parse(interaction.expiresAt) - Date.parse(interaction.createdAt)) / 1000);
 const expired = () => new AuthError(401, "Enter your employee PIN again.");
+const approvalUnavailable = () => new AuthError(409, "This approval request is no longer available. Enter your employee PIN again.");
+const maxApprovalMs = 5 * 60_000;
 
 function selectClockInShift(candidates: ClockInCandidate[], time: number, date: string, allowance: number) {
   const matching = candidates.filter(candidate => time >= candidate.start - allowance && time < candidate.end);
@@ -269,23 +271,47 @@ export function createKioskService(db: KioskOperatorDatabase, options: { secret:
     const shiftId = draft.eventType === "in" ? plan.shift?.id ?? null : previous?.shiftId ?? null;
     const requiresApproval = plan.requiresApproval;
     const approvalReason = requiresApproval ? plan.shift ? "Early work needs manager approval." : "Clock-in is outside a published shift. A manager must approve it." : "";
+    const expiresAt = requiresApproval ? new Date(actionAt + clockSeconds(person.interaction) * 1000).toISOString() : person.interaction.expiresAt;
     const id = ticket?.interactionId ?? newToken();
     const result = await atomicBatch(db, [
-      db.update(schema.kioskClockRequests).set({ cancelledAt: stamp() }).where(and(eq(schema.kioskClockRequests.interactionId, person.interaction.id), isNull(schema.kioskClockRequests.completedAt), isNull(schema.kioskClockRequests.cancelledAt), sql`id <> ${id}`)),
+      db.update(schema.kioskClockRequests).set({ cancelledAt: stamp() }).where(and(eq(schema.kioskClockRequests.interactionId, person.interaction.id), eq(schema.kioskClockRequests.requiresApproval, false), isNull(schema.kioskClockRequests.completedAt), isNull(schema.kioskClockRequests.cancelledAt), sql`id <> ${id}`)),
       sql`INSERT INTO kiosk_clock_requests (id, interaction_id, event_type, role_id, shift_id, role_name, previous_event_id, explanation, requires_approval, approval_reason, expires_at, created_at, action_details, clock_details)
-        SELECT ${id}, ${person.interaction.id}, ${draft.eventType}, ${plan.roleId}, ${shiftId}, ${plan.roleName}, ${previous?.id ?? null}, ${draft.explanation}, ${requiresApproval ? 1 : 0}, ${approvalReason}, ${person.interaction.expiresAt}, ${new Date(actionAt).toISOString()}, ${draft.details ? JSON.stringify(draft.details) : null}, ${plan.details ? JSON.stringify(plan.details) : null}
+        SELECT ${id}, ${person.interaction.id}, ${draft.eventType}, ${plan.roleId}, ${shiftId}, ${plan.roleName}, ${previous?.id ?? null}, ${draft.explanation}, ${requiresApproval ? 1 : 0}, ${approvalReason}, ${expiresAt}, ${new Date(actionAt).toISOString()}, ${draft.details ? JSON.stringify(draft.details) : null}, ${plan.details ? JSON.stringify(plan.details) : null}
         WHERE ${activePerson(device, person)} AND NOT EXISTS (SELECT 1 FROM kiosk_clock_replays WHERE interaction_id = ${person.interaction.id})
+        AND NOT EXISTS (SELECT 1 FROM kiosk_clock_requests WHERE interaction_id = ${person.interaction.id}
+          AND requires_approval = 1)
         ON CONFLICT (id) DO NOTHING`,
+      ...(requiresApproval ? [sql`UPDATE kiosk_interactions SET expires_at = ${expiresAt} WHERE id = ${person.interaction.id} AND changes() = 1`] : []),
     ]);
     if (result[1].meta.changes !== 1) throw expired();
     const [pending] = await db.select().from(schema.kioskClockRequests).where(eq(schema.kioskClockRequests.id, id));
     return pending;
   }
+  async function approvalActivity(device: RegisteredDevice, person: Person, body: Record<string, unknown>) {
+    exactKeys(body, ["requestId"]);
+    if (!tokenIsValid(body.requestId)) throw approvalUnavailable();
+    const idle = (await clockIdleSeconds(db)) * 1000;
+    const at = now();
+    const time = new Date(at).toISOString();
+    const oldest = new Date(at - maxApprovalMs).toISOString();
+    const [pending] = await db.select().from(schema.kioskClockRequests).where(eq(schema.kioskClockRequests.id, body.requestId));
+    if (!pending || pending.interactionId !== person.interaction.id || pending.createdAt <= oldest) throw approvalUnavailable();
+    const expiresAt = new Date(Math.min(at + idle, Date.parse(pending.createdAt) + maxApprovalMs)).toISOString();
+    const [extended] = await atomicBatch(db, [
+      sql`UPDATE kiosk_clock_requests SET expires_at = MAX(expires_at, ${expiresAt}) WHERE id = ${pending.id}
+        AND interaction_id = ${person.interaction.id} AND requires_approval = 1 AND completed_at IS NULL
+        AND cancelled_at IS NULL AND expires_at > ${time} AND ${activePerson(device, person)}`,
+      sql`UPDATE kiosk_interactions SET expires_at = (SELECT expires_at FROM kiosk_clock_requests WHERE id = ${pending.id})
+        WHERE id = ${person.interaction.id} AND changes() = 1`,
+    ]);
+    if (extended.meta.changes !== 1) throw approvalUnavailable();
+    return json({ renewed: true });
+  }
   async function approve(device: RegisteredDevice, person: Person, body: Record<string, unknown>) {
     exactKeys(body, ["requestId", "pin", "offline", "photo"]);
     if (!tokenIsValid(body.requestId) || !pinIsValid(body.pin)) throw new AuthError(401, "Invalid manager approval PIN.");
     const [pending] = await db.select().from(schema.kioskClockRequests).where(and(eq(schema.kioskClockRequests.id, body.requestId), eq(schema.kioskClockRequests.interactionId, person.interaction.id), eq(schema.kioskClockRequests.requiresApproval, true), isNull(schema.kioskClockRequests.completedAt), isNull(schema.kioskClockRequests.cancelledAt), sql`${schema.kioskClockRequests.expiresAt} > ${stamp()}`)).limit(1);
-    if (!pending) throw new AuthError(409, "This approval request is no longer available. Enter your employee PIN again.");
+    if (!pending) throw approvalUnavailable();
     const lookup = pinLookup(options.secret, body.pin);
     const deviceAttempt = await attemptBudget(db, options.secret, `approval-device:${device.device.id}`, pinAttemptLimits.approvalDevice, now());
     const pinAttempt = await attemptBudget(db, options.secret, `approval-pin:${lookup}`, pinAttemptLimits.pin, now());
@@ -304,7 +330,7 @@ export function createKioskService(db: KioskOperatorDatabase, options: { secret:
   async function handle(request: Request) {
     try {
       const url = new URL(request.url); const action = url.pathname.slice("/api/kiosk/".length);
-      if (!["status", "pin", "lock", "clock", "approve", "sync", "offline-sync", "clock-photo"].includes(action)) throw new AuthError(404, "Not found.");
+      if (!["status", "pin", "lock", "clock", "approve", "approval-activity", "sync", "offline-sync", "clock-photo"].includes(action)) throw new AuthError(404, "Not found.");
       const device = await deviceFor(request);
       if (action === "status" && request.method === "GET") return json({ registered: true, deviceName: device.device.name, ...(url.searchParams.get("offline") === "1" ? { offlineDevice: offlineDeviceTag(options.secret, device) } : {}), ...await devicePinLockouts(db, options.secret, device.device.id, now()) });
       if (request.method !== "POST") return json({ error: "Method not allowed." }, 405, { Allow: action === "status" ? "GET" : "POST" });
@@ -318,15 +344,24 @@ export function createKioskService(db: KioskOperatorDatabase, options: { secret:
         return json(await syncClock(db, device, activeDevice(device), options.secret, now(), entry, lastEvent, planClock, forceReview));
       }
       const person = await personFor(request, device);
+      if (action === "approval-activity") return await approvalActivity(device, person, body);
       let result;
       if (action === "approve") result = await approve(device, person, body);
       else if (action === "clock") {
         const pending = await prepareClock(device, person, body);
-        if (pending.requiresApproval) return json({ approvalRequired: true, requestId: pending.id, reason: pending.approvalReason }, 202);
+        if (pending.requiresApproval) {
+          const at = now();
+          const hardExpiresInMs = Date.parse(pending.createdAt) + maxApprovalMs - at;
+          const token = readKioskCookie(request.headers.get("cookie"), url, "person");
+          return json({ approvalRequired: true, requestId: pending.id, reason: pending.approvalReason,
+            idleMs: clockSeconds(person.interaction) * 1000, expiresInMs: Date.parse(pending.expiresAt) - at, hardExpiresInMs }, 202,
+          { "Set-Cookie": kioskCookie(url, "person", token, Math.max(1, Math.ceil(hardExpiresInMs / 1000))) });
+        }
         result = await commitClock(device, person, pending);
       } else throw new AuthError(405, "Method not allowed.");
       const latest = body.offline === true && !result.assistance ? await lastEvent(person.employee.id).catch(() => null) : null;
-      const offline = latest ? prepareOfflineAuthorization(options.secret, device, person.employee.id, person.employee.pinVersion, latest.id, now(), clockSeconds(person.interaction)) : undefined;
+      const offline = latest ? prepareOfflineAuthorization(options.secret, device, person.employee.id, person.employee.pinVersion, latest.id, now(),
+        action === "approve" ? await clockIdleSeconds(db) : clockSeconds(person.interaction)) : undefined;
       const { photoEventId, ...recorded } = result;
       const photoGrant = body.photo === true && photoEventId && options.bucket && await kioskPhotosEnabled(db).catch(() => false)
         ? clockPhotoGrant(options.secret, device, photoEventId, now()) : undefined;

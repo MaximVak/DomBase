@@ -16,12 +16,13 @@ import { prepareOfflineShell } from "./offline-shell";
 
 type Phase = "loading" | "unregistered" | "pin" | "person" | "approval" | "error";
 type Cooldowns = { pin: PinCooldown | null; approve: PinCooldown | null };
+type PendingApproval = { id: string; early: boolean; idleMs: number; deadline: number; hardDeadline: number };
 
 export function KioskScreen() {
   const [phase, setPhase] = useState<Phase>("loading");
   const [deviceName, setDeviceName] = useState("");
   const [person, setPerson] = useState<ClockPerson | null>(null);
-  const [pending, setPending] = useState<{ id: string; early: boolean } | null>(null);
+  const [pending, setPending] = useState<PendingApproval | null>(null);
   const [busy, setBusy] = useState(false);
   const [online, setOnline] = useState(true);
   const [offlineReady, setOfflineReady] = useState(false);
@@ -37,6 +38,7 @@ export function KioskScreen() {
   const generation = useRef(0);
   const pendingPhoto = useRef<Blob | undefined>(undefined);
   const controller = useRef<AbortController | null>(null);
+  const approvalActivity = useRef<Promise<unknown> | null>(null);
   const active = useRef(false);
   const working = useRef(false);
   const registered = useRef(false);
@@ -54,6 +56,7 @@ export function KioskScreen() {
   const reset = useCallback((confirmation: KioskText | null = null) => {
     generation.current += 1;
     controller.current?.abort();
+    approvalActivity.current = null;
     pendingPhoto.current = undefined;
     active.current = false;
     working.current = false;
@@ -138,12 +141,25 @@ export function KioskScreen() {
   }, [check, refresh, reset, sync]);
 
   useEffect(() => {
-    if (!person) return;
+    if (phase !== "person" || !person) return;
     const remaining = person.replay ? Date.parse(person.expiresAt) - person.replay.serverTime - (performance.now() - receivedAt.current)
       : Date.parse(person.expiresAt) - Date.now();
     const timer = window.setTimeout(() => reset("locked"), Math.max(0, remaining));
     return () => window.clearTimeout(timer);
-  }, [person, reset]);
+  }, [phase, person, reset]);
+
+  useEffect(() => {
+    if (phase !== "approval" || !pending) return;
+    const timer = window.setTimeout(() => reset("locked"), Math.max(0, pending.deadline - performance.now()));
+    return () => window.clearTimeout(timer);
+  }, [pending, phase, reset]);
+
+  function keepApprovalActive() {
+    if (!pending || !online || document.hidden) return;
+    const deadline = Math.min(performance.now() + pending.idleMs, pending.hardDeadline);
+    setPending({ ...pending, deadline });
+    approvalActivity.current = kioskPost("approval-activity", { requestId: pending.id }).catch(() => undefined);
+  }
 
   function selectLanguage(next: KioskLanguage) {
     setLanguage(next);
@@ -203,6 +219,7 @@ export function KioskScreen() {
       }
       if (version !== generation.current) return;
       if (action === "pin") { await lockRequest.current; await sync(); }
+      if (action === "approve") await approvalActivity.current;
       if (version !== generation.current) return;
       if (!navigator.onLine) {
         if (savedLocally) reset("queued");
@@ -232,6 +249,7 @@ export function KioskScreen() {
           return;
         }
         if (action === "clock" && ([401, 409].includes(response.status) || data.error === kioskCopy.en.breaksChanged)) reset();
+        if (action === "approve" && (response.status === 409 || data.error === "Enter your employee PIN again.")) reset("locked");
         setMessage(localizedError(data.error, response.status, action));
         return;
       }
@@ -250,7 +268,10 @@ export function KioskScreen() {
           clockInPhotos: data.clockInPhotos === true, clockInSchedule: data.clockInSchedule });
         setPhase("person");
       } else if (data.approvalRequired) {
-        setPending({ id: data.requestId, early: data.reason === kioskCopy.en.earlyApproval }); setPhase("approval");
+        const at = performance.now();
+        setPending({ id: data.requestId, early: data.reason === kioskCopy.en.earlyApproval, idleMs: data.idleMs,
+          deadline: at + data.expiresInMs, hardDeadline: at + data.hardExpiresInMs });
+        setPhase("approval");
       } else {
         if (cached && data.offline && data.offlineState) {
           await storePreparedPin({ ...cached, authorization: data.offline, clockOffset: data.offline.issuedAt - Date.now(), person: { ...cached.person, state: data.offlineState } }).catch(() => undefined);
@@ -306,7 +327,7 @@ export function KioskScreen() {
       {phase === "pin" ? <PinForm key={epoch} language={language} busy={busy} offline={!online && !offlineReady} locked={cooldowns.pin?.scope === "device"} describedBy={cooldowns.pin ? "kiosk-lockout" : undefined} onSubmit={pin => submit("pin", { pin, queue: available, breaks: true })} /> : null}
       {phase === "person" && person ? <ClockPanel person={person} language={language} busy={busy} online={online} earlyClockBlocked={message === "earlyClock"} offlineBlocked={!online && !((person.replay || person.local) && available)} onClock={(input, photo) => submit("clock", input, input, photo)} onCancel={() => reset()} /> : null}
       {phase === "approval" && pending ? <><h2>{text.approval}</h2><p>{pending.early ? text.earlyApproval : text.approvalReason}</p>{cooldowns.approve ? <PinLockout value={cooldowns.approve} language={language} manager onExpired={clearApprovalCooldown} /> : null}
-        <PinForm key={"manager-" + epoch} language={language} manager busy={busy} offline={!online} locked={cooldowns.approve?.scope === "device"} describedBy={cooldowns.approve ? "kiosk-lockout" : undefined} onSubmit={pin => submit("approve", { requestId: pending.id, pin })} /><button type="button" onClick={() => reset()}>{text.cancel}</button>
+        <PinForm key={"manager-" + epoch} language={language} manager busy={busy} offline={!online} locked={cooldowns.approve?.scope === "device"} describedBy={cooldowns.approve ? "kiosk-lockout" : undefined} onActivity={keepApprovalActive} onSubmit={pin => submit("approve", { requestId: pending.id, pin })} /><button type="button" onClick={() => reset()}>{text.cancel}</button>
       </> : null}
     </section>
   </main>;
