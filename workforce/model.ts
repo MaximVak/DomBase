@@ -3,7 +3,7 @@ import type { TimeCardEdit } from "../app/timesheets-model";
 import type { ClockDetails } from "../kiosk/break-rules";
 
 export type Mode = "manager" | "employee";
-export type ViewId = "dashboard" | "employees" | "departments_roles" | "schedule" | "time_off" | "my_availability" | "team_availability" | "clockins" | "hours" | "settings" | "profile" | "team_members";
+export type ViewId = "dashboard" | "employees" | "departments_roles" | "schedule" | "time_off" | "my_availability" | "team_availability" | "clockins" | "hours" | "reports" | "settings" | "profile" | "team_members";
 export type CalendarTab = "today" | "week" | "month";
 export type SettingsTab =
   | "Basic info"

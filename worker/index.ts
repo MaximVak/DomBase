@@ -70,7 +70,7 @@ const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
-    if (["/", "/login", "/setup", "/access", "/kiosk-admin", "/me", "/me/schedule", "/me/availability", "/team", "/team/reports", "/community", "/messages", "/messages/channels", "/invite", "/backups"].includes(url.pathname)) {
+    if (["/", "/login", "/setup", "/access", "/kiosk-admin", "/me", "/me/schedule", "/me/availability", "/team", "/team/reports", "/reports", "/community", "/messages", "/messages/channels", "/invite", "/backups"].includes(url.pathname)) {
       try {
         if (await registeredDevice(drizzle(env.DB, { schema }), request.headers.get("cookie"), url)) {
           return new Response(null, { status: 303, headers: { Location: "/kiosk", "Cache-Control": "private, no-store", "Referrer-Policy": "no-referrer" } });
@@ -96,7 +96,7 @@ const worker = {
     if (request.method === "POST" && url.pathname === "/api/workspace/commit" && response.ok && smsAvailable(env)) {
       ctx.waitUntil(dispatchEmployeeNotices(drizzle(env.DB, { schema }), env, Date.now(), "schedule").catch(() => console.error("Schedule text status is temporarily unavailable.")));
     }
-    if (["/", "/login", "/setup", "/access", "/kiosk", "/kiosk-admin", "/me", "/me/schedule", "/me/availability", "/team", "/team/reports", "/community", "/messages", "/messages/channels", "/invite", "/backups"].includes(url.pathname) || /^\/api\/(auth|access|workforce|workspace|documents|kiosk|kiosk-admin|self|team|community|messenger|invitations|backups)\//.test(url.pathname)) {
+    if (["/", "/login", "/setup", "/access", "/kiosk", "/kiosk-admin", "/me", "/me/schedule", "/me/availability", "/team", "/team/reports", "/reports", "/community", "/messages", "/messages/channels", "/invite", "/backups"].includes(url.pathname) || /^\/api\/(auth|access|workforce|workspace|documents|kiosk|kiosk-admin|self|team|community|messenger|invitations|backups)\//.test(url.pathname)) {
       const headers = new Headers(response.headers);
       headers.delete("X-Schedule-Dispatch");
       headers.set("Cache-Control", "private, no-store");

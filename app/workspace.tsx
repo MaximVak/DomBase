@@ -97,6 +97,7 @@ const navItems: { id: ViewId; label: string; icon: string; managerOnly?: boolean
   { id: "employees", label: "Team", icon: "person", managerOnly: true },
   { id: "schedule", label: "Schedule", icon: "calendar" },
   { id: "hours", label: "Timesheets", icon: "clock" },
+  { id: "reports", label: "Reports", icon: "reports", managerOnly: true },
   { id: "clockins", label: "Events", icon: "flag", managerOnly: true },
   { id: "settings", label: "Settings", icon: "gear", managerOnly: true },
 ];
@@ -945,6 +946,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
     if (["employees", "departments_roles", "team_members"].includes(view)) return p["team.read"];
     if (["schedule", "events"].includes(view)) return p["schedule.read"];
     if (["hours", "clockins"].includes(view)) return p["timesheets.read"];
+    if (view === "reports") return p["reports.read"];
     if (view === "time_off") return p["time_off.read"];
     if (["my_availability", "team_availability"].includes(view)) return p["availability.read"];
     if (view === "settings") return p["settings.manage"];
@@ -1591,6 +1593,7 @@ export default function Home({ account }: { account: DashboardAccount }) {
 
   function navigateToView(view: ViewId) {
     if (!viewIsAllowed(view)) return;
+    if (view === "reports") { window.location.assign("/reports"); return; }
     setIsTimesheetSummary(false);
     setScheduleEventDraft(null);
     if (view !== activeView) {

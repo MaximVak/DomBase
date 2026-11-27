@@ -35,7 +35,7 @@ export function milestonesFor(person: { id: number; name: string; startDate: str
   return result.sort((a, b) => a.date.localeCompare(b.date) || a.name.localeCompare(b.name));
 }
 export type ShiftScore = { shiftId: number; employeeId: number; name: string; date: string; role: string; scheduledStart: string; scheduledEnd: string; clockIn: string | null; clockOut: string | null; minutesLate: number | null; status: "On time" | "Late" | "No show" | "Excused" | "In progress" | "Upcoming"; score: number | null; workedHours: number; missingClockOut: boolean; automaticClockOut: boolean; missedBreak: boolean };
-type ReliabilityInput = { employees: { id: number; name: string; terminated?: boolean; terminationDate?: string }[]; shifts: StaffState["shifts"]; clockEvents: StaffState["clockEvents"]; ptoRequests: Pick<StaffState["ptoRequests"][number], "employeeId" | "status" | "startDate" | "endDate" | "startTime" | "endTime">[] };
+type ReliabilityInput = { employees: { id: number; name: string; terminated?: boolean; terminationDate?: string }[]; shifts: Pick<StaffState["shifts"][number], "id" | "employeeId" | "date" | "start" | "end" | "role" | "shiftType">[]; clockEvents: StaffState["clockEvents"]; ptoRequests: Pick<StaffState["ptoRequests"][number], "employeeId" | "status" | "startDate" | "endDate" | "startTime" | "endTime">[] };
 export function reliabilityFor(state: ReliabilityInput, start: string, end: string, now: number, settings: { lateMinutes: number; mandatoryMealBreak: boolean; mealBreakAfterHours: number }, zone = "America/Los_Angeles") {
   const rows: ShiftScore[] = [];
   for (const person of state.employees) {

@@ -9,6 +9,8 @@ export function SidebarNavIcon({ icon }: { icon: string }) {
     paths = <><rect x="3.5" y="5" width="17" height="16" rx="2.5" /><path d="M8 3v4M16 3v4M3.5 10h17M8 14h2M14 14h2M8 18h2M14 18h2" /></>;
   } else if (icon === "clock") {
     paths = <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3.5 2" /></>;
+  } else if (icon === "reports") {
+    paths = <path d="M4 4v16h16M8 16v-4m4 4V8m4 8V5" />;
   } else if (icon === "flag") {
     paths = <><path d="M5 22V3" /><path d="M5 4h11.5l-1.8 3 1.8 3H5" /></>;
   } else {
