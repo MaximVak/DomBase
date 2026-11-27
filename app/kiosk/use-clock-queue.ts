@@ -16,6 +16,7 @@ export function useClockQueue() {
   const [pendingCount, setPendingCount] = useState(0);
   const [needsHelp, setNeedsHelp] = useState(false);
   const [result, setResult] = useState<KioskText | null>(null);
+  const clearResult = () => setResult(null);
   const running = useRef<Promise<void> | null>(null);
   const refresh = useCallback(async () => {
     try {
@@ -55,5 +56,5 @@ export function useClockQueue() {
     })();
     return running.current;
   }, [refresh]);
-  return { available, pendingCount, needsHelp, result, refresh, sync };
+  return { available, pendingCount, needsHelp, result, clearResult, refresh, sync };
 }

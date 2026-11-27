@@ -46,7 +46,7 @@ export function KioskScreen() {
   const healthy = useRef(false);
   const checking = useRef(false);
   const lockRequest = useRef<Promise<unknown>>(Promise.resolve());
-  const { available, pendingCount, needsHelp, result, refresh, sync } = useClockQueue();
+  const { available, pendingCount, needsHelp, result, clearResult, refresh, sync } = useClockQueue();
   const text = kioskCopy[language];
 
   const lockRemote = useCallback(() => {
@@ -171,6 +171,7 @@ export function KioskScreen() {
     if (version !== generation.current) return false;
     if (retry) setCooldowns(current => ({ ...current, pin: pinCooldown(String(retry), "device", Date.now()) }));
     if (!session) { if (!retry) setMessage("offlineBadPin"); return false; }
+    clearResult();
     offlinePerson.current = session;
     const expiresAt = Math.min(Date.now() + session.authorization.idleSeconds * 1000, session.authorization.expiresAt - session.clockOffset);
     setPerson({ ...session.person, local: true, state: session.progress?.state ?? session.person.state, expiresAt: new Date(expiresAt).toISOString() });
@@ -261,6 +262,7 @@ export function KioskScreen() {
           if (prepared) setOfflineReady(true);
         }
         signedIn = true;
+        clearResult();
         receivedAt.current = performance.now();
         setCooldowns(current => ({ ...current, pin: null }));
         setPerson({ employee: data.employee, roles: data.roles, state: data.state, expiresAt: data.expiresAt,
