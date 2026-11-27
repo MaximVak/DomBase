@@ -66,25 +66,28 @@ export function ClockPanel({ person, language, busy, online, offlineBlocked, ear
       void onClock({ ...input(assistance, details), explanation });
     }} />;
   return <section aria-labelledby="clock-person-heading" className="kiosk-clock-panel">
-    <h2 ref={heading} id="clock-person-heading" tabIndex={-1}>{text.hello}, {person.employee.name}</h2>
-    <p>{off ? text.clockedOut : onBreak ? activeBreak?.kind === "rest" ? text.onRest : text.onMeal : text.clockedIn}</p>
-    {person.assist?.reminder ? <p className="kiosk-status" role="status">{text.clockOutReminder}</p> : null}
-    {off ? <label htmlFor="kiosk-role">{text.role}
-      <select id="kiosk-role" value={roleId} disabled={busy || !person.roles.length} onChange={event => setRoleId(event.target.value)}>
-        {!person.roles.length ? <option value="">{text.noRole}</option> : person.roles.map(role => <option key={role.id} value={role.id}>{role.name}</option>)}
-      </select>
-    </label> : null}
-    {off && !person.roles.length ? <p role="status">{text.assignRole}</p> : null}
-    {shiftNote ? <div className="kiosk-status kiosk-shift-note" aria-live="polite">
-      <h3>{text.shiftNote}</h3>
-      <p>{shiftNote}</p>
-    </div> : null}
-    <label htmlFor="kiosk-explanation">{text.note}
-      <textarea id="kiosk-explanation" value={explanation} maxLength={1000} disabled={busy} onChange={event => setExplanation(event.target.value)} />
-    </label>
+    <div className="kiosk-panel-content">
+      <h2 ref={heading} id="clock-person-heading" tabIndex={-1}>{text.hello}, {person.employee.name}</h2>
+      <p>{off ? text.clockedOut : onBreak ? activeBreak?.kind === "rest" ? text.onRest : text.onMeal : text.clockedIn}</p>
+      {person.assist?.reminder ? <p className="kiosk-status" role="status">{text.clockOutReminder}</p> : null}
+      {onBreak && remaining > 0 ? <p>{text.remaining} <span role="timer" aria-live="off">{Math.floor(remaining / 60)}:{String(remaining % 60).padStart(2, "0")}</span></p> : null}
+      {onBreak && askExtension ? <label className="kiosk-check"><input type="checkbox" checked={extension} disabled={disabled} onChange={event => setExtension(event.target.checked)} />{text.offDutyExtension}</label> : null}
+      {off ? <label htmlFor="kiosk-role">{text.role}
+        <select id="kiosk-role" value={roleId} disabled={busy || !person.roles.length} onChange={event => setRoleId(event.target.value)}>
+          {!person.roles.length ? <option value="">{text.noRole}</option> : person.roles.map(role => <option key={role.id} value={role.id}>{role.name}</option>)}
+        </select>
+      </label> : null}
+      {off && !person.roles.length ? <p role="status">{text.assignRole}</p> : null}
+      {shiftNote ? <div className="kiosk-status kiosk-shift-note" aria-live="polite">
+        <h3>{text.shiftNote}</h3>
+        <p>{shiftNote}</p>
+      </div> : null}
+      <label htmlFor="kiosk-explanation">{text.note}
+        <textarea id="kiosk-explanation" value={explanation} maxLength={1000} disabled={busy} onChange={event => setExplanation(event.target.value)} />
+      </label>
+      <p className="kiosk-hint">{text.lockHint}</p>
+    </div>
     {off && person.clockInPhotos && online && !earlyClockBlocked && !busy ? <ClockCamera language={language} disabled={!roleId} onCapture={photo => void onClock(input("in"), photo)} /> : null}
-    {onBreak && remaining > 0 ? <p>{text.remaining} <span role="timer" aria-live="off">{Math.floor(remaining / 60)}:{String(remaining % 60).padStart(2, "0")}</span></p> : null}
-    {onBreak && askExtension ? <label className="kiosk-check"><input type="checkbox" checked={extension} disabled={disabled} onChange={event => setExtension(event.target.checked)} />{text.offDutyExtension}</label> : null}
     <div className="kiosk-actions">
       {off ? <><button type="button" className="kiosk-primary" disabled={disabled || !roleId} onClick={() => void onClock(input("in"))}>{text.clockIn}</button>
         {earlyClockBlocked ? <button type="button" disabled={disabled || !roleId} onClick={() => void onClock(input("in", { worked: true }))}>{text.startedWork}</button> : null}</>
@@ -97,6 +100,5 @@ export function ClockPanel({ person, language, busy, online, offlineBlocked, ear
       {person.assist?.out ? <button type="button" disabled={disabled} onClick={() => setAssistance("out")}>{text.assistedOut}</button> : null}
       <button type="button" onClick={onCancel}>{text.cancel}</button>
     </div>
-    <p className="kiosk-hint">{text.lockHint}</p>
   </section>;
 }
