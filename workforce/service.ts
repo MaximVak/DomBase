@@ -18,7 +18,7 @@ import { scheduleTools } from "./schedule-tools";
 import { readScheduleConflicts } from "./conflicts";
 import { readSchedulePrint } from "./schedule-print";
 import { readAccountantReport } from "./accountant-export";
-import { readReportsAttendance, readReportsHours, readReportsOverview } from "./reports-overview";
+import { readReportsAttendance, readReportsHours, readReportsLabor, readReportsOverview } from "./reports-overview";
 import { timeOffChange } from "./time-off";
 import { handleManagerTimeOff } from "./manager-time-off";
 import { managerLeaveScope, readLeaveBalances } from "./leave-balances";
@@ -86,9 +86,10 @@ export function createWorkforceService(db: Database, access: ReturnType<typeof c
         if (request.method !== "GET" && request.method !== "POST") return json({ error: "Method not allowed." }, 405, { Allow: "GET, POST" });
         return json(await readAccountantReport(db, ctx, request, options.fieldKey, now(), options.stagingAccountantFixtureIds));
       }
-      if (action === "reports-overview" || action === "reports-hours" || action === "reports-attendance") {
+      if (action === "reports-overview" || action === "reports-hours" || action === "reports-attendance" || action === "reports-labor") {
         if (request.method !== "GET") return json({ error: "Method not allowed." }, 405, { Allow: "GET" });
-        const readReport = action === "reports-attendance" ? readReportsAttendance : action === "reports-hours" ? readReportsHours : readReportsOverview;
+        const readReport = { "reports-overview": readReportsOverview, "reports-hours": readReportsHours,
+          "reports-attendance": readReportsAttendance, "reports-labor": readReportsLabor }[action];
         return json(await readReport(db, ctx, url, options.fieldKey, now()));
       }
       if (action === "shift-exchanges") {

@@ -8,7 +8,10 @@ const reportSections = {
   overview: { path: "/reports", title: "Overview" },
   hours: { path: "/reports/hours", title: "Scheduled vs. Actual Hours" },
   attendance: { path: "/reports/attendance", title: "Attendance" },
+  labor: { path: "/reports/labor", title: "Labor Cost" },
 };
+
+export const currency = (amountCents: number) => usd.format(amountCents / 100);
 
 export function duration(seconds: number) {
   const minutes = Math.round(seconds / 60);
@@ -24,19 +27,20 @@ export function Metric({ label, children }: { label: string; children: ReactNode
   return <div className="report-metric"><dt>{label}</dt><dd>{children}</dd></div>;
 }
 
-export function ReportFrame({ active, scope, canCompare, error, start, end, children }: {
-  active: keyof typeof reportSections; scope?: ReportScope; canCompare: boolean; error?: string; start: string; end: string; children: ReactNode;
+export function ReportFrame({ active, scope, canCompare, canViewLabor = false, error, start, end, children }: {
+  active: keyof typeof reportSections; scope?: ReportScope; canCompare: boolean; canViewLabor?: boolean;
+  error?: string; start: string; end: string; children: ReactNode;
 }) {
   const { path, title } = reportSections[active];
   const query = scope ? `?${new URLSearchParams(scope.period)}` : "";
+  const navigation = ["overview", ...(canCompare ? ["hours", "attendance"] as const : []), ...(canViewLabor ? ["labor"] as const : [])] as const;
   return <main className="reports-screen">
     <header className="reports-header">
       <a href="/" className="reports-back">← Dashboard</a>
       <div className="reports-title"><SidebarNavIcon icon="reports" /><h1>Reports</h1></div>
     </header>
-    {canCompare && <nav className="reports-nav" aria-label="Reports sections">
-      {Object.entries(reportSections).map(([key, section]) =>
-        <a key={key} href={section.path + query} aria-current={key === active ? "page" : undefined}>{section.title}</a>)}
+    {navigation.length > 1 && <nav className="reports-nav" aria-label="Reports sections">
+      {navigation.map(key => <a key={key} href={reportSections[key].path + query} aria-current={key === active ? "page" : undefined}>{reportSections[key].title}</a>)}
     </nav>}
     <section className="reports-overview" aria-labelledby="reports-overview-title">
       <div className="reports-overview-heading">
@@ -56,7 +60,7 @@ export function ReportFrame({ active, scope, canCompare, error, start, end, chil
 export function ReportsScreen({ report, error, start, end }: { report?: ReportsOverview; error?: string; start: string; end: string }) {
   const { schedule, time, attendance, labor } = report ?? {};
   const difference = schedule && time ? time.workedSeconds - schedule.paidSeconds : undefined;
-  return <ReportFrame active="overview" scope={report} canCompare={Boolean(schedule && time)} error={error} start={start} end={end}>
+  return <ReportFrame active="overview" scope={report} canCompare={Boolean(schedule && time)} canViewLabor={Boolean(labor)} error={error} start={start} end={end}>
       {report && <>
         {!schedule && !time && <p className="reports-status">Your current access doesn’t include schedule or timesheet reports.</p>}
         {(schedule || time) && <section className="reports-section" aria-labelledby="reports-hours-title">
@@ -81,7 +85,7 @@ export function ReportsScreen({ report, error, start, end }: { report?: ReportsO
         </section>}
         {labor && <section className="reports-section" aria-labelledby="reports-labor-title">
           <h3 id="reports-labor-title">Labor cost</h3>
-          <dl className="reports-metrics"><Metric label="Estimated wages">{labor.estimatedCents === null ? "Review required" : usd.format(labor.estimatedCents / 100)}</Metric></dl>
+          <dl className="reports-metrics"><Metric label="Estimated wages">{labor.estimatedCents === null ? "Review required" : currency(labor.estimatedCents)}</Metric></dl>
           {labor.estimatedCents === null && <p className="reports-note">{report.companyWide ? "Review time cards and wage setup in Timesheets for this workweek." : "Estimated wages require a company-wide workweek."}</p>}
         </section>}
       </>}

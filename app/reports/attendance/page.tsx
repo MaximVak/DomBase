@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 
 export default async function ReportsAttendancePage({ searchParams }: { searchParams: Promise<ReportFilters> }) {
   const { report, ...form } = await readReportPage<ReportsAttendance>("reports-attendance", searchParams);
-  return <ReportFrame active="attendance" scope={report} canCompare {...form}>
+  return <ReportFrame active="attendance" scope={report} canCompare canViewLabor={report?.canViewLabor} {...form}>
     {report && <AttendanceDetail report={report} />}
   </ReportFrame>;
 }

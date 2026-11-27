@@ -6,7 +6,7 @@ import type { ReportScope } from "../../workforce/reports-overview";
 
 export type ReportFilters = Record<string, string | string[] | undefined>;
 
-export async function readReportPage<T extends ReportScope>(action: "reports-overview" | "reports-hours" | "reports-attendance", searchParams: Promise<ReportFilters>) {
+export async function readReportPage<T extends ReportScope>(action: "reports-overview" | "reports-hours" | "reports-attendance" | "reports-labor", searchParams: Promise<ReportFilters>) {
   const [incoming, params] = await Promise.all([headers(), searchParams]);
   const url = new URL(`/api/workspace/${action}`, `https://${incoming.get("host") ?? "invalid"}`);
   if (isLoopback(url.hostname)) url.protocol = "http:";

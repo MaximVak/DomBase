@@ -52,6 +52,8 @@
 .attendance-zone { margin: 0 0 10px; }
 .reports-attendance-table { min-width: 860px; }
 .reports-attendance-table td:last-child { white-space: normal; }
+.reports-labor-table { min-width: 420px; }
+.labor-location { margin: 0 0 12px; }
 
 @media (max-width: 700px) {
   .reports-overview-heading, .reports-section, .reports-status { padding: 16px; }

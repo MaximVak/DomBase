@@ -12,11 +12,16 @@ export async function seedReports(db, schema, load, password) {
   const scheduleEmail = "schedule-only@example.test";
   const [scheduleOnly] = await db.insert(schema.accounts).values({ email: scheduleEmail, normalizedEmail: scheduleEmail,
     displayName: "Schedule-only manager", accessLevel: "general_manager", passwordHash: manager.passwordHash, loginEnabled: true }).returning();
+  const timeEmail = "wages-and-time@example.test";
+  const [timeOnly] = await db.insert(schema.accounts).values({ email: timeEmail, normalizedEmail: timeEmail,
+    displayName: "Timesheets and wages manager", accessLevel: "general_manager", passwordHash: manager.passwordHash, loginEnabled: true }).returning();
   const [publication] = await db.insert(schema.schedulePublications).values({ version: 1, publishedByAccountId: owner.id }).returning();
   await db.insert(schema.accountPermissions).values([
     { accountId: manager.id, permission: "reports.read", allowed: true },
     { accountId: manager.id, permission: "wages.read", allowed: true },
     { accountId: scheduleOnly.id, permission: "timesheets.read", allowed: false },
+    { accountId: timeOnly.id, permission: "schedule.read", allowed: false },
+    { accountId: timeOnly.id, permission: "wages.read", allowed: true },
   ]);
   const [shiftA, shiftB] = await db.insert(schema.shifts).values([
     { employeeId: a.id, roleId: roleA.id, startTime: "09:00", endTime: "13:00", date: "2026-11-16", publicationId: publication.id, notes: "Private report shift note" },
@@ -36,6 +41,19 @@ export async function seedReports(db, schema, load, password) {
     { employeeId: a.id, roleName: roleA.name, eventType: "in", occurredAt: "2026-10-05T16:00:00.000Z", clockDetails: { california: true } },
     { employeeId: a.id, roleName: roleA.name, eventType: "out", occurredAt: "2026-10-05T22:00:00.000Z" },
   ]);
+  await db.insert(schema.clockEvents).values([
+    { employeeId: b.id, roleName: roleB.name, eventType: "in", occurredAt: "2026-11-24T17:00:00.000Z" },
+    { employeeId: b.id, roleName: roleB.name, eventType: "out", occurredAt: "2026-11-24T18:00:00.000Z" },
+    { employeeId: multi.id, roleName: roleA.name, eventType: "in", occurredAt: "2026-11-10T17:00:00.000Z" },
+    { employeeId: multi.id, roleName: roleA.name, eventType: "out", occurredAt: "2026-11-10T17:01:01.000Z" },
+    { employeeId: multi.id, roleName: roleB.name, eventType: "in", occurredAt: "2026-11-10T18:00:00.000Z" },
+    { employeeId: multi.id, roleName: roleB.name, eventType: "out", occurredAt: "2026-11-10T18:01:00.000Z" },
+    { employeeId: fixture.managerEmployee.id, roleName: roleA.name, eventType: "in", occurredAt: "2026-10-07T16:00:00.000Z" },
+    { employeeId: fixture.managerEmployee.id, roleName: roleA.name, eventType: "out", occurredAt: "2026-10-07T18:00:00.000Z" },
+  ]);
+  await db.update(schema.locationSettings).set({ holidayPayEnabled: true, holidays: [{ date: "2026-11-10", name: "Fictional holiday" }] });
+  await db.insert(schema.wageRates).values({ employeeId: multi.id, roleId: roleA.id, basis: "hourly", amountCents: 5500,
+    effectiveDate: "2026-11-11", recordedByAccountId: owner.id });
   const [draft] = await db.insert(schema.scheduleDrafts).values({ ownerAccountId: owner.id }).returning();
   await db.insert(schema.scheduleDraftChanges).values({ draftId: draft.id, clientKey: "9001", operation: "upsert", employeeId: a.id,
     roleId: roleA.id, roleName: roleA.name, date: "2026-10-05", startTime: "09:00", endTime: "12:00" });
@@ -68,7 +86,7 @@ export async function seedReports(db, schema, load, password) {
     { employeeId: a.id, startTime: "09:00", endTime: "10:00" }, { employeeId: b.id, startTime: "12:00", endTime: "13:00" },
   ].map(leave => ({ ...leave, compensation: "unpaid", startDate: "2026-10-14", endDate: "2026-10-14", reason: "vacation",
     explanation: "Private attendance leave note", status: "approved" })));
-  return { ...fixture, scheduleEmail, attendanceShifts, assistedEventId: attendancePunches[5].id };
+  return { ...fixture, scheduleEmail, timeEmail, attendanceShifts, assistedEventId: attendancePunches[5].id };
 }
 
 test("built Reports Overview shares date filters and scopes aggregates to live grants", { timeout: 120000 }, async t => {
@@ -85,9 +103,9 @@ test("built Reports Overview shares date filters and scopes aggregates to live g
     assert.equal(result.status, 200);
     return result.headers.get("set-cookie").split(";")[0];
   };
-  const [owner, manager, general, unassigned, scheduleOnly] = await Promise.all([
+  const [owner, manager, general, unassigned, scheduleOnly, timeOnly] = await Promise.all([
     login(app.email), login(fixture.manager.email), login(fixture.generalManager.email), login(fixture.unassigned.email),
-    login(fixture.scheduleEmail),
+    login(fixture.scheduleEmail), login(fixture.timeEmail),
   ]);
   const api = "/api/workspace/reports-overview";
   const report = (cookie, query = week) => call(`${api}?${query}`, cookie);
@@ -257,6 +275,61 @@ test("built Reports Overview shares date filters and scopes aggregates to live g
     assert.equal(approved.shifts.find(row => row.shiftId === pending.id).status, "On time");
     assert.equal(approved.totals.punctualityRate, 75);
     assert.equal(approved.totals.eligible, 5);
+  });
+  await t.test("Labor Cost agrees across location, role and department and shares its date range", async () => {
+    const endpoint = "/api/workspace/reports-labor?";
+    const weekCosts = await read(await call(endpoint + week, owner));
+    assert.deepEqual(weekCosts.totals, { estimatedCents: 32340, breakPremiumCents: 0, holidayPremiumCents: 0, totalCents: 32340 });
+    assert.equal(weekCosts.city, "Sacramento");
+    assert.deepEqual(weekCosts.roles.map(({ role, estimatedCents }) => [role, estimatedCents]), [["Job A", 13200], ["Job B", 19140]]);
+    assert.deepEqual(weekCosts.departments.map(({ name, estimatedCents }) => [name, estimatedCents]), [["Department A", 13200], ["Department B", 19140]]);
+    const overview = await read(await report(owner));
+    assert.equal(overview.labor.estimatedCents, weekCosts.totals.estimatedCents);
+    const page = await call(`/reports/labor?${week}`, owner);
+    assert.match(page.headers.get("cache-control"), /no-store/);
+    const html = await page.text();
+    for (const pattern of [/\$323\.40/, /By role/, /By department/, /By location/, /href="\/reports\?start=2026-11-16&amp;end=2026-11-22"/]) assert.match(html, pattern);
+    assert.doesNotMatch(html, /Private report|Private legal name|Local department A worker|Other department private worker/);
+  });
+  await t.test("Labor Cost prices by the recorded effective role and reconciles the fractional holiday cents", async () => {
+    const url = "/api/workspace/reports-labor?start=2026-11-10&end=2026-11-10";
+    const costs = await read(await call(url, owner));
+    // These role premiums round down independently but the Timesheets sum rounds up.
+    assert.deepEqual(costs.totals, { estimatedCents: 186, breakPremiumCents: 0, holidayPremiumCents: 93, totalCents: 279 });
+    assert.deepEqual(costs.roles.map(({ role, estimatedCents, holidayPremiumCents }) => [role, estimatedCents, holidayPremiumCents]),
+      [["Job A", 39, 20], ["Job B", 147, 73]]);
+    for (const rows of [costs.roles, costs.departments]) {
+      for (const key of ["estimatedCents", "breakPremiumCents", "holidayPremiumCents", "totalCents"]) {
+        assert.equal(rows.reduce((sum, row) => sum + row[key], 0), costs.totals[key]);
+      }
+    }
+  });
+  await t.test("Labor Cost preserves wage and department gates and withholds unverified totals", async () => {
+    const endpoint = "/api/workspace/reports-labor?";
+    assert.equal((await call(endpoint + week, general)).status, 403);
+    assert.equal((await call(endpoint + week, scheduleOnly)).status, 403);
+    assert.equal((await call(endpoint + week, unassigned)).status, 403);
+    assert.equal((await call(endpoint + week)).status, 401);
+    assert.equal((await call(endpoint + week, `dombase-session=${fixture.employeeToken}`)).status, 401);
+    const device = `dombase-kiosk-device=${fixture.deviceToken}; ${owner}`;
+    assert.equal((await call(endpoint + week, device)).status, 403);
+    assert.equal((await call("/reports/labor", device)).headers.get("location"), "/kiosk");
+    assert.equal((await call(endpoint + week + "&department=2", owner)).status, 400);
+    assert.equal((await call(endpoint + week, owner, { start: "2026-11-16" })).status, 405);
+    const scoped = await read(await call(endpoint + week, manager));
+    assert.deepEqual(scoped.totals, { estimatedCents: null, breakPremiumCents: null, holidayPremiumCents: null, totalCents: null });
+    assert.deepEqual(scoped.roles, []);
+    assert.deepEqual(scoped.departments, []);
+    const timeAndWages = await read(await call(endpoint + week, timeOnly));
+    assert.equal(timeAndWages.canCompare, false);
+    assert.equal(timeAndWages.totals.estimatedCents, 32340);
+    const partial = await read(await call(endpoint + "start=2026-11-23&end=2026-11-24", owner));
+    assert.equal(partial.totals.estimatedCents, null);
+    assert.deepEqual(partial.roles.map(({ role, estimatedCents }) => [role, estimatedCents]), [["Job A", null], ["Job B", 9900]]);
+    const missingRate = await read(await call(endpoint + "start=2026-10-07&end=2026-10-07", owner));
+    assert.equal(missingRate.totals.estimatedCents, null);
+    assert.deepEqual(missingRate.roles.map(({ role, estimatedCents }) => [role, estimatedCents]), [["Job A", null]]);
+    assert.doesNotMatch(await (await call(`/reports?${week}`, general)).text(), /href="\/reports\/labor/);
   });
 });
 

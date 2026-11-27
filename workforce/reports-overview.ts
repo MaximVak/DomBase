@@ -10,6 +10,8 @@ import { offsetDate, requestPeriod, weekStart } from "./period";
 import type { WorkspacePeriod } from "./period";
 import { attendanceRows, attendanceTotals } from "./reports-attendance";
 import type { AttendanceRow } from "./reports-attendance";
+import { estimatedLaborCents, hasUnverifiedBreakPremium, laborBreakdown, laborEntries } from "./reports-labor";
+import type { LaborAmounts, LaborDepartment, LaborRole } from "./reports-labor";
 import { workspaceSnapshot } from "./snapshot";
 
 export type ReportScope = {
@@ -35,25 +37,35 @@ export type ReportHours = {
 };
 
 export type ReportsHours = ReportScope & {
+  canViewLabor: boolean;
   totals: ReportHours;
   days: (ReportHours & { date: string })[];
   team: (ReportHours & { id: number; name: string })[];
 };
 
 export type ReportsAttendance = ReportScope & {
+  canViewLabor: boolean;
   zone: string;
   lateMinutes: number;
   totals: ReturnType<typeof attendanceTotals>;
   shifts: AttendanceRow[];
 };
 
+export type ReportsLabor = ReportScope & {
+  city: string;
+  canCompare: boolean;
+  holidayPayEnabled: boolean;
+  totals: LaborAmounts;
+  departments: LaborDepartment[];
+  roles: LaborRole[];
+};
+
 const incompleteTime = new Set(["Missing clock-out", "Clock time needs review", "Confirm unfinished break"]);
-const incompletePremium = new Set(["Review salaried break premium", "Review break premium wage rate", "Confirm time and breaks before calculating premiums"]);
 const seconds = (hours: number | null) => Math.round((hours ?? 0) * 3600);
 
 async function readReportSource(db: Database, ctx: Context, url: URL, fieldKey: string, now: number, attendanceLinks = false) {
   ctx.requirePermission("reports.read");
-  const [site] = await db.select({ location: s.business.locationName, zone: s.business.timeZone, settings: s.locationSettings })
+  const [site] = await db.select({ location: s.business.locationName, city: s.business.city, zone: s.business.timeZone, settings: s.locationSettings })
     .from(s.business).leftJoin(s.locationSettings, eq(s.locationSettings.businessId, s.business.id))
     .where(and(eq(s.business.id, 1), ctx.activeActor())).limit(1);
   if (!site) throw new AuthError(401, "Sign in to view Reports.");
@@ -89,7 +101,7 @@ async function readReportSource(db: Database, ctx: Context, url: URL, fieldKey: 
   const employees = state?.employees ?? [...new Set(published.map(shift => shift.employeeId))]
     .map(id => ({ id, name: "", role: "", wage: "", active: true }));
   const scope = { period, location: view?.basicInfo.locationName ?? site.location, companyWide: ctx.allDepartments };
-  return { scope, canSchedule, canTime, published, employees, state, dataPeriod, priorDay,
+  return { scope, city: view?.basicInfo.city ?? site.city, canSchedule, canTime, published, employees, state, dataPeriod, priorDay,
     settings: reportSettings, zone: site.zone, pto: view?.permissions["time_off.read"] ? view.state.ptoRequests : view?.timesheetLeave ?? [], revision: view?.revision };
 }
 
@@ -133,7 +145,6 @@ export async function readReportsOverview(db: Database, ctx: Context, url: URL, 
   const { selected, unresolved } = reportTime(source, now);
   const { period } = scope;
   const actual = selected.filter(card => !unresolved.has(card));
-  const paid = selected.filter(card => card.metrics.actual || card.metrics.pto || card.metrics.mealPremium || card.metrics.restPremium);
   const actualTotals = totalMetrics(actual);
   const needsReview = selected.some(card => unresolved.has(card));
   const result: ReportsOverview = { ...scope };
@@ -141,10 +152,8 @@ export async function readReportsOverview(db: Database, ctx: Context, url: URL, 
     paidSeconds: seconds(totalMetrics(selected).scheduled) };
   if (canTime) result.time = { workedSeconds: seconds(actualTotals.actual), paidLeaveSeconds: seconds(totalMetrics(selected).pto), needsReview };
   if (canTime && ctx.permissions["wages.read"]) {
-    const unresolvedWeeks = new Set([...unresolved].map(card => `${card.employeeId}:${weekStart(card.date, settings.workWeekStart)}`));
-    const incomplete = needsReview || paid.some(card => unresolvedWeeks.has(`${card.employeeId}:${weekStart(card.date, settings.workWeekStart)}`));
-    const wages = paid.length ? totalMetrics(paid).wages : 0;
-    result.labor = { estimatedCents: !ctx.allDepartments || incomplete || wages === null ? null : Math.round(wages * 100) };
+    const estimatedCents = ctx.allDepartments ? estimatedLaborCents(laborEntries(selected, unresolved, settings.workWeekStart, settings.holidayPayEnabled)) : null;
+    result.labor = { estimatedCents };
   }
   if (canSchedule && canTime) {
     const { totals: { onTime, late, noShows, punctualityRate } } = await reportAttendance(db, ctx, source, now);
@@ -176,7 +185,7 @@ export async function readReportsHours(db: Database, ctx: Context, url: URL, fie
       }
       worked += metrics.actual ?? 0;
       premium += (metrics.mealPremium ?? 0) + (metrics.restPremium ?? 0);
-      premiumIncomplete ||= card.issues.some(issue => incompletePremium.has(issue));
+      premiumIncomplete ||= hasUnverifiedBreakPremium(card);
     }
     const scheduledSeconds = seconds(scheduled), workedSeconds = seconds(worked);
     return { scheduledSeconds, workedSeconds, varianceSeconds: workedSeconds - scheduledSeconds, paidLeaveSeconds: seconds(paidLeave),
@@ -191,7 +200,7 @@ export async function readReportsHours(db: Database, ctx: Context, url: URL, fie
     return cards ? [{ id, name, ...summarize(cards) }] : [];
   }).sort((a, b) => a.name.localeCompare(b.name) || a.id - b.id);
   await assertReportCurrent(db, ctx, revision);
-  return { ...scope, totals: summarize(selected), days, team };
+  return { ...scope, canViewLabor: ctx.permissions["wages.read"], totals: summarize(selected), days, team };
 }
 
 export async function readReportsAttendance(db: Database, ctx: Context, url: URL, fieldKey: string, now: number): Promise<ReportsAttendance> {
@@ -200,5 +209,25 @@ export async function readReportsAttendance(db: Database, ctx: Context, url: URL
   const source = await readReportSource(db, ctx, url, fieldKey, now, true);
   const attendance = await reportAttendance(db, ctx, source, now);
   await assertReportCurrent(db, ctx, source.revision);
-  return { ...source.scope, zone: source.zone, lateMinutes: source.settings.lateMinutes, ...attendance };
+  return { ...source.scope, canViewLabor: ctx.permissions["wages.read"], zone: source.zone, lateMinutes: source.settings.lateMinutes, ...attendance };
+}
+
+export async function readReportsLabor(db: Database, ctx: Context, url: URL, fieldKey: string, now: number): Promise<ReportsLabor> {
+  ctx.requirePermission("timesheets.read");
+  ctx.requirePermission("wages.read");
+  const source = await readReportSource(db, ctx, url, fieldKey, now);
+  const { scope, city, canSchedule, settings, revision } = source;
+  const { holidayPayEnabled, workWeekStart } = settings;
+  const report = { ...scope, city, canCompare: canSchedule, holidayPayEnabled };
+  if (!scope.companyWide) {
+    await assertReportCurrent(db, ctx, revision);
+    return { ...report, totals: { estimatedCents: null, breakPremiumCents: null, holidayPremiumCents: null, totalCents: null }, departments: [], roles: [] };
+  }
+  const { selected, unresolved } = reportTime(source, now);
+  // Keep historical assignments even when a role or department has since been archived.
+  const roleDepartments = await db.select({ name: s.roles.name, departmentId: s.roles.departmentId, department: s.departments.name })
+    .from(s.roles).leftJoin(s.departments, eq(s.roles.departmentId, s.departments.id)).where(ctx.activeActor());
+  const costs = laborBreakdown(laborEntries(selected, unresolved, workWeekStart, holidayPayEnabled), roleDepartments, holidayPayEnabled);
+  await assertReportCurrent(db, ctx, revision);
+  return { ...report, ...costs };
 }
