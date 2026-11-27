@@ -19,7 +19,7 @@ export function PinForm({ language = "en", manager = false, busy, locked = false
   function edit(next: string, digit = "") {
     onActivity?.();
     if (digit) navigator.vibrate?.(35);
-    setEntry({ pin: next, visible: manager ? "" : digit });
+    setEntry({ pin: next, visible: digit });
   }
   async function submit(event: FormEvent) {
     event.preventDefault();
