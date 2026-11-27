@@ -10928,7 +10928,7 @@ button[aria-label^="Remove"]:focus-visible,
 .ts-pay-period-panel .ts-group-row td[data-column="card"], .ts-totals-table td[data-column="card"], .ts-totals-table td[data-column="role"] { text-align: left; }
 .ts-pay-period-panel .ts-group-toggle { text-align: left; }
 .ts-add-member-row td { text-align: left; background: #fff; }
-.ts-add-member-row button { display: inline-flex; align-items: center; gap: 10px; padding: 0; background: none; border: 0; color: #8b43df; text-decoration: underline; text-underline-offset: 4px; font-size: .85rem !important; }
+.ts-add-member-row button { display: inline-flex; align-items: center; gap: 10px; padding: 0; background: none; border: 0; color: var(--ts-accent); text-decoration: underline; text-underline-offset: 4px; font-size: .85rem !important; }
 .ts-add-member-row button > span { font-size: 1.4rem; text-decoration: none; }
 .ts-pay-period-panel .ts-table-footnote { border: 0; }
 .ts-totals-ribbon { position: sticky; bottom: 0; z-index: 30; margin-top: auto; overflow-x: auto; border-top: 1px solid #dedde7; background: #fff; box-shadow: 0 -2px 7px #172e4710; }
