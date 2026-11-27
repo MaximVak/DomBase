@@ -11066,7 +11066,14 @@ button[aria-label^="Remove"]:focus-visible,
 .kiosk-shift-note p { margin: .25rem 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .kiosk-actions { display: grid; gap: 12px; }
 .kiosk-camera { display: grid; gap: 8px; }
-.kiosk-camera video { display: block; width: min(100%, 240px); margin-inline: auto; border-radius: 8px; background: #1e293b; }
+.kiosk-camera video { display: block; width: min(100%, 15rem); max-height: min(34dvh, 15rem); object-fit: contain; margin-inline: auto; border-radius: 8px; background: #1e293b; }
+.kiosk-camera > .kiosk-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; }
+.kiosk-shell:has(.kiosk-camera video), .kiosk-clock-panel:has(> .kiosk-camera video) { gap: .75rem; }
+.kiosk-clock-panel:has(> .kiosk-camera video) > :is(label, .kiosk-shift-note, .kiosk-actions, .kiosk-hint) { display: none; }
+@media (max-width: 480px) {
+  .kiosk-camera video { max-height: 26dvh; }
+  .kiosk-camera > .kiosk-actions > button { padding-inline: .5rem; }
+}
 .ts-clock-photo { display: grid; justify-items: start; gap: 8px; margin-block: 10px; }
 .ts-clock-photo img { display: block; width: auto; max-width: min(100%, 240px); max-height: 240px; border-radius: 8px; }
 .kiosk-admin-screen { max-width: 760px; margin: 0 auto; padding: 32px 16px; display: grid; gap: 24px; }
@@ -11102,6 +11109,8 @@ button[aria-label^="Remove"]:focus-visible,
   .kiosk-actions { grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); }
 }
 @media (orientation: landscape) and (min-width: 560px) {
+  .kiosk-camera:has(video) { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: center; gap: 1rem; }
+  .kiosk-camera > .kiosk-actions { grid-template-columns: minmax(0, 1fr); gap: .5rem; }
   .kiosk-shell[data-phase="approval"] { width: min(100%, 42rem); gap: .75rem; padding: 1rem; }
   .kiosk-shell[data-phase="approval"] .kiosk-pin-form { grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); align-content: start; gap: .5rem 1rem; }
   .kiosk-shell[data-phase="approval"] .kiosk-pin-form > :not(.kiosk-keypad) { grid-column: 1; }
